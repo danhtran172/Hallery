@@ -1,0 +1,66 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// Shadow schema: Hallery-only metadata layer.
+// Never mirrors Notion structure back into Notion — Hallery only reads
+// Notion data/values and stores its own display/layout metadata here,
+// keyed by the Notion database/property IDs it describes.
+
+model Workspace {
+  id           String   @id @default(cuid())
+  name         String
+  notionBotId  String?
+  accessToken  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  galleries    Gallery[]
+}
+
+model Gallery {
+  id                 String    @id @default(cuid())
+  workspaceId        String
+  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  notionDatabaseId   String
+  notionDataSourceId String
+  name               String
+  icon               String?
+  description        String?
+  sortOrder          Int       @default(0)
+
+  parentGalleryId    String?
+  parentGallery      Gallery?  @relation("SubGalleries", fields: [parentGalleryId], references: [id])
+  subGalleries       Gallery[] @relation("SubGalleries")
+
+  propertyConfigs    PropertyConfig[]
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([workspaceId, notionDataSourceId])
+}
+
+model PropertyConfig {
+  id                 String   @id @default(cuid())
+  galleryId          String
+  gallery            Gallery  @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+  notionPropertyId   String
+  notionPropertyName String
+  notionPropertyType String
+  displayConfig      String   @default("{}")
+  sortOrder          Int      @default(0)
+  hidden             Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([galleryId, notionPropertyId])
+}
