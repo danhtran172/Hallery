@@ -7,7 +7,7 @@
  *            rate uses `max`; with_text uses `prefix`/`suffix`
  *   url:     kind = "link" | "button"  (button uses `label`)
  *   date:    kind = "full" | "month_only" | "year_only"
- *   select / multi_select / status: no `kind`, just `prefix`/`suffix`
+ *   select / multi_select / status: kind = "pill" | "text", plus `prefix`/`suffix`
  */
 export type DisplayConfig = {
   kind?: string;

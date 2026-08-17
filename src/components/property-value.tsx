@@ -16,19 +16,15 @@ export function PropertyValue({ value, displayConfig }: { value: PropertyValue; 
     case "number":
       return <NumberValue value={value.number} cfg={cfg} />;
     case "select":
-      return value.select ? (
-        <Pill color={value.select.color}>{withAffixes(value.select.name, cfg)}</Pill>
-      ) : (
-        <Empty />
-      );
+      return value.select ? <SelectOption name={value.select.name} color={value.select.color} cfg={cfg} /> : <Empty />;
     case "status":
-      return value.status ? (
-        <Pill color={value.status.color}>{withAffixes(value.status.name, cfg)}</Pill>
-      ) : (
-        <Empty />
-      );
+      return value.status ? <SelectOption name={value.status.name} color={value.status.color} cfg={cfg} /> : <Empty />;
     case "multi_select":
-      return value.multi_select.length ? (
+      if (!value.multi_select.length) return <Empty />;
+      if (cfg.kind === "text") {
+        return <span>{value.multi_select.map((opt) => withAffixes(opt.name, cfg)).join(", ")}</span>;
+      }
+      return (
         <div className="flex flex-wrap gap-1">
           {value.multi_select.map((opt) => (
             <Pill key={opt.id} color={opt.color}>
@@ -36,8 +32,6 @@ export function PropertyValue({ value, displayConfig }: { value: PropertyValue; 
             </Pill>
           ))}
         </div>
-      ) : (
-        <Empty />
       );
     case "date":
       return value.date ? <span>{formatDateByGranularity(value.date.start, cfg.kind)}</span> : <Empty />;
@@ -85,6 +79,11 @@ export function PropertyValue({ value, displayConfig }: { value: PropertyValue; 
 
 function withAffixes(text: string, cfg: DisplayConfig) {
   return `${cfg.prefix ?? ""}${text}${cfg.suffix ?? ""}`;
+}
+
+function SelectOption({ name, color, cfg }: { name: string; color: string; cfg: DisplayConfig }) {
+  if (cfg.kind === "text") return <span>{withAffixes(name, cfg)}</span>;
+  return <Pill color={color}>{withAffixes(name, cfg)}</Pill>;
 }
 
 function NumberValue({ value, cfg }: { value: number | null; cfg: DisplayConfig }) {

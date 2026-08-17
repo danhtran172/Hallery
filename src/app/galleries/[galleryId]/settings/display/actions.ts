@@ -30,6 +30,7 @@ export async function saveDisplayConfig(
   } else if (propertyType === "date") {
     config.kind = String(formData.get("kind") ?? "full");
   } else if (["select", "status", "multi_select"].includes(propertyType)) {
+    config.kind = String(formData.get("kind") ?? "pill");
     config.prefix = String(formData.get("prefix") ?? "");
     config.suffix = String(formData.get("suffix") ?? "");
   }

@@ -135,12 +135,22 @@ function DateFields({ cfg }: { cfg: { kind?: string } }) {
   );
 }
 
-function AffixFields({ cfg }: { cfg: { prefix?: string; suffix?: string } }) {
+function AffixFields({ cfg }: { cfg: { kind?: string; prefix?: string; suffix?: string } }) {
   return (
-    <div className="grid grid-cols-2 gap-3">
-      <TextField name="prefix" label="Chữ trước" defaultValue={cfg.prefix ?? ""} />
-      <TextField name="suffix" label="Chữ sau" defaultValue={cfg.suffix ?? ""} />
-    </div>
+    <>
+      <RadioGroup
+        name="kind"
+        defaultValue={cfg.kind ?? "pill"}
+        options={[
+          { value: "pill", label: "Hiển thị dạng pill (có màu)" },
+          { value: "text", label: "Hiển thị dạng chữ thường" },
+        ]}
+      />
+      <div className="grid grid-cols-2 gap-3">
+        <TextField name="prefix" label="Chữ trước" defaultValue={cfg.prefix ?? ""} />
+        <TextField name="suffix" label="Chữ sau" defaultValue={cfg.suffix ?? ""} />
+      </div>
+    </>
   );
 }
 
