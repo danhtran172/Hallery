@@ -156,7 +156,7 @@ export function LayoutBuilder({
     <>
     <form action={formAction} className="flex flex-col gap-5">
       <input type="hidden" name="layout" value={JSON.stringify(layout)} />
-      <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+      <DndContext id="layout-builder" sensors={sensors} onDragEnd={handleDragEnd}>
         <div className="grid gap-5 lg:grid-cols-[15rem_minmax(0,1fr)]">
           <PropertyTray properties={unplaced} query={query} onQueryChange={setQuery} />
           <section className="min-w-0 rounded-lg border border-stone-200 bg-stone-50 p-4 sm:p-5">
