@@ -94,7 +94,7 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
           Database này chưa có item nào.
         </p>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,10.7rem)] gap-y-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
           {pages.map((page) => {
             const title = getPageTitle(page, titlePropertyName);
             const icon = getPageIcon(page);
