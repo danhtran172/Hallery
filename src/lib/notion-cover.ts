@@ -7,10 +7,14 @@ export const CONTENT_IMAGE = "content_image";
 /** A Files or URL property, encoded as `property:<name>`. */
 export const PROPERTY_PREFIX = "property:";
 
+export type CoverAspect = "landscape" | "portrait" | "square" | "none";
+
 /** Gallery-level display settings, stored as JSON in Gallery.displayConfig. */
 export type GalleryConfig = {
-  /** Card cover shape. "none" hides the cover entirely. */
-  coverAspect?: "landscape" | "portrait" | "square" | "none";
+  /** Card cover orientation. "none" hides the cover entirely. */
+  coverAspect?: CoverAspect;
+  /** Ratio within that orientation, e.g. "16:9". Falls back to the orientation's first. */
+  coverRatio?: string;
   /** PAGE_COVER | CONTENT_IMAGE | `property:<name>` */
   coverSource?: string;
 };
@@ -24,11 +28,26 @@ export function parseGalleryConfig(raw: string): GalleryConfig {
   }
 }
 
-export const COVER_ASPECT_CLASS: Record<string, string> = {
-  landscape: "aspect-[16/9]",
-  portrait: "aspect-[2/3]",
-  square: "aspect-square",
+/** Ratios offered per orientation; the first of each is that orientation's default. */
+export const COVER_RATIOS: Record<Exclude<CoverAspect, "none">, string[]> = {
+  landscape: ["16:9", "3:2", "4:3", "2:1", "21:9"],
+  portrait: ["2:3", "3:4", "4:5", "9:16", "1:2"],
+  square: ["1:1"],
 };
+
+/**
+ * CSS `aspect-ratio` for a gallery's cards, or null when covers are off.
+ * Written as an inline style rather than a Tailwind class so any ratio works
+ * without needing a matching class to exist at build time.
+ */
+export function resolveCoverRatio(config: GalleryConfig): string | null {
+  const aspect = config.coverAspect ?? "landscape";
+  if (aspect === "none") return null;
+
+  const allowed = COVER_RATIOS[aspect];
+  const ratio = config.coverRatio && allowed.includes(config.coverRatio) ? config.coverRatio : allowed[0];
+  return ratio.replace(":", " / ");
+}
 
 /** Property types that can hold something we can show as an image. */
 export function listImagePropertyNames(dataSource: DataSourceObjectResponse): string[] {

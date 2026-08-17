@@ -5,11 +5,13 @@ import { db } from "@/lib/db";
 import { getNotionClient } from "@/lib/notion";
 import {
   CONTENT_IMAGE,
+  COVER_RATIOS,
   PAGE_COVER,
   PROPERTY_PREFIX,
   listImagePropertyNames,
   parseGalleryConfig,
 } from "@/lib/notion-cover";
+import { CoverShapePicker } from "./cover-shape-picker";
 import { saveCoverSettings } from "./aspect-actions";
 
 export default async function CoverSettingsPage({
@@ -26,6 +28,10 @@ export default async function CoverSettingsPage({
   const config = parseGalleryConfig(gallery.displayConfig);
   const aspect = config.coverAspect ?? "landscape";
   const source = config.coverSource ?? PAGE_COVER;
+  const ratio =
+    aspect === "none"
+      ? COVER_RATIOS.landscape[0]
+      : (config.coverRatio ?? COVER_RATIOS[aspect][0]);
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-12">
@@ -74,22 +80,7 @@ export default async function CoverSettingsPage({
 
         <section>
           <h2 className="mb-3 text-sm font-semibold text-stone-700">Khung ảnh trên card</h2>
-          <div className="flex flex-col gap-1.5 rounded-lg border border-stone-200 p-5">
-            {[
-              { value: "landscape", label: "Ngang (16:9)" },
-              { value: "portrait", label: "Dọc (2:3)" },
-              { value: "square", label: "Vuông (1:1)" },
-              { value: "none", label: "Không hiện ảnh bìa" },
-            ].map((opt) => (
-              <Radio
-                key={opt.value}
-                name="coverAspect"
-                value={opt.value}
-                checked={aspect === opt.value}
-                label={opt.label}
-              />
-            ))}
-          </div>
+          <CoverShapePicker initialAspect={aspect} initialRatio={ratio} />
         </section>
 
         <button

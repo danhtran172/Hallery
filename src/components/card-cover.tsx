@@ -17,7 +17,7 @@ import { saveCoverPosition } from "@/app/galleries/[galleryId]/cover-position-ac
  * them, and a fresh object identity each render would tear down the in-flight fetch.
  */
 export function CardCover({
-  aspectClass,
+  ratio,
   url,
   galleryId,
   pageId,
@@ -25,7 +25,7 @@ export function CardCover({
   initialX,
   initialY,
 }: {
-  aspectClass: string;
+  ratio: string;
   url: string | null;
   galleryId: string;
   pageId: string;
@@ -131,14 +131,15 @@ export function CardCover({
     <div
       ref={ref}
       onPointerDown={onPointerDown}
-      className={`${aspectClass} relative w-full shrink-0 bg-stone-100 bg-cover ${
+      className={`relative w-full shrink-0 bg-stone-100 bg-cover ${
         armed ? `z-20 ${dragging ? "cursor-grabbing" : "cursor-grab"} ring-2 ring-emerald-500` : "pointer-events-none"
       }`}
-      style={
-        resolved
+      style={{
+        aspectRatio: ratio,
+        ...(resolved
           ? { backgroundImage: `url(${JSON.stringify(resolved)})`, backgroundPosition: `${pos.x}% ${pos.y}%` }
-          : undefined
-      }
+          : {}),
+      }}
     >
       {resolved && (
         <span

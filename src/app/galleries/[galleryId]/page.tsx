@@ -6,7 +6,7 @@ import { getPageIcon, getPageTitle, getTitlePropertyName } from "@/lib/notion-sc
 import { PropertyValue } from "@/components/property-value";
 import { parseDisplayConfig } from "@/lib/display-config";
 import { CardCover } from "@/components/card-cover";
-import { COVER_ASPECT_CLASS, CONTENT_IMAGE, parseGalleryConfig, resolveCoverUrl } from "@/lib/notion-cover";
+import { CONTENT_IMAGE, parseGalleryConfig, resolveCoverRatio, resolveCoverUrl } from "@/lib/notion-cover";
 import { isFullDataSource, isFullPage } from "@notionhq/client";
 
 export default async function GalleryPage({ params }: PageProps<"/galleries/[galleryId]">) {
@@ -35,7 +35,7 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
     .slice(0, 4);
 
   const galleryConfig = parseGalleryConfig(gallery.displayConfig);
-  const coverClass = COVER_ASPECT_CLASS[galleryConfig.coverAspect ?? "landscape"];
+  const coverRatio = resolveCoverRatio(galleryConfig);
   const coverSource = galleryConfig.coverSource;
 
   const positions = new Map(
@@ -90,7 +90,7 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
           {pages.map((page) => {
             const title = getPageTitle(page, titlePropertyName);
             const icon = getPageIcon(page);
-            const coverUrl = coverClass
+            const coverUrl = coverRatio
               ? (resolveCoverUrl(page, coverSource) ?? cachedImages.get(page.id) ?? null)
               : null;
             return (
@@ -103,9 +103,9 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
                   aria-label={title}
                   className="absolute inset-0 z-10"
                 />
-                {coverClass && (
+                {coverRatio && (
                   <CardCover
-                    aspectClass={coverClass}
+                    ratio={coverRatio}
                     url={coverUrl}
                     galleryId={galleryId}
                     pageId={page.id}
