@@ -160,19 +160,14 @@ export function LayoutBuilder({
         <div className="grid gap-5 lg:grid-cols-[15rem_minmax(0,1fr)]">
           <PropertyTray properties={unplaced} query={query} onQueryChange={setQuery} />
           <section className="min-w-0 rounded-lg border border-stone-200 bg-stone-50 p-4 sm:p-5">
-            <div className="mb-5 flex flex-col gap-3 border-b border-stone-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
-              <label className="flex max-w-xs flex-col gap-1 text-xs font-medium text-stone-500">
-                Kiểu chia ô tổng
-                <select
-                  value={layout.root.kind}
-                  onChange={(event) => handleRootKindChange(event.target.value as LayoutKind)}
-                  className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-normal text-stone-800 outline-none focus:border-emerald-600"
-                >
-                  {ROOT_KIND_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
+            <div className="mb-5 grid gap-4 border-b border-stone-200 pb-5 lg:grid-cols-[minmax(0,1fr)_10rem] lg:items-end">
+              <LayoutKindPicker
+                label="Kiểu chia ô tổng"
+                value={layout.root.kind}
+                onChange={(kind) => {
+                  if (kind !== "none") handleRootKindChange(kind);
+                }}
+              />
               {layoutUsesColumns(layout.root.kind) && (
                 <RatioSelect value={layout.root.ratio ?? [50, 50]} onChange={handleRootRatioChange} />
               )}
@@ -354,18 +349,14 @@ function LayoutCanvas({
         <div key={cell.id} className={cellPlacementClass(node.kind, index)}>
           {cell.kind && cell.cells ? (
             <div className="rounded-lg border border-stone-300 bg-white p-3">
-              <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-                <label className="flex flex-col gap-1 text-[11px] font-medium uppercase tracking-wide text-stone-400">
-                  Chia ô
-                  <select
-                    value={cell.kind}
-                    onChange={(event) => onNestedKindChange(cell.id, event.target.value as LayoutKind | "none")}
-                    className="rounded border border-stone-300 bg-white px-2 py-1.5 text-sm normal-case text-stone-700 outline-none focus:border-emerald-600"
-                  >
-                    <option value="none">Gộp thành một ô</option>
-                    {ROOT_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
-                </label>
+              <div className="mb-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_8rem] xl:items-end">
+                <LayoutKindPicker
+                  compact
+                  includeNone
+                  label="Chia ô"
+                  value={cell.kind}
+                  onChange={(kind) => onNestedKindChange(cell.id, kind)}
+                />
                 {layoutUsesColumns(cell.kind) && <RatioSelect value={cell.ratio ?? [50, 50]} onChange={(ratio) => onNestedRatioChange(cell.id, ratio)} />}
               </div>
               <LayoutCanvas
@@ -414,19 +405,17 @@ function CanvasCell({
   return (
     <div ref={setNodeRef} className={`min-h-32 rounded-lg border p-3 ${isOver ? "border-emerald-500 bg-emerald-50" : "border-stone-300 bg-white"}`}>
       {depth === 0 ? (
-        <label className="mb-3 flex max-w-full flex-col gap-1 text-[11px] font-medium uppercase tracking-wide text-stone-400">
-          Chia nhỏ ô này
-          <select
+        <div className="mb-3">
+          <LayoutKindPicker
+            compact
+            label="Chia nhỏ ô này"
             value="none"
-            onChange={(event) => event.target.value !== "none" && onNestedKindChange(cell.id, event.target.value as LayoutKind)}
-            className="w-full rounded border border-stone-300 bg-white px-2 py-1.5 text-sm normal-case text-stone-700 outline-none focus:border-emerald-600"
-          >
-            <option value="none">Không chia thêm</option>
-            {ROOT_KIND_OPTIONS.filter((option) => option.value !== "single").map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-        </label>
+            options={ROOT_KIND_OPTIONS.filter((option) => option.value !== "single")}
+            onChange={(kind) => {
+              if (kind !== "none") onNestedKindChange(cell.id, kind);
+            }}
+          />
+        </div>
       ) : (
         <div className="mb-3 flex flex-col gap-1">
           <button type="button" disabled className="self-start rounded border border-stone-200 px-2 py-1 text-[11px] text-stone-400">
@@ -482,6 +471,82 @@ function MissingPropertyCard({ propertyId, onRemove }: { propertyId: string; onR
       <span className="min-w-0 flex-1 truncate">Property không còn tồn tại ({propertyId})</span>
       <button type="button" onClick={() => onRemove(propertyId)} className="text-stone-500 hover:text-red-600">Gỡ</button>
     </div>
+  );
+}
+
+function LayoutKindPicker({
+  label,
+  value,
+  onChange,
+  includeNone = false,
+  compact = false,
+  options = ROOT_KIND_OPTIONS,
+}: {
+  label: string;
+  value: LayoutKind | "none";
+  onChange: (kind: LayoutKind | "none") => void;
+  includeNone?: boolean;
+  compact?: boolean;
+  options?: { value: LayoutKind; label: string }[];
+}) {
+  const choices = includeNone ? [{ value: "none" as const, label: "Gộp thành một ô" }, ...options] : options;
+
+  return (
+    <fieldset>
+      <legend className={`mb-2 font-medium text-stone-500 ${compact ? "text-[11px] uppercase tracking-wide" : "text-xs"}`}>{label}</legend>
+      <div className={`grid gap-2 ${compact ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-2 sm:grid-cols-3 xl:grid-cols-5"}`}>
+        {choices.map((option) => {
+          const selected = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onChange(option.value)}
+              className={`min-h-20 rounded-md border p-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 ${
+                selected
+                  ? "border-emerald-700 bg-emerald-50 text-emerald-950"
+                  : "border-stone-300 bg-white text-stone-700 hover:border-stone-500 hover:bg-stone-50"
+              }`}
+            >
+              <LayoutPreview kind={option.value} selected={selected} />
+              <span className={`mt-2 block text-xs font-medium leading-tight ${compact ? "text-[11px]" : ""}`}>{option.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
+function LayoutPreview({ kind, selected }: { kind: LayoutKind | "none"; selected: boolean }) {
+  const cellClass = `rounded-[2px] border ${selected ? "border-emerald-400 bg-emerald-100" : "border-stone-300 bg-stone-100"}`;
+  const frameClass = "grid h-9 gap-1 rounded-sm bg-stone-200/70 p-1";
+
+  if (kind === "single" || kind === "none") {
+    return <span aria-hidden className={frameClass}><span className={cellClass} /></span>;
+  }
+  if (kind === "stack") {
+    return <span aria-hidden className={`${frameClass} grid-rows-2`}><span className={cellClass} /><span className={cellClass} /></span>;
+  }
+  if (kind === "two-col") {
+    return <span aria-hidden className={`${frameClass} grid-cols-2`}><span className={cellClass} /><span className={cellClass} /></span>;
+  }
+  if (kind === "two-col-split-left") {
+    return (
+      <span aria-hidden className={`${frameClass} grid-cols-2 grid-rows-2`}>
+        <span className={cellClass} />
+        <span className={`${cellClass} col-start-2 row-span-2`} />
+        <span className={cellClass} />
+      </span>
+    );
+  }
+  return (
+    <span aria-hidden className={`${frameClass} grid-cols-2 grid-rows-2`}>
+      <span className={`${cellClass} row-span-2`} />
+      <span className={cellClass} />
+      <span className={cellClass} />
+    </span>
   );
 }
 
