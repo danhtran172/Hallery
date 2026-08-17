@@ -2,6 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { PropertyDisplayConfigForm } from "@/components/property-display-config-form";
+import {
+  MAX_CARDS_PER_ROW,
+  MIN_CARDS_PER_ROW,
+  parseGalleryConfig,
+  resolveCardsPerRow,
+} from "@/lib/notion-cover";
+import { saveGalleryGridSettings } from "./actions";
 
 export default async function DisplaySettingsPage({
   params,
@@ -14,6 +21,7 @@ export default async function DisplaySettingsPage({
   if (!gallery) notFound();
 
   const properties = gallery.propertyConfigs.filter((p) => p.notionPropertyType !== "title");
+  const cardsPerRow = resolveCardsPerRow(parseGalleryConfig(gallery.displayConfig));
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-12">
@@ -26,12 +34,45 @@ export default async function DisplaySettingsPage({
         Hallery đọc và trình bày lại giá trị.
       </p>
 
+      <GalleryGridSettings galleryId={galleryId} cardsPerRow={cardsPerRow} />
+
       <div className="flex flex-col gap-4">
         {properties.map((p) => (
           <PropertyConfigCard key={p.id} galleryId={galleryId} property={p} />
         ))}
       </div>
     </div>
+  );
+}
+
+function GalleryGridSettings({ galleryId, cardsPerRow }: { galleryId: string; cardsPerRow: number }) {
+  return (
+    <form action={saveGalleryGridSettings.bind(null, galleryId)} className="mb-6 rounded-lg border border-stone-200 p-4">
+      <label htmlFor="cardsPerRow" className="block text-sm font-medium text-stone-900">
+        Số card mỗi hàng
+      </label>
+      <p className="mt-1 text-xs text-stone-500">
+        Áp dụng trên desktop. Trên màn hình nhỏ, Gallery tự giảm số cột để card vẫn dễ đọc.
+      </p>
+      <div className="mt-3 flex items-end gap-3">
+        <input
+          id="cardsPerRow"
+          name="cardsPerRow"
+          type="number"
+          inputMode="numeric"
+          min={MIN_CARDS_PER_ROW}
+          max={MAX_CARDS_PER_ROW}
+          defaultValue={cardsPerRow}
+          className="h-10 w-24 rounded-md border border-stone-300 px-3 text-base text-stone-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-100"
+        />
+        <button
+          type="submit"
+          className="h-10 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white hover:bg-emerald-800"
+        >
+          Lưu
+        </button>
+      </div>
+    </form>
   );
 }
 

@@ -3,6 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import type { DisplayConfig } from "@/lib/display-config";
+import {
+  DEFAULT_CARDS_PER_ROW,
+  MAX_CARDS_PER_ROW,
+  MIN_CARDS_PER_ROW,
+  parseGalleryConfig,
+} from "@/lib/notion-cover";
 
 export async function saveDisplayConfig(
   galleryId: string,
@@ -44,4 +50,23 @@ export async function saveDisplayConfig(
   revalidatePath(`/galleries/${galleryId}/items/[pageId]`, "page");
   revalidatePath(`/galleries/${galleryId}/settings/display`);
   revalidatePath(`/galleries/${galleryId}/settings/layout`);
+}
+
+export async function saveGalleryGridSettings(galleryId: string, formData: FormData) {
+  const gallery = await db.gallery.findUniqueOrThrow({ where: { id: galleryId } });
+  const config = parseGalleryConfig(gallery.displayConfig);
+  const cardsPerRow = Number(formData.get("cardsPerRow"));
+
+  config.cardsPerRow =
+    Number.isInteger(cardsPerRow) && cardsPerRow >= MIN_CARDS_PER_ROW && cardsPerRow <= MAX_CARDS_PER_ROW
+      ? cardsPerRow
+      : DEFAULT_CARDS_PER_ROW;
+
+  await db.gallery.update({
+    where: { id: galleryId },
+    data: { displayConfig: JSON.stringify(config) },
+  });
+
+  revalidatePath(`/galleries/${galleryId}`);
+  revalidatePath(`/galleries/${galleryId}/settings/display`);
 }

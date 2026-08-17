@@ -6,9 +6,24 @@ import { getPageIcon, getPageTitle, getTitlePropertyName } from "@/lib/notion-sc
 import { PropertyValue } from "@/components/property-value";
 import { parseDisplayConfig } from "@/lib/display-config";
 import { CardCover } from "@/components/card-cover";
-import { CONTENT_IMAGE, parseGalleryConfig, resolveCoverRatio, resolveCoverUrl } from "@/lib/notion-cover";
+import {
+  CONTENT_IMAGE,
+  parseGalleryConfig,
+  resolveCardsPerRow,
+  resolveCoverRatio,
+  resolveCoverUrl,
+} from "@/lib/notion-cover";
 import { isFullDataSource, isFullPage } from "@notionhq/client";
 import { syncPropertyConfigs } from "@/lib/property-config-sync";
+
+const GALLERY_GRID_COLUMNS: Record<number, string> = {
+  1: "lg:grid-cols-1",
+  2: "lg:grid-cols-2",
+  3: "lg:grid-cols-3",
+  4: "lg:grid-cols-4",
+  5: "lg:grid-cols-5",
+  6: "lg:grid-cols-6",
+};
 
 export default async function GalleryPage({ params }: PageProps<"/galleries/[galleryId]">) {
   const { galleryId } = await params;
@@ -37,6 +52,7 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
     .slice(0, 4);
 
   const galleryConfig = parseGalleryConfig(gallery.displayConfig);
+  const cardsPerRow = resolveCardsPerRow(galleryConfig);
   const coverRatio = resolveCoverRatio(galleryConfig);
   const coverSource = galleryConfig.coverSource;
 
@@ -94,7 +110,7 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
           Database này chưa có item nào.
         </p>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+        <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 ${GALLERY_GRID_COLUMNS[cardsPerRow]}`}>
           {pages.map((page) => {
             const title = getPageTitle(page, titlePropertyName);
             const icon = getPageIcon(page);

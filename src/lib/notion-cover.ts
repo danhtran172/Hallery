@@ -6,6 +6,9 @@ export const PAGE_COVER = "page_cover";
 export const CONTENT_IMAGE = "content_image";
 /** A Files or URL property, encoded as `property:<name>`. */
 export const PROPERTY_PREFIX = "property:";
+export const MIN_CARDS_PER_ROW = 1;
+export const MAX_CARDS_PER_ROW = 6;
+export const DEFAULT_CARDS_PER_ROW = 4;
 
 export type CoverAspect = "landscape" | "portrait" | "square" | "none";
 
@@ -17,6 +20,8 @@ export type GalleryConfig = {
   coverRatio?: string;
   /** PAGE_COVER | CONTENT_IMAGE | `property:<name>` */
   coverSource?: string;
+  /** Number of cards shown across the gallery on desktop. */
+  cardsPerRow?: number;
 };
 
 export function parseGalleryConfig(raw: string): GalleryConfig {
@@ -26,6 +31,14 @@ export function parseGalleryConfig(raw: string): GalleryConfig {
   } catch {
     return {};
   }
+}
+
+/** A safe desktop column count for the gallery grid. */
+export function resolveCardsPerRow(config: GalleryConfig): number {
+  const value = config.cardsPerRow;
+  return typeof value === "number" && Number.isInteger(value) && value >= MIN_CARDS_PER_ROW && value <= MAX_CARDS_PER_ROW
+    ? value
+    : DEFAULT_CARDS_PER_ROW;
 }
 
 /** Ratios offered per orientation; the first of each is that orientation's default. */
