@@ -58,7 +58,7 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
       : new Map<string, string | null>();
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-12">
+    <div className="mx-auto w-full max-w-5xl px-6 py-12">
       <div className="mb-8 flex items-center justify-between">
         <div>
           <Link href="/" className="text-xs text-stone-500 hover:underline">
@@ -94,7 +94,7 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
           Database này chưa có item nào.
         </p>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4">
           {pages.map((page) => {
             const title = getPageTitle(page, titlePropertyName);
             const icon = getPageIcon(page);
