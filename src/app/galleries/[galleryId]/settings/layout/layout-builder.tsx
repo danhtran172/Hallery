@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   DndContext,
   KeyboardSensor,
@@ -52,11 +53,13 @@ const RATIO_OPTIONS: { value: LayoutRatio; label: string }[] = [
 
 export function LayoutBuilder({
   galleryId,
+  galleryName,
   properties,
   initialLayout,
   templates,
 }: {
   galleryId: string;
+  galleryName: string;
   properties: BuilderProperty[];
   initialLayout: DetailLayout;
   templates: { id: string; name: string; layout: string }[];
@@ -159,6 +162,17 @@ export function LayoutBuilder({
 
   return (
     <>
+    <Link
+      href={`/galleries/${galleryId}`}
+      onNavigate={(event) => {
+        if (dirty && !window.confirm("Bạn có thay đổi bố cục chưa lưu. Rời trang và bỏ các thay đổi này?")) {
+          event.preventDefault();
+        }
+      }}
+      className="mb-4 inline-block text-xs text-stone-500 hover:underline"
+    >
+      ← {galleryName}
+    </Link>
     <form action={formAction} className="flex flex-col gap-5">
       <input type="hidden" name="layout" value={JSON.stringify(layout)} />
       <DndContext id="layout-builder" sensors={sensors} onDragEnd={handleDragEnd}>
