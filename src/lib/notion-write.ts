@@ -66,11 +66,8 @@ export function buildPropertyUpdate(
       return { [type]: value === "" ? null : { name: value } };
     }
     case "multi_select": {
-      const raw = String(formData.get(fieldName) ?? "");
-      const names = raw
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
+      // Rendered as one hidden input per chip, all sharing `fieldName` — getAll collects them all.
+      const names = formData.getAll(fieldName).map((v) => String(v).trim()).filter(Boolean);
       return { multi_select: names.map((name) => ({ name })) };
     }
     default:

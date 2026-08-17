@@ -154,28 +154,24 @@ function EditField({ field }: { field: FieldData }) {
       );
     case "select":
     case "status":
-    case "multi_select": {
-      const listId = `options-${field.name}`;
       return (
-        <FieldRow
+        <SelectField
+          fieldName={fieldName}
           label={field.name}
-          hint={field.type === "multi_select" ? "Nhiều giá trị, cách nhau bằng dấu phẩy" : "Gõ tên mới để tạo option"}
-        >
-          <input
-            type="text"
-            name={fieldName}
-            defaultValue={String(defaultValue)}
-            list={field.options?.length ? listId : undefined}
-            className="w-full rounded-md border border-stone-300 px-3 py-1.5 text-sm outline-none focus:border-emerald-600"
-          />
-          {field.options?.length ? (
-            <datalist id={listId}>
-              {field.options.map((opt) => (
-                <option key={opt} value={opt} />
-              ))}
-            </datalist>
-          ) : null}
-        </FieldRow>
+          options={field.options ?? []}
+          currentValue={String(defaultValue)}
+        />
+      );
+    case "multi_select": {
+      const current =
+        field.value.type === "multi_select" ? field.value.multi_select.map((o) => o.name) : [];
+      return (
+        <MultiSelectField
+          fieldName={fieldName}
+          label={field.name}
+          options={field.options ?? []}
+          currentValues={current}
+        />
       );
     }
     default:
@@ -226,6 +222,146 @@ function DurationField({
         <span className="text-sm text-stone-500">phút</span>
       </div>
       <input type="hidden" name={fieldName} value={hours * 60 + minutes} />
+    </FieldRow>
+  );
+}
+
+const CUSTOM = "__custom__";
+
+function SelectField({
+  fieldName,
+  label,
+  options,
+  currentValue,
+}: {
+  fieldName: string;
+  label: string;
+  options: string[];
+  currentValue: string;
+}) {
+  const isKnown = currentValue === "" || options.includes(currentValue);
+  const [mode, setMode] = useState<"existing" | "custom">(isKnown ? "existing" : "custom");
+  const [customValue, setCustomValue] = useState(isKnown ? "" : currentValue);
+
+  return (
+    <FieldRow label={label}>
+      {mode === "existing" ? (
+        <select
+          name={fieldName}
+          defaultValue={currentValue}
+          onChange={(e) => {
+            if (e.target.value === CUSTOM) setMode("custom");
+          }}
+          className="w-full rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm outline-none focus:border-emerald-600"
+        >
+          <option value="">— Trống —</option>
+          {options.map((opt) => (
+            <option key={opt} value={opt}>
+              {opt}
+            </option>
+          ))}
+          <option value={CUSTOM}>+ Option mới…</option>
+        </select>
+      ) : (
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            name={fieldName}
+            value={customValue}
+            onChange={(e) => setCustomValue(e.target.value)}
+            placeholder="Tên option mới"
+            autoFocus
+            className="w-full rounded-md border border-stone-300 px-3 py-1.5 text-sm outline-none focus:border-emerald-600"
+          />
+          {options.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setMode("existing")}
+              className="shrink-0 text-xs text-stone-500 hover:underline"
+            >
+              Chọn có sẵn
+            </button>
+          )}
+        </div>
+      )}
+    </FieldRow>
+  );
+}
+
+function MultiSelectField({
+  fieldName,
+  label,
+  options,
+  currentValues,
+}: {
+  fieldName: string;
+  label: string;
+  options: string[];
+  currentValues: string[];
+}) {
+  const [selected, setSelected] = useState<string[]>(currentValues);
+  const [customValue, setCustomValue] = useState("");
+  const remaining = options.filter((o) => !selected.includes(o));
+
+  function addValue(raw: string) {
+    const value = raw.trim();
+    if (value && !selected.includes(value)) setSelected((s) => [...s, value]);
+  }
+
+  return (
+    <FieldRow label={label}>
+      <div className="mb-2 flex flex-wrap gap-1.5">
+        {selected.length === 0 && <span className="text-xs text-stone-400">Chưa chọn gì</span>}
+        {selected.map((v) => (
+          <span
+            key={v}
+            className="inline-flex items-center gap-1 rounded bg-stone-100 px-2 py-0.5 text-xs text-stone-700"
+          >
+            {v}
+            <button
+              type="button"
+              onClick={() => setSelected((s) => s.filter((x) => x !== v))}
+              className="text-stone-400 hover:text-stone-700"
+              aria-label={`Bỏ ${v}`}
+            >
+              ×
+            </button>
+            <input type="hidden" name={fieldName} value={v} />
+          </span>
+        ))}
+      </div>
+      <div className="flex items-center gap-2">
+        {remaining.length > 0 && (
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value) addValue(e.target.value);
+            }}
+            className="rounded-md border border-stone-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-emerald-600"
+          >
+            <option value="">+ Thêm từ option có sẵn…</option>
+            {remaining.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        )}
+        <input
+          type="text"
+          value={customValue}
+          onChange={(e) => setCustomValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addValue(customValue);
+              setCustomValue("");
+            }
+          }}
+          placeholder="Gõ tên mới rồi Enter"
+          className="min-w-0 flex-1 rounded-md border border-stone-300 px-3 py-1.5 text-sm outline-none focus:border-emerald-600"
+        />
+      </div>
     </FieldRow>
   );
 }
