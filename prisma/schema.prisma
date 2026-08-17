@@ -74,6 +74,15 @@ model CoverPosition {
   @@unique([galleryId, notionPageId])
 }
 
+/// A reusable Hallery-only Card Detail arrangement. Its JSON carries source
+/// property names as well as IDs so it can be applied to another database.
+model LayoutTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  layout    String
+  createdAt DateTime @default(now())
+}
+
 model PropertyConfig {
   id                 String   @id @default(cuid())
   galleryId          String

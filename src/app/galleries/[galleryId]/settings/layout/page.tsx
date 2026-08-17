@@ -13,6 +13,7 @@ export default async function LayoutSettingsPage({
     include: { propertyConfigs: { orderBy: { sortOrder: "asc" } } },
   });
   if (!gallery) notFound();
+  const templates = await db.layoutTemplate.findMany({ orderBy: { createdAt: "desc" } });
 
   const parsed = parseDetailLayout(gallery.detailLayout, gallery.propertyConfigs);
   if (parsed.usedFallback) console.warn(`Gallery ${galleryId}: ${parsed.reason}`);
@@ -26,7 +27,12 @@ export default async function LayoutSettingsPage({
       <p className="mb-8 text-sm text-stone-600">
         Sắp property trên màn Card Detail. Đây chỉ là metadata của Hallery, không thay đổi property hay cấu trúc trong Notion.
       </p>
-      <LayoutBuilder galleryId={galleryId} properties={gallery.propertyConfigs} initialLayout={parsed.layout} />
+      <LayoutBuilder
+        galleryId={galleryId}
+        properties={gallery.propertyConfigs}
+        initialLayout={parsed.layout}
+        templates={templates.map((template) => ({ id: template.id, name: template.name, layout: template.layout }))}
+      />
     </div>
   );
 }

@@ -14,6 +14,7 @@ import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { PropertyDisplayConfigForm, type DisplayConfigProperty } from "@/components/property-display-config-form";
 import {
   getPlacedPropertyIds,
+  applyLayoutTemplate,
   layoutCellCount,
   layoutUsesColumns,
   type DetailLayout,
@@ -22,7 +23,7 @@ import {
   type LayoutKind,
   type LayoutRatio,
 } from "@/lib/detail-layout";
-import { saveDetailLayout, type SaveLayoutState } from "./actions";
+import { saveDetailLayout, saveLayoutTemplate, type SaveLayoutState, type SaveTemplateState } from "./actions";
 
 type BuilderProperty = DisplayConfigProperty & {
   notionPropertyId: string;
@@ -51,10 +52,12 @@ export function LayoutBuilder({
   galleryId,
   properties,
   initialLayout,
+  templates,
 }: {
   galleryId: string;
   properties: BuilderProperty[];
   initialLayout: DetailLayout;
+  templates: { id: string; name: string; layout: string }[];
 }) {
   const [layout, setLayout] = useState(initialLayout);
   const [query, setQuery] = useState("");
@@ -130,6 +133,16 @@ export function LayoutBuilder({
     setLayout(initialLayout);
     setDirty(false);
     setSelectedPropertyId(null);
+  }
+
+  function applyTemplate(templateId: string): { message: string | null } {
+    const template = templates.find((candidate) => candidate.id === templateId);
+    if (!template) return { message: "Chọn một mẫu để áp dụng." };
+    const applied = applyLayoutTemplate(template.layout, properties);
+    if (applied.invalid) return { message: "Mẫu này không hợp lệ và không thể áp dụng." };
+    updateLayout(applied.layout);
+    if (!applied.missingPropertyCount) return { message: "Đã đặt mẫu vào canvas. Nhấn Lưu bố cục để áp dụng." };
+    return { message: `${applied.missingPropertyCount} property trong mẫu không có trong database này nên đã ở lại kho bên trái.` };
   }
 
   return (
@@ -210,7 +223,72 @@ export function LayoutBuilder({
           <PropertyDisplayConfigForm galleryId={galleryId} property={selectedProperty} />
         </aside>
       )}
+      <TemplatePanel galleryId={galleryId} layout={layout} templates={templates} onApply={applyTemplate} />
     </>
+  );
+}
+
+function TemplatePanel({
+  galleryId,
+  layout,
+  templates,
+  onApply,
+}: {
+  galleryId: string;
+  layout: DetailLayout;
+  templates: { id: string; name: string; layout: string }[];
+  onApply: (templateId: string) => { message: string | null };
+}) {
+  const action = saveLayoutTemplate.bind(null, galleryId);
+  const [state, formAction, pending] = useActionState<SaveTemplateState, FormData>(action, { error: null });
+  const [templateId, setTemplateId] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
+
+  return (
+    <section className="mt-5 grid gap-5 rounded-lg border border-stone-200 p-5 md:grid-cols-2">
+      <div>
+        <h2 className="mb-1 font-medium text-stone-900">Lưu làm mẫu</h2>
+        <p className="mb-3 text-sm text-stone-500">Lưu một bản sao bố cục hiện tại để tái sử dụng ở Gallery khác.</p>
+        <form action={formAction} className="flex gap-2">
+          <input type="hidden" name="layout" value={JSON.stringify(layout)} />
+          <input
+            required
+            name="name"
+            maxLength={100}
+            placeholder="Tên mẫu"
+            className="min-w-0 flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm outline-none focus:border-emerald-600"
+          />
+          <button type="submit" disabled={pending} className="rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-700 hover:border-stone-400 disabled:opacity-50">
+            {pending ? "Đang lưu…" : "Lưu mẫu"}
+          </button>
+        </form>
+        {state.error && <p className="mt-2 text-sm text-red-600">{state.error}</p>}
+      </div>
+      <div>
+        <h2 className="mb-1 font-medium text-stone-900">Áp dụng mẫu</h2>
+        <p className="mb-3 text-sm text-stone-500">Property được map theo tên; property không khớp sẽ không bị đặt vào layout.</p>
+        <div className="flex gap-2">
+          <select
+            value={templateId}
+            onChange={(event) => setTemplateId(event.target.value)}
+            className="min-w-0 flex-1 rounded-md border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-600"
+          >
+            <option value="">Chọn mẫu…</option>
+            {templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+          </select>
+          <button
+            type="button"
+            onClick={() => setMessage(onApply(templateId).message)}
+            disabled={!templates.length}
+            className="rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-700 hover:border-stone-400 disabled:opacity-50"
+          >
+            Áp dụng
+          </button>
+        </div>
+        {!templates.length && <p className="mt-2 text-xs text-stone-400">Chưa có mẫu bố cục nào.</p>}
+        {message && <p className="mt-2 text-sm text-amber-700">{message}</p>}
+      </div>
+    </section>
   );
 }
 

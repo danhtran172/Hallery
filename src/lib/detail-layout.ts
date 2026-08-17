@@ -46,6 +46,12 @@ export type ParsedDetailLayout = {
   reason?: string;
 };
 
+export type AppliedLayoutTemplate = {
+  layout: DetailLayout;
+  missingPropertyCount: number;
+  invalid: boolean;
+};
+
 const RATIO_OPTIONS: LayoutRatio[] = [
   [50, 50],
   [60, 40],
@@ -104,6 +110,55 @@ export function getPlacedPropertyIds(layout: DetailLayout): Set<string> {
   const placed = new Set<string>();
   collectProperties(layout.root, placed);
   return placed;
+}
+
+/** Stores source names only for template portability; regular Gallery layouts remain ID-only. */
+export function serializeLayoutTemplate(layout: DetailLayout, properties: Array<LayoutProperty & { notionPropertyName: string }>) {
+  const names = new Map(properties.map((property) => [property.notionPropertyId, property.notionPropertyName]));
+  const propertyNames: Record<string, string> = {};
+  for (const propertyId of getPlacedPropertyIds(layout)) {
+    const name = names.get(propertyId);
+    if (name) propertyNames[propertyId] = name;
+  }
+  return JSON.stringify({ ...layout, propertyNames });
+}
+
+/**
+ * Template IDs only identify the source database. When applying elsewhere, match
+ * by the source property name and report anything that cannot be represented.
+ */
+export function applyLayoutTemplate(raw: string, targetProperties: Array<LayoutProperty & { notionPropertyName: string }>): AppliedLayoutTemplate {
+  const parsed = parseDetailLayout(raw, targetProperties);
+  if (parsed.usedFallback) {
+    return { layout: parsed.layout, missingPropertyCount: 0, invalid: true };
+  }
+
+  const sourceNames = readTemplatePropertyNames(raw);
+  const targetByName = new Map(targetProperties.map((property) => [property.notionPropertyName, property.notionPropertyId]));
+  let missingPropertyCount = 0;
+  const seen = new Set<string>();
+
+  function mapCell(cell: DetailLayoutCell): DetailLayoutCell {
+    if (cell.kind && cell.cells) {
+      return { ...cell, props: [], cells: cell.cells.map(mapCell) };
+    }
+    const props = cell.props.flatMap((sourceId) => {
+      const targetId = sourceNames[sourceId] ? targetByName.get(sourceNames[sourceId]) : undefined;
+      if (!targetId || seen.has(targetId)) {
+        missingPropertyCount += 1;
+        return [];
+      }
+      seen.add(targetId);
+      return [targetId];
+    });
+    return { ...cell, props };
+  }
+
+  return {
+    layout: { ...parsed.layout, root: { ...parsed.layout.root, cells: parsed.layout.root.cells.map(mapCell) } },
+    missingPropertyCount,
+    invalid: false,
+  };
 }
 
 function collectProperties(node: DetailLayoutNode, placed: Set<string>) {
@@ -183,6 +238,18 @@ function parseRatio(value: unknown, kind: LayoutKind): LayoutRatio | undefined |
   return RATIO_OPTIONS.some((ratio) => ratio[0] === value[0] && ratio[1] === value[1])
     ? ([value[0], value[1]] as LayoutRatio)
     : null;
+}
+
+function readTemplatePropertyNames(raw: string): Record<string, string> {
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!isRecord(value) || !isRecord(value.propertyNames)) return {};
+    return Object.fromEntries(
+      Object.entries(value.propertyNames).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+    );
+  } catch {
+    return {};
+  }
 }
 
 function isLayoutKind(value: unknown): value is LayoutKind {
