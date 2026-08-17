@@ -41,5 +41,7 @@ export async function saveDisplayConfig(
   });
 
   revalidatePath(`/galleries/${galleryId}`);
+  revalidatePath(`/galleries/${galleryId}/items/[pageId]`, "page");
   revalidatePath(`/galleries/${galleryId}/settings/display`);
+  revalidatePath(`/galleries/${galleryId}/settings/layout`);
 }

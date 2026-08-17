@@ -8,6 +8,7 @@ import { parseDisplayConfig } from "@/lib/display-config";
 import { CardCover } from "@/components/card-cover";
 import { CONTENT_IMAGE, parseGalleryConfig, resolveCoverRatio, resolveCoverUrl } from "@/lib/notion-cover";
 import { isFullDataSource, isFullPage } from "@notionhq/client";
+import { syncPropertyConfigs } from "@/lib/property-config-sync";
 
 export default async function GalleryPage({ params }: PageProps<"/galleries/[galleryId]">) {
   const { galleryId } = await params;
@@ -21,6 +22,7 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
 
   const dataSourceRes = await notion.dataSources.retrieve({ data_source_id: gallery.notionDataSourceId });
   const dataSource = isFullDataSource(dataSourceRes) ? dataSourceRes : null;
+  if (dataSource) await syncPropertyConfigs(galleryId, gallery.propertyConfigs, dataSource);
   const titlePropertyName = dataSource ? getTitlePropertyName(dataSource.properties) : null;
 
   const queryRes = await notion.dataSources.query({
@@ -31,7 +33,7 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
 
   // Show up to 4 non-title properties per card by default; Phase 1 will make this configurable.
   const visibleProps = gallery.propertyConfigs
-    .filter((p) => p.notionPropertyType !== "title" && !p.hidden)
+    .filter((p) => p.notionPropertyType !== "title" && !p.hidden && !p.isMissing)
     .slice(0, 4);
 
   const galleryConfig = parseGalleryConfig(gallery.displayConfig);
@@ -127,15 +129,18 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
                   </div>
                   <dl className="flex flex-col gap-1 text-sm text-stone-600">
                     {visibleProps.map((cfg) => (
-                      <div key={cfg.id} className="flex items-baseline gap-2">
-                        <dt className="w-24 shrink-0 truncate text-xs text-stone-400">{cfg.notionPropertyName}</dt>
-                        <dd className="min-w-0 flex-1 [&_a]:pointer-events-auto">
-                          <PropertyValue
-                            value={page.properties[cfg.notionPropertyName]}
-                            displayConfig={parseDisplayConfig(cfg.displayConfig)}
-                          />
-                        </dd>
-                      </div>
+                      (() => {
+                        const value = Object.values(page.properties).find((property) => property.id === cfg.notionPropertyId);
+                        if (!value) return null;
+                        return (
+                          <div key={cfg.id} className="flex items-baseline gap-2">
+                            <dt className="w-24 shrink-0 truncate text-xs text-stone-400">{cfg.notionPropertyName}</dt>
+                            <dd className="min-w-0 flex-1 [&_a]:pointer-events-auto">
+                              <PropertyValue value={value} displayConfig={parseDisplayConfig(cfg.displayConfig)} />
+                            </dd>
+                          </div>
+                        );
+                      })()
                     ))}
                   </dl>
                 </div>

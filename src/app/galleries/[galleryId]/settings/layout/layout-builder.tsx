@@ -30,6 +30,7 @@ type BuilderProperty = DisplayConfigProperty & {
   notionPropertyName: string;
   notionPropertyType: string;
   sortOrder: number;
+  isMissing: boolean;
 };
 
 const ROOT_KIND_OPTIONS: { value: LayoutKind; label: string }[] = [
@@ -63,6 +64,7 @@ export function LayoutBuilder({
   const [query, setQuery] = useState("");
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [layoutNotice, setLayoutNotice] = useState<string | null>(null);
   const saveAction = saveDetailLayout.bind(null, galleryId);
   const [saveState, formAction, pending] = useActionState<SaveLayoutState, FormData>(saveAction, { error: null });
   const wasPending = useRef(false);
@@ -72,6 +74,7 @@ export function LayoutBuilder({
   const unplaced = properties.filter(
     (property) =>
       property.notionPropertyType !== "title" &&
+      !property.isMissing &&
       !placed.has(property.notionPropertyId) &&
       property.notionPropertyName.toLocaleLowerCase("vi").includes(query.trim().toLocaleLowerCase("vi")),
   );
@@ -113,7 +116,9 @@ export function LayoutBuilder({
   }
 
   function handleRootKindChange(kind: LayoutKind) {
-    updateLayout({ ...layout, root: reshapeRoot(layout.root, kind) });
+    const reshaped = reshapeRoot(layout.root, kind);
+    updateLayout({ ...layout, root: reshaped.node });
+    setLayoutNotice(reshaped.consolidated ? "Property từ ô bị gộp đã được dồn vào ô cuối cùng; không có dữ liệu nào bị bỏ." : null);
   }
 
   function handleRootRatioChange(ratio: LayoutRatio) {
@@ -121,7 +126,9 @@ export function LayoutBuilder({
   }
 
   function handleNestedKindChange(cellId: string, kind: LayoutKind | "none") {
-    updateLayout({ ...layout, root: updateNestedKind(layout.root, cellId, kind) });
+    const updated = updateNestedKind(layout.root, cellId, kind);
+    updateLayout({ ...layout, root: updated.node });
+    setLayoutNotice(updated.consolidated ? "Property từ ô bị gộp đã được dồn vào ô cuối cùng; không có dữ liệu nào bị bỏ." : null);
   }
 
   function handleNestedRatioChange(cellId: string, ratio: LayoutRatio) {
@@ -187,6 +194,7 @@ export function LayoutBuilder({
       <p className={`text-sm ${placed.size ? "text-stone-500" : "text-amber-700"}`}>
         {unplaced.length} property chưa được đặt — chúng sẽ không hiện trong Card Detail.
       </p>
+      {layoutNotice && <p className="text-sm text-amber-700">{layoutNotice}</p>}
       {saveState.error && <p className="text-sm text-red-600">{saveState.error}</p>}
 
       <div className="flex flex-wrap items-center gap-3">
@@ -420,11 +428,16 @@ function CanvasCell({
           </select>
         </label>
       ) : (
-        <p className="mb-3 text-[11px] text-stone-400">Không thể chia tiếp: layout tối đa 2 tầng.</p>
+        <div className="mb-3 flex flex-col gap-1">
+          <button type="button" disabled className="self-start rounded border border-stone-200 px-2 py-1 text-[11px] text-stone-400">
+            Chia tiếp
+          </button>
+          <p className="text-[11px] text-stone-400">Không thể chia tiếp: layout tối đa 2 tầng.</p>
+        </div>
       )}
       <div className="flex flex-col gap-2">
         {fields.map((property, index) =>
-          property ? (
+          property && !property.isMissing ? (
             <DraggableProperty key={property.notionPropertyId} property={property} onRemove={onRemove} onSettings={onSettings} />
           ) : (
             <MissingPropertyCard key={cell.props[index]} propertyId={cell.props[index]} onRemove={onRemove} />
@@ -488,7 +501,7 @@ function RatioSelect({ value, onChange }: { value: LayoutRatio; onChange: (ratio
   );
 }
 
-function reshapeRoot(root: DetailLayoutNode, kind: LayoutKind): DetailLayoutNode {
+function reshapeRoot(root: DetailLayoutNode, kind: LayoutKind): { node: DetailLayoutNode; consolidated: boolean } {
   const prior = root.cells.map((cell) => propertiesInCell(cell));
   const nextCells = Array.from({ length: layoutCellCount(kind) }, (_, index) => ({
     id: `root-${crypto.randomUUID()}`,
@@ -497,11 +510,15 @@ function reshapeRoot(root: DetailLayoutNode, kind: LayoutKind): DetailLayoutNode
   for (let index = nextCells.length; index < prior.length; index += 1) {
     nextCells[nextCells.length - 1].props.push(...prior[index]);
   }
-  return { kind, ...(layoutUsesColumns(kind) ? { ratio: root.ratio ?? [50, 50] as LayoutRatio } : {}), cells: nextCells };
+  return {
+    node: { kind, ...(layoutUsesColumns(kind) ? { ratio: root.ratio ?? [50, 50] as LayoutRatio } : {}), cells: nextCells },
+    consolidated: prior.length > nextCells.length,
+  };
 }
 
-function updateNestedKind(root: DetailLayoutNode, targetId: string, kind: LayoutKind | "none"): DetailLayoutNode {
-  return {
+function updateNestedKind(root: DetailLayoutNode, targetId: string, kind: LayoutKind | "none"): { node: DetailLayoutNode; consolidated: boolean } {
+  let consolidated = false;
+  const node = {
     ...root,
     cells: root.cells.map((cell) => {
       if (cell.id !== targetId) return cell;
@@ -511,15 +528,17 @@ function updateNestedKind(root: DetailLayoutNode, targetId: string, kind: Layout
         ? { kind: cell.kind, ...(cell.ratio ? { ratio: cell.ratio } : {}), cells: cell.cells }
         : { kind: "single", cells: [{ id: cell.id, props: cell.props }] };
       const reshaped = reshapeRoot(priorNode, kind);
+      consolidated = reshaped.consolidated;
       return {
         id: cell.id,
         props: [],
-        kind: reshaped.kind,
-        ...(reshaped.ratio ? { ratio: reshaped.ratio } : {}),
-        cells: reshaped.cells,
+        kind: reshaped.node.kind,
+        ...(reshaped.node.ratio ? { ratio: reshaped.node.ratio } : {}),
+        cells: reshaped.node.cells,
       };
     }),
   };
+  return { node, consolidated };
 }
 
 function updateNestedRatio(root: DetailLayoutNode, targetId: string, ratio: LayoutRatio): DetailLayoutNode {
