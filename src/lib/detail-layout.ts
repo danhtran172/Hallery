@@ -81,14 +81,14 @@ export function createDefaultDetailLayout(properties: LayoutProperty[]): DetailL
  * Invalid, future-version, or over-nested persisted JSON never breaks a detail
  * page. It falls back to the ordered legacy layout and reports why to the caller.
  */
-export function parseDetailLayout(raw: string, properties: LayoutProperty[]): ParsedDetailLayout {
+export function parseDetailLayout(raw: string | undefined, properties: LayoutProperty[]): ParsedDetailLayout {
   const fallback = (reason: string): ParsedDetailLayout => ({
     layout: createDefaultDetailLayout(properties),
     usedFallback: true,
     reason,
   });
 
-  if (!raw.trim()) return { layout: createDefaultDetailLayout(properties), usedFallback: false };
+  if (!raw?.trim()) return { layout: createDefaultDetailLayout(properties), usedFallback: false };
 
   try {
     const value: unknown = JSON.parse(raw);
