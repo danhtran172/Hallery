@@ -621,18 +621,70 @@ function LayoutPreview({ kind, selected, compact = false }: { kind: LayoutKind |
 }
 
 function RatioSelect({ value, onChange }: { value: LayoutRatio; onChange: (ratio: LayoutRatio) => void }) {
-  const key = value.join(":");
+  const [isOpen, setIsOpen] = useState(false);
+  const selected = RATIO_OPTIONS.find((option) => option.value[0] === value[0] && option.value[1] === value[1]) ?? RATIO_OPTIONS[0]!;
+
   return (
-    <label className="flex flex-col gap-1 text-xs font-medium text-stone-500">
-      Tỉ lệ cột
-      <select
-        value={key}
-        onChange={(event) => onChange(event.target.value.split(":").map(Number) as LayoutRatio)}
-        className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-normal text-stone-800 outline-none focus:border-emerald-600"
+    <fieldset className="relative">
+      <legend className="mb-2 text-xs font-medium text-stone-500">Tỉ lệ cột</legend>
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((open) => !open)}
+        className={`flex min-h-11 w-full items-center gap-2 rounded-md border bg-white px-2 text-left text-stone-800 transition-colors hover:border-stone-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 ${
+          isOpen ? "border-emerald-700" : "border-stone-300"
+        }`}
       >
-        {RATIO_OPTIONS.map((option) => <option key={option.label} value={option.value.join(":")}>{option.label}</option>)}
-      </select>
-    </label>
+        <RatioPreview ratio={selected.value} selected />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{selected.label}</span>
+        <span aria-hidden className="text-stone-400">⌄</span>
+      </button>
+      {isOpen && (
+        <div role="dialog" aria-label="Chọn tỉ lệ cột" className="absolute z-30 mt-2 w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-stone-300 bg-white p-3 shadow-lg">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="text-sm font-medium text-stone-900">Chọn tỉ lệ cột</p>
+            <button type="button" onClick={() => setIsOpen(false)} className="rounded px-2 py-1 text-xs text-stone-500 hover:bg-stone-100 hover:text-stone-800">
+              Đóng
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {RATIO_OPTIONS.map((option) => {
+              const optionSelected = option.value[0] === value[0] && option.value[1] === value[1];
+              return (
+                <button
+                  key={option.label}
+                  type="button"
+                  aria-pressed={optionSelected}
+                  onClick={() => {
+                    onChange(option.value);
+                    setIsOpen(false);
+                  }}
+                  className={`min-h-20 rounded-md border p-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 ${
+                    optionSelected
+                      ? "border-emerald-700 bg-emerald-50 text-emerald-950"
+                      : "border-stone-300 bg-white text-stone-700 hover:border-stone-500 hover:bg-stone-50"
+                  }`}
+                >
+                  <RatioPreview ratio={option.value} selected={optionSelected} />
+                  <span className="mt-2 block text-xs font-medium">{option.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </fieldset>
+  );
+}
+
+function RatioPreview({ ratio, selected }: { ratio: LayoutRatio; selected: boolean }) {
+  const cellClass = `rounded-[2px] border ${selected ? "border-emerald-400 bg-emerald-100" : "border-stone-300 bg-stone-100"}`;
+  return (
+    <span aria-hidden className="flex h-7 w-12 shrink-0 gap-1 rounded-sm bg-stone-200/70 p-1">
+      <span style={{ flex: ratio[0] }} className={cellClass} />
+      <span style={{ flex: ratio[1] }} className={cellClass} />
+    </span>
   );
 }
 
