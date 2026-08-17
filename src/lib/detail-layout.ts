@@ -52,6 +52,10 @@ export type AppliedLayoutTemplate = {
   invalid: boolean;
 };
 
+/** Root plus two nested layout levels; the final level may not be split again. */
+export const MAX_DETAIL_LAYOUT_DEPTH = 2;
+export const MAX_STACK_LAYOUT_CELLS = 12;
+
 const RATIO_OPTIONS: LayoutRatio[] = [
   [50, 50],
   [60, 40],
@@ -186,7 +190,7 @@ function parseNode(
   cellIds: Set<string>,
 ): DetailLayoutNode | null {
   const kind = value.kind;
-  if (!isLayoutKind(kind) || !Array.isArray(value.cells) || value.cells.length !== layoutCellCount(kind)) return null;
+  if (!isLayoutKind(kind) || !Array.isArray(value.cells) || !hasValidCellCount(kind, value.cells.length)) return null;
 
   const ratio = parseRatio(value.ratio, kind);
   if (ratio === null) return null;
@@ -217,18 +221,24 @@ function parseCell(
     return { id: value.id, props: [...value.props] };
   }
 
-  // Root is depth 0. A nested node is allowed only in one of its cells (depth 1).
-  if (depth >= 1 || !isLayoutKind(value.kind) || !Array.isArray(value.cells) || value.props.length > 0) return null;
+  // Root is depth 0. Final-level layouts may not be split further, but a stack
+  // can contain as many sibling layouts as its user needs.
+  if (depth >= MAX_DETAIL_LAYOUT_DEPTH || !isLayoutKind(value.kind) || !Array.isArray(value.cells) || value.props.length > 0) return null;
   const ratio = parseRatio(value.ratio, value.kind);
-  if (ratio === null || value.cells.length !== layoutCellCount(value.kind)) return null;
+  if (ratio === null || !hasValidCellCount(value.kind, value.cells.length)) return null;
 
   const cells: DetailLayoutCell[] = [];
   for (const rawChild of value.cells) {
     const child = parseCell(rawChild, depth + 1, propertyIds, cellIds);
-    if (!child || child.kind) return null;
+    if (!child) return null;
     cells.push(child);
   }
   return { id: value.id, props: [], kind: value.kind, ...(ratio ? { ratio } : {}), cells };
+}
+
+function hasValidCellCount(kind: LayoutKind, count: number) {
+  if (kind === "stack") return count >= 1 && count <= MAX_STACK_LAYOUT_CELLS;
+  return count === layoutCellCount(kind);
 }
 
 function parseRatio(value: unknown, kind: LayoutKind): LayoutRatio | undefined | null {
