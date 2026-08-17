@@ -15,6 +15,8 @@ import {
 } from "@/lib/notion-cover";
 import { isFullDataSource, isFullPage } from "@notionhq/client";
 import { syncPropertyConfigs, syncResolvedTypes } from "@/lib/property-config-sync";
+import { CategoryBar } from "@/components/category-bar";
+import { bucketPages, filterPagesByCategory } from "@/lib/category";
 
 const GALLERY_GRID_COLUMNS: Record<number, string> = {
   1: "lg:grid-cols-1",
@@ -25,11 +27,16 @@ const GALLERY_GRID_COLUMNS: Record<number, string> = {
   6: "lg:grid-cols-6",
 };
 
-export default async function GalleryPage({ params }: PageProps<"/galleries/[galleryId]">) {
+export default async function GalleryPage({ params, searchParams }: PageProps<"/galleries/[galleryId]">) {
   const { galleryId } = await params;
+  const { axis: axisParam, value: valueParam } = await searchParams;
   const gallery = await db.gallery.findUnique({
     where: { id: galleryId },
-    include: { workspace: true, propertyConfigs: { orderBy: { sortOrder: "asc" } } },
+    include: {
+      workspace: true,
+      propertyConfigs: { orderBy: { sortOrder: "asc" } },
+      categoryAxes: { orderBy: { sortOrder: "asc" } },
+    },
   });
   if (!gallery) notFound();
 
@@ -44,11 +51,22 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
     data_source_id: gallery.notionDataSourceId,
     page_size: 100,
   });
-  const pages = queryRes.results.filter(isFullPage);
+  const allPages = queryRes.results.filter(isFullPage);
 
   // What each formula/rollup evaluates to is only visible on a page value, and we already
   // have pages here — so learn it now rather than spending a request on it in Settings.
-  await syncResolvedTypes(gallery.propertyConfigs, pages[0]);
+  await syncResolvedTypes(gallery.propertyConfigs, allPages[0]);
+
+  // Category axes bucket and filter the pages already in hand — no extra Notion request.
+  // Counts therefore describe the loaded page, hence the "+" when more remain.
+  const axes = gallery.categoryAxes.filter((axis) => axis.sourceType !== "relation");
+  const firstAxisParam = typeof axisParam === "string" ? axisParam : undefined;
+  const activeAxis = axes.find((axis) => axis.id === firstAxisParam) ?? axes[0];
+  const activeValue = typeof valueParam === "string" && valueParam !== "" ? valueParam : null;
+
+  const buckets = activeAxis ? bucketPages(allPages, activeAxis) : [];
+  const pages =
+    activeAxis && activeValue ? filterPagesByCategory(allPages, activeAxis, activeValue) : allPages;
 
   // Show up to 4 non-title properties per card by default; Phase 1 will make this configurable.
   const visibleProps = gallery.propertyConfigs
@@ -85,9 +103,18 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
             ← Tất cả gallery
           </Link>
           <h1 className="mt-1 text-2xl font-semibold text-stone-900">{gallery.name}</h1>
-          <p className="text-sm text-stone-500">{pages.length} item</p>
+          <p className="text-sm text-stone-500">
+            {pages.length} item
+            {activeValue && ` · lọc từ ${allPages.length}`}
+          </p>
         </div>
         <div className="flex items-center gap-4">
+          <Link
+            href={`/galleries/${galleryId}/settings/category`}
+            className="text-xs text-stone-500 hover:underline"
+          >
+            Phân loại
+          </Link>
           <Link
             href={`/galleries/${galleryId}/settings/layout`}
             className="text-xs text-stone-500 hover:underline"
@@ -109,9 +136,22 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
         </div>
       </div>
 
+      {activeAxis && buckets.length > 0 && (
+        <CategoryBar
+          galleryId={galleryId}
+          axes={axes}
+          activeAxis={activeAxis}
+          buckets={buckets}
+          activeValue={activeValue}
+          partialCounts={queryRes.has_more}
+        />
+      )}
+
       {pages.length === 0 ? (
         <p className="rounded-md border border-dashed border-stone-300 px-4 py-10 text-center text-sm text-stone-500">
-          Database này chưa có item nào.
+          {activeValue
+            ? "Không có item nào trong phân loại này."
+            : "Database này chưa có item nào."}
         </p>
       ) : (
         <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 ${GALLERY_GRID_COLUMNS[cardsPerRow]}`}>

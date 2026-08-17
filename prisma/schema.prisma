@@ -45,6 +45,7 @@ model Gallery {
   subGalleries       Gallery[] @relation("SubGalleries")
 
   propertyConfigs    PropertyConfig[]
+  categoryAxes       CategoryAxis[]
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -81,6 +82,24 @@ model LayoutTemplate {
   name      String
   layout    String
   createdAt DateTime @default(now())
+}
+
+/// A property used to sort items into categories — Series, Genre, and so on.
+/// Select-like sources cost nothing to browse because their values already ride along
+/// with the page data; relation sources need one request to list the linked items.
+model CategoryAxis {
+  id                 String   @id @default(cuid())
+  galleryId          String
+  gallery            Gallery  @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+  notionPropertyId   String
+  notionPropertyName String
+  sourceType         String
+  displayLabel       String?
+  sortOrder          Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([galleryId, notionPropertyId])
 }
 
 model PropertyConfig {
