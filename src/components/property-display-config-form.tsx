@@ -2,12 +2,22 @@
 
 import { saveDisplayConfig } from "@/app/galleries/[galleryId]/settings/display/actions";
 import { parseDisplayConfig } from "@/lib/display-config";
+import { configTypeOf, isConfigStranded } from "@/lib/property-kind";
 
-const CONFIGURABLE_TYPES = new Set(["number", "url", "date", "select", "status", "multi_select"]);
+const CONFIGURABLE_TYPES = new Set([
+  "number",
+  "url",
+  "date",
+  "select",
+  "status",
+  "multi_select",
+  "rich_text",
+]);
 
 export type DisplayConfigProperty = {
   id: string;
   notionPropertyType: string;
+  resolvedType: string | null;
   displayConfig: string;
 };
 
@@ -20,18 +30,37 @@ export function PropertyDisplayConfigForm({
   property: DisplayConfigProperty;
 }) {
   const cfg = parseDisplayConfig(property.displayConfig);
-  const action = saveDisplayConfig.bind(null, galleryId, property.id, property.notionPropertyType);
+  // Formula and rollup borrow the options of whatever they evaluate to.
+  const configType = configTypeOf(property.notionPropertyType, property.resolvedType);
+  const action = saveDisplayConfig.bind(null, galleryId, property.id, configType);
 
-  if (!CONFIGURABLE_TYPES.has(property.notionPropertyType)) {
+  if (configType === "unknown") {
+    return (
+      <p className="text-sm text-stone-400">
+        Chưa xác định được kiểu đầu ra. Thêm ít nhất một item vào database rồi mở lại trang này.
+      </p>
+    );
+  }
+
+  if (!CONFIGURABLE_TYPES.has(configType)) {
     return <p className="text-sm text-stone-400">Chưa có tuỳ chỉnh hiển thị cho kiểu này.</p>;
   }
 
+  const stranded = isConfigStranded(configType, property.displayConfig);
+
   return (
     <form action={action} className="flex flex-col gap-3">
-      {property.notionPropertyType === "number" && <NumberFields cfg={cfg} />}
-      {property.notionPropertyType === "url" && <UrlFields cfg={cfg} />}
-      {property.notionPropertyType === "date" && <DateFields cfg={cfg} />}
-      {["select", "status", "multi_select"].includes(property.notionPropertyType) && <AffixFields cfg={cfg} />}
+      {stranded && (
+        <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Kiểu đầu ra đã đổi thành <b>{property.resolvedType}</b>, nên cấu hình hiển thị cũ không còn dùng được.
+          Chọn lại bên dưới rồi lưu.
+        </p>
+      )}
+      {configType === "number" && <NumberFields cfg={cfg} />}
+      {configType === "url" && <UrlFields cfg={cfg} />}
+      {configType === "date" && <DateFields cfg={cfg} />}
+      {configType === "rich_text" && <TextAffixFields cfg={cfg} />}
+      {["select", "status", "multi_select"].includes(configType) && <AffixFields cfg={cfg} />}
       <button
         type="submit"
         className="self-start rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800"
@@ -91,6 +120,15 @@ function DateFields({ cfg }: { cfg: { kind?: string } }) {
         { value: "year_only", label: "Chỉ năm" },
       ]}
     />
+  );
+}
+
+function TextAffixFields({ cfg }: { cfg: { prefix?: string; suffix?: string } }) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <TextField name="prefix" label="Chữ trước" defaultValue={cfg.prefix ?? ""} />
+      <TextField name="suffix" label="Chữ sau" defaultValue={cfg.suffix ?? ""} />
+    </div>
   );
 }
 

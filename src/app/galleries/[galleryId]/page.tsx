@@ -14,7 +14,7 @@ import {
   resolveCoverUrl,
 } from "@/lib/notion-cover";
 import { isFullDataSource, isFullPage } from "@notionhq/client";
-import { syncPropertyConfigs } from "@/lib/property-config-sync";
+import { syncPropertyConfigs, syncResolvedTypes } from "@/lib/property-config-sync";
 
 const GALLERY_GRID_COLUMNS: Record<number, string> = {
   1: "lg:grid-cols-1",
@@ -45,6 +45,10 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
     page_size: 100,
   });
   const pages = queryRes.results.filter(isFullPage);
+
+  // What each formula/rollup evaluates to is only visible on a page value, and we already
+  // have pages here — so learn it now rather than spending a request on it in Settings.
+  await syncResolvedTypes(gallery.propertyConfigs, pages[0]);
 
   // Show up to 4 non-title properties per card by default; Phase 1 will make this configurable.
   const visibleProps = gallery.propertyConfigs

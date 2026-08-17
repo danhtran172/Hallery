@@ -90,6 +90,11 @@ model PropertyConfig {
   notionPropertyId   String
   notionPropertyName String
   notionPropertyType String
+  /// What a formula or rollup actually evaluates to ("number" | "string" | "date" |
+  /// "boolean" | "array"). Notion's schema only exposes the expression, never the
+  /// output type — it surfaces solely on a page's value — so this is detected from a
+  /// sampled page. Null means not determined yet. Unused for other property types.
+  resolvedType       String?
   displayConfig      String   @default("{}")
   sortOrder          Int      @default(0)
   hidden             Boolean  @default(false)

@@ -10,15 +10,23 @@ import {
   parseGalleryConfig,
 } from "@/lib/notion-cover";
 
+/**
+ * `configType` is the type whose options were shown — for formula and rollup properties
+ * that's what they evaluate to, not "formula"/"rollup" themselves.
+ */
 export async function saveDisplayConfig(
   galleryId: string,
   propertyConfigId: string,
-  propertyType: string,
+  configType: string,
   formData: FormData,
 ) {
   const config: DisplayConfig = {};
+  const propertyType = configType;
 
-  if (propertyType === "number") {
+  if (propertyType === "rich_text") {
+    config.prefix = String(formData.get("prefix") ?? "");
+    config.suffix = String(formData.get("suffix") ?? "");
+  } else if (propertyType === "number") {
     config.kind = String(formData.get("kind") ?? "plain");
     if (config.kind === "rate") {
       const max = Number(formData.get("max"));

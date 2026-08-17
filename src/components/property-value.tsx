@@ -11,7 +11,7 @@ export function PropertyValue({ value, displayConfig }: { value: PropertyValue; 
       return null; // rendered separately as the card heading
     case "rich_text": {
       const text = value.rich_text.map((t) => t.plain_text).join("");
-      return text ? <span>{text}</span> : <Empty />;
+      return text ? <span>{withAffixes(text, cfg)}</span> : <Empty />;
     }
     case "number":
       return <NumberValue value={value.number} cfg={cfg} />;
@@ -138,7 +138,8 @@ function RollupValue({ rollup, cfg }: { rollup: { type: string; [key: string]: u
 }
 
 function FormulaValue({ formula, cfg }: { formula: { type: string; [key: string]: unknown }; cfg: DisplayConfig }) {
-  if (formula.type === "string") return formula.string ? <span>{formula.string as string}</span> : <Empty />;
+  if (formula.type === "string")
+    return formula.string ? <span>{withAffixes(formula.string as string, cfg)}</span> : <Empty />;
   if (formula.type === "number") return <NumberValue value={(formula.number as number | null) ?? null} cfg={cfg} />;
   if (formula.type === "boolean") return <span>{formula.boolean ? "✓" : "—"}</span>;
   if (formula.type === "date") {

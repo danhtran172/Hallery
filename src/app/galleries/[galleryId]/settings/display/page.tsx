@@ -8,6 +8,7 @@ import {
   parseGalleryConfig,
   resolveCardsPerRow,
 } from "@/lib/notion-cover";
+import { describePropertyType } from "@/lib/property-kind";
 import { saveGalleryGridSettings } from "./actions";
 
 export default async function DisplaySettingsPage({
@@ -85,14 +86,17 @@ function PropertyConfigCard({
     id: string;
     notionPropertyName: string;
     notionPropertyType: string;
+    resolvedType: string | null;
     displayConfig: string;
   };
 }) {
   return (
     <div className="rounded-lg border border-stone-200 p-4">
-      <div className="mb-3 flex items-baseline justify-between">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
         <span className="font-medium text-stone-900">{property.notionPropertyName}</span>
-        <span className="font-mono text-xs text-stone-400">{property.notionPropertyType}</span>
+        <span className="font-mono text-xs text-stone-400">
+          {describePropertyType(property.notionPropertyType, property.resolvedType)}
+        </span>
       </div>
 
       <PropertyDisplayConfigForm galleryId={galleryId} property={property} />

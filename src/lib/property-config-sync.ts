@@ -1,5 +1,6 @@
-import type { DataSourceObjectResponse } from "@notionhq/client";
+import type { DataSourceObjectResponse, PageObjectResponse } from "@notionhq/client";
 import { db } from "@/lib/db";
+import { detectResolvedTypes } from "@/lib/property-kind";
 
 type ExistingPropertyConfig = {
   id: string;
@@ -57,6 +58,32 @@ export async function syncPropertyConfigs(
       }),
     );
     nextSortOrder += 1;
+  }
+
+  if (operations.length) await db.$transaction(operations);
+}
+
+/**
+ * Records what each formula/rollup property evaluates to, read off a page the caller
+ * already fetched — no extra Notion request. Only writes when the answer changed, so a
+ * gallery view that hasn't touched its formulas does no database work.
+ */
+export async function syncResolvedTypes(
+  existing: { id: string; notionPropertyId: string; resolvedType: string | null }[],
+  samplePage: PageObjectResponse | undefined,
+) {
+  if (!samplePage) return;
+
+  const detected = detectResolvedTypes(samplePage);
+  const operations = [];
+
+  for (const property of existing) {
+    const current = detected.get(property.notionPropertyId);
+    if (current && current !== property.resolvedType) {
+      operations.push(
+        db.propertyConfig.update({ where: { id: property.id }, data: { resolvedType: current } }),
+      );
+    }
   }
 
   if (operations.length) await db.$transaction(operations);
