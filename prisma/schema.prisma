@@ -38,6 +38,7 @@ model Gallery {
   description        String?
   sortOrder          Int       @default(0)
   displayConfig      String    @default("{}")
+  detailLayout       String    @default("")
 
   parentGalleryId    String?
   parentGallery      Gallery?  @relation("SubGalleries", fields: [parentGalleryId], references: [id])

@@ -5,6 +5,7 @@ import { getNotionClient } from "@/lib/notion";
 import { getPageIcon, getPageTitle, getTitlePropertyName } from "@/lib/notion-schema";
 import { EDITABLE_PROPERTY_TYPES, READONLY_PROPERTY_TYPES } from "@/lib/notion-write";
 import { parseDisplayConfig } from "@/lib/display-config";
+import { parseDetailLayout } from "@/lib/detail-layout";
 import { isFullDataSource, isFullPage } from "@notionhq/client";
 import { ItemDetail, type FieldData } from "./item-detail";
 
@@ -30,6 +31,7 @@ export default async function ItemDetailPage({
   const title = getPageTitle(pageRes, titlePropertyName);
   const icon = getPageIcon(pageRes);
 
+  const propertyConfigsById = new Map(gallery.propertyConfigs.map((config) => [config.notionPropertyId, config]));
   const fields: FieldData[] = Object.entries(pageRes.properties)
     .filter(([name]) => name !== titlePropertyName)
     .map(([name, value]) => {
@@ -38,8 +40,9 @@ export default async function ItemDetailPage({
       if (schema?.type === "select") options = schema.select.options.map((o) => o.name);
       if (schema?.type === "status") options = schema.status.options.map((o) => o.name);
       if (schema?.type === "multi_select") options = schema.multi_select.options.map((o) => o.name);
-      const propertyConfig = gallery.propertyConfigs.find((p) => p.notionPropertyName === name);
+      const propertyConfig = propertyConfigsById.get(value.id);
       return {
+        propertyId: value.id,
         name,
         type: value.type,
         value,
@@ -48,7 +51,15 @@ export default async function ItemDetailPage({
         options,
         displayConfig: propertyConfig ? parseDisplayConfig(propertyConfig.displayConfig) : {},
       };
+    })
+    .sort((a, b) => {
+      const aOrder = propertyConfigsById.get(a.propertyId)?.sortOrder ?? Number.MAX_SAFE_INTEGER;
+      const bOrder = propertyConfigsById.get(b.propertyId)?.sortOrder ?? Number.MAX_SAFE_INTEGER;
+      return aOrder - bOrder || a.name.localeCompare(b.name, "vi");
     });
+
+  const parsedLayout = parseDetailLayout(gallery.detailLayout, gallery.propertyConfigs);
+  if (parsedLayout.usedFallback) console.warn(`Gallery ${galleryId}: ${parsedLayout.reason}`);
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-12">
@@ -60,7 +71,7 @@ export default async function ItemDetailPage({
         <h1 className="text-2xl font-semibold text-stone-900">{title}</h1>
       </div>
 
-      <ItemDetail galleryId={galleryId} pageId={pageId} fields={fields} notionUrl={pageRes.url} />
+      <ItemDetail galleryId={galleryId} pageId={pageId} fields={fields} layout={parsedLayout.layout} notionUrl={pageRes.url} />
     </div>
   );
 }

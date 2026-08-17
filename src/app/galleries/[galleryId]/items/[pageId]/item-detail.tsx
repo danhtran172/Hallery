@@ -5,9 +5,11 @@ import type { PageObjectResponse } from "@notionhq/client";
 import { PropertyValue } from "@/components/property-value";
 import { getEditableValue } from "@/lib/notion-schema";
 import { formatDuration, type DisplayConfig } from "@/lib/display-config";
+import type { DetailLayout, DetailLayoutCell, DetailLayoutNode } from "@/lib/detail-layout";
 import { saveItem, type SaveItemState } from "./actions";
 
 export type FieldData = {
+  propertyId: string;
   name: string;
   type: string;
   value: PageObjectResponse["properties"][string];
@@ -21,11 +23,13 @@ export function ItemDetail({
   galleryId,
   pageId,
   fields,
+  layout,
   notionUrl,
 }: {
   galleryId: string;
   pageId: string;
   fields: FieldData[];
+  layout: DetailLayout;
   notionUrl: string;
 }) {
   const [editing, setEditing] = useState(false);
@@ -56,10 +60,8 @@ export function ItemDetail({
       </div>
 
       {editing ? (
-        <form action={formAction} className="flex flex-col gap-4 rounded-lg border border-stone-200 p-5">
-          {fields.map((field) => (
-            <EditField key={field.name} field={field} />
-          ))}
+        <form action={formAction} className="flex flex-col gap-4">
+          <DetailLayoutRenderer fields={fields} layout={layout} editing />
           {state.error && <p className="text-sm text-red-600">{state.error}</p>}
           <div className="flex gap-2">
             <button
@@ -72,19 +74,118 @@ export function ItemDetail({
           </div>
         </form>
       ) : (
-        <dl className="flex flex-col divide-y divide-stone-100 rounded-lg border border-stone-200">
-          {fields.map((field) => (
-            <div key={field.name} className="grid grid-cols-3 gap-3 px-4 py-3">
-              <dt className="text-sm text-stone-500">{field.name}</dt>
-              <dd className="col-span-2 text-sm text-stone-800">
-                <PropertyValue value={field.value} displayConfig={field.displayConfig} />
-              </dd>
-            </div>
-          ))}
-        </dl>
+        <DetailLayoutRenderer fields={fields} layout={layout} editing={false} />
       )}
     </div>
   );
+}
+
+/** Shared tree renderer for Card Detail and inline edit mode. */
+function DetailLayoutRenderer({
+  fields,
+  layout,
+  editing,
+}: {
+  fields: FieldData[];
+  layout: DetailLayout;
+  editing: boolean;
+}) {
+  const fieldsById = new Map(fields.map((field) => [field.propertyId, field]));
+  const placedFields = [...fieldsById.values()].filter((field) => containsProperty(layout.root, field.propertyId));
+
+  if (!placedFields.length) {
+    return (
+      <p className="rounded-lg border border-dashed border-stone-300 px-4 py-8 text-center text-sm text-stone-500">
+        Chưa có property nào trong layout này. Vào Cài đặt bố cục để thêm field vào Card Detail.
+      </p>
+    );
+  }
+
+  return <LayoutNodeView node={layout.root} fieldsById={fieldsById} editing={editing} />;
+}
+
+function LayoutNodeView({
+  node,
+  fieldsById,
+  editing,
+}: {
+  node: DetailLayoutNode;
+  fieldsById: Map<string, FieldData>;
+  editing: boolean;
+}) {
+  return (
+    <div className={`grid gap-4 ${layoutGridClass(node)}`}>
+      {node.cells.map((cell, index) => (
+        <div key={cell.id} className={cellPlacementClass(node.kind, index)}>
+          <LayoutCellView cell={cell} fieldsById={fieldsById} editing={editing} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LayoutCellView({
+  cell,
+  fieldsById,
+  editing,
+}: {
+  cell: DetailLayoutCell;
+  fieldsById: Map<string, FieldData>;
+  editing: boolean;
+}) {
+  if (cell.kind && cell.cells) {
+    return <LayoutNodeView node={cell as DetailLayoutNode} fieldsById={fieldsById} editing={editing} />;
+  }
+
+  const fields = cell.props.map((propertyId) => fieldsById.get(propertyId)).filter((field): field is FieldData => !!field);
+  if (!fields.length) return <div className="min-h-20 rounded-lg border border-dashed border-stone-200" />;
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-stone-200">
+      {fields.map((field, index) => (
+        <div key={field.propertyId} className={index ? "border-t border-stone-100" : ""}>
+          {editing ? (
+            <div className="p-4"><EditField field={field} /></div>
+          ) : (
+            <div className="grid grid-cols-3 gap-3 px-4 py-3">
+              <div className="text-sm text-stone-500">{field.name}</div>
+              <div className="col-span-2 text-sm text-stone-800">
+                <PropertyValue value={field.value} displayConfig={field.displayConfig} />
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function containsProperty(node: DetailLayoutNode, propertyId: string): boolean {
+  return node.cells.some((cell) =>
+    cell.props.includes(propertyId) || (cell.kind && cell.cells ? containsProperty(cell as DetailLayoutNode, propertyId) : false),
+  );
+}
+
+function layoutGridClass(node: DetailLayoutNode) {
+  const ratio = node.ratio?.join(":") ?? "50:50";
+  if (node.kind === "single") return "grid-cols-1";
+  if (node.kind === "stack") return "grid-cols-1";
+  const ratioClass: Record<string, string> = {
+    "50:50": "md:grid-cols-2",
+    "60:40": "md:grid-cols-[3fr_2fr]",
+    "40:60": "md:grid-cols-[2fr_3fr]",
+    "70:30": "md:grid-cols-[7fr_3fr]",
+    "30:70": "md:grid-cols-[3fr_7fr]",
+  };
+  return `grid-cols-1 ${ratioClass[ratio] ?? ratioClass["50:50"]}`;
+}
+
+function cellPlacementClass(kind: DetailLayoutNode["kind"], index: number) {
+  if (kind === "two-col-split-left") {
+    if (index === 2) return "md:col-start-2 md:row-span-2";
+  }
+  if (kind === "two-col-split-right" && index === 0) return "md:row-span-2";
+  return "";
 }
 
 function EditField({ field }: { field: FieldData }) {
