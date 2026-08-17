@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { isFullDataSource } from "@notionhq/client";
+import { isFullDataSource, isFullPage } from "@notionhq/client";
 import { db } from "@/lib/db";
 import { getNotionClient } from "@/lib/notion";
 import {
@@ -10,6 +10,7 @@ import {
   PROPERTY_PREFIX,
   listImagePropertyNames,
   parseGalleryConfig,
+  resolveCoverUrl,
 } from "@/lib/notion-cover";
 import { CoverShapePicker } from "./cover-shape-picker";
 import { saveCoverSettings } from "./aspect-actions";
@@ -32,6 +33,10 @@ export default async function CoverSettingsPage({
     aspect === "none"
       ? COVER_RATIOS.landscape[0]
       : (config.coverRatio ?? COVER_RATIOS[aspect][0]);
+
+  // One real cover from the gallery, so the preview shows how each ratio actually
+  // crops rather than an empty rectangle.
+  const sampleUrl = await findSampleCover(gallery.notionDataSourceId, source, notion);
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-12">
@@ -80,7 +85,7 @@ export default async function CoverSettingsPage({
 
         <section>
           <h2 className="mb-3 text-sm font-semibold text-stone-700">Khung ảnh trên card</h2>
-          <CoverShapePicker initialAspect={aspect} initialRatio={ratio} />
+          <CoverShapePicker initialAspect={aspect} initialRatio={ratio} sampleUrl={sampleUrl} />
         </section>
 
         <button
@@ -92,6 +97,38 @@ export default async function CoverSettingsPage({
       </form>
     </div>
   );
+}
+
+/** First page in the gallery that actually has an image for the chosen source. */
+async function findSampleCover(
+  dataSourceId: string,
+  source: string,
+  notion: ReturnType<typeof getNotionClient>,
+): Promise<string | null> {
+  try {
+    const res = await notion.dataSources.query({ data_source_id: dataSourceId, page_size: 20 });
+    const pages = res.results.filter(isFullPage);
+
+    if (source === CONTENT_IMAGE) {
+      // Reuse whatever the Gallery has already resolved; never crawl blocks just for a preview.
+      const cached = await db.pageImageCache.findFirst({
+        where: {
+          notionPageId: { in: pages.map((p) => p.id) },
+          imageUrl: { not: null },
+          expiresAt: { gt: new Date() },
+        },
+      });
+      return cached?.imageUrl ?? null;
+    }
+
+    for (const page of pages) {
+      const url = resolveCoverUrl(page, source);
+      if (url) return url;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function Radio({
