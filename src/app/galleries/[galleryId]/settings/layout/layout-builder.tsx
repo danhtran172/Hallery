@@ -17,6 +17,7 @@ import {
   applyLayoutTemplate,
   layoutCellCount,
   layoutUsesColumns,
+  MAX_STACK_LAYOUT_CELLS,
   type DetailLayout,
   type DetailLayoutCell,
   type DetailLayoutNode,
@@ -135,6 +136,10 @@ export function LayoutBuilder({
     updateLayout({ ...layout, root: updateNestedRatio(layout.root, cellId, ratio) });
   }
 
+  function handleAddSiblingLayout(containerId: string) {
+    updateLayout({ ...layout, root: addSiblingLayout(layout.root, containerId) });
+  }
+
   function resetLayout() {
     if (dirty && !window.confirm("Bỏ toàn bộ thay đổi bố cục chưa lưu?")) return;
     setLayout(initialLayout);
@@ -181,6 +186,7 @@ export function LayoutBuilder({
               onSettings={setSelectedPropertyId}
               onNestedKindChange={handleNestedKindChange}
               onNestedRatioChange={handleNestedRatioChange}
+              onAddSiblingLayout={handleAddSiblingLayout}
             />
           </section>
         </div>
@@ -334,6 +340,8 @@ function LayoutCanvas({
   onSettings,
   onNestedKindChange,
   onNestedRatioChange,
+  onAddSiblingLayout,
+  containerId,
 }: {
   node: DetailLayoutNode;
   depth: number;
@@ -342,45 +350,63 @@ function LayoutCanvas({
   onSettings: (propertyId: string) => void;
   onNestedKindChange: (cellId: string, kind: LayoutKind | "none") => void;
   onNestedRatioChange: (cellId: string, ratio: LayoutRatio) => void;
+  onAddSiblingLayout: (containerId: string) => void;
+  containerId?: string;
 }) {
+  const canAddSiblingLayout = node.kind === "stack" && depth === 1 && !!containerId;
   return (
-    <div className={`grid gap-3 ${layoutGridClass(node)}`}>
-      {node.cells.map((cell, index) => (
-        <div key={cell.id} className={cellPlacementClass(node.kind, index)}>
-          {cell.kind && cell.cells ? (
-            <div className="rounded-lg border border-stone-300 bg-white p-3">
-              <div className="mb-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_8rem] xl:items-end">
-                <LayoutKindPicker
-                  compact
-                  includeNone
-                  label="Chia ô"
-                  value={cell.kind}
-                  onChange={(kind) => onNestedKindChange(cell.id, kind)}
+    <div className={canAddSiblingLayout ? "flex flex-col gap-3" : undefined}>
+      <div className={`grid gap-3 ${layoutGridClass(node)}`}>
+        {node.cells.map((cell, index) => (
+          <div key={cell.id} className={cellPlacementClass(node.kind, index)}>
+            {cell.kind && cell.cells ? (
+              <div className="rounded-lg border border-stone-300 bg-white p-3">
+                <div className="mb-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_8rem] xl:items-end">
+                  <LayoutKindPicker
+                    compact
+                    includeNone
+                    label="Chia ô"
+                    value={cell.kind}
+                    onChange={(kind) => onNestedKindChange(cell.id, kind)}
+                  />
+                  {layoutUsesColumns(cell.kind) && <RatioSelect value={cell.ratio ?? [50, 50]} onChange={(ratio) => onNestedRatioChange(cell.id, ratio)} />}
+                </div>
+                <LayoutCanvas
+                  node={cell as DetailLayoutNode}
+                  depth={depth + 1}
+                  containerId={cell.id}
+                  properties={properties}
+                  onRemove={onRemove}
+                  onSettings={onSettings}
+                  onNestedKindChange={onNestedKindChange}
+                  onNestedRatioChange={onNestedRatioChange}
+                  onAddSiblingLayout={onAddSiblingLayout}
                 />
-                {layoutUsesColumns(cell.kind) && <RatioSelect value={cell.ratio ?? [50, 50]} onChange={(ratio) => onNestedRatioChange(cell.id, ratio)} />}
               </div>
-              <LayoutCanvas
-                node={cell as DetailLayoutNode}
-                depth={depth + 1}
+            ) : (
+              <CanvasCell
+                cell={cell}
+                depth={depth}
+                isStackSection={node.kind === "stack" && depth === 1}
                 properties={properties}
                 onRemove={onRemove}
                 onSettings={onSettings}
                 onNestedKindChange={onNestedKindChange}
-                onNestedRatioChange={onNestedRatioChange}
               />
-            </div>
-          ) : (
-            <CanvasCell
-              cell={cell}
-              depth={depth}
-              properties={properties}
-              onRemove={onRemove}
-              onSettings={onSettings}
-              onNestedKindChange={onNestedKindChange}
-            />
-          )}
-        </div>
-      ))}
+            )}
+          </div>
+        ))}
+      </div>
+      {canAddSiblingLayout && (
+        <button
+          type="button"
+          onClick={() => onAddSiblingLayout(containerId)}
+          disabled={node.cells.length >= MAX_STACK_LAYOUT_CELLS}
+          className="self-start rounded-md border border-dashed border-emerald-600 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-stone-300 disabled:text-stone-400"
+        >
+          + Thêm layout cùng lớp
+        </button>
+      )}
     </div>
   );
 }
@@ -388,6 +414,7 @@ function LayoutCanvas({
 function CanvasCell({
   cell,
   depth,
+  isStackSection,
   properties,
   onRemove,
   onSettings,
@@ -395,6 +422,7 @@ function CanvasCell({
 }: {
   cell: DetailLayoutCell;
   depth: number;
+  isStackSection: boolean;
   properties: BuilderProperty[];
   onRemove: (propertyId: string) => void;
   onSettings: (propertyId: string) => void;
@@ -404,13 +432,13 @@ function CanvasCell({
   const fields = cell.props.map((propertyId) => properties.find((property) => property.notionPropertyId === propertyId));
   return (
     <div ref={setNodeRef} className={`min-h-32 rounded-lg border p-3 ${isOver ? "border-emerald-500 bg-emerald-50" : "border-stone-300 bg-white"}`}>
-      {depth === 0 ? (
+      {depth === 0 || isStackSection ? (
         <div className="mb-3">
           <LayoutKindPicker
             compact
-            label="Chia nhỏ ô này"
+            label={isStackSection ? "Kiểu layout" : "Chia nhỏ ô này"}
             value="none"
-            options={ROOT_KIND_OPTIONS.filter((option) => option.value !== "single")}
+            options={isStackSection ? ROOT_KIND_OPTIONS : ROOT_KIND_OPTIONS.filter((option) => option.value !== "single")}
             onChange={(kind) => {
               if (kind !== "none") onNestedKindChange(cell.id, kind);
             }}
@@ -421,7 +449,7 @@ function CanvasCell({
           <button type="button" disabled className="self-start rounded border border-stone-200 px-2 py-1 text-[11px] text-stone-400">
             Chia tiếp
           </button>
-          <p className="text-[11px] text-stone-400">Không thể chia tiếp: layout tối đa 2 tầng.</p>
+          <p className="text-[11px] text-stone-400">Không thể chia tiếp: đây là layer cuối.</p>
         </div>
       )}
       <div className="flex flex-col gap-2">
@@ -490,38 +518,66 @@ function LayoutKindPicker({
   options?: { value: LayoutKind; label: string }[];
 }) {
   const choices = includeNone ? [{ value: "none" as const, label: "Gộp thành một ô" }, ...options] : options;
+  const selectedChoice = choices.find((choice) => choice.value === value) ?? choices[0]!;
+  const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <fieldset>
+    <fieldset className="relative">
       <legend className={`mb-2 font-medium text-stone-500 ${compact ? "text-[11px] uppercase tracking-wide" : "text-xs"}`}>{label}</legend>
-      <div className={`grid gap-2 ${compact ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-2 sm:grid-cols-3 xl:grid-cols-5"}`}>
-        {choices.map((option) => {
-          const selected = option.value === value;
-          return (
-            <button
-              key={option.value}
-              type="button"
-              aria-pressed={selected}
-              onClick={() => onChange(option.value)}
-              className={`min-h-20 rounded-md border p-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 ${
-                selected
-                  ? "border-emerald-700 bg-emerald-50 text-emerald-950"
-                  : "border-stone-300 bg-white text-stone-700 hover:border-stone-500 hover:bg-stone-50"
-              }`}
-            >
-              <LayoutPreview kind={option.value} selected={selected} />
-              <span className={`mt-2 block text-xs font-medium leading-tight ${compact ? "text-[11px]" : ""}`}>{option.label}</span>
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((open) => !open)}
+        className={`flex min-h-11 w-full items-center gap-2 rounded-md border bg-white px-2 text-left text-stone-800 transition-colors hover:border-stone-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 ${
+          isOpen ? "border-emerald-700" : "border-stone-300"
+        }`}
+      >
+        <LayoutPreview compact kind={selectedChoice.value} selected />
+        <span className={`min-w-0 flex-1 truncate font-medium ${compact ? "text-xs" : "text-sm"}`}>{selectedChoice.label}</span>
+        <span aria-hidden className="text-stone-400">⌄</span>
+      </button>
+      {isOpen && (
+        <div role="dialog" aria-label={`Chọn ${label}`} className="absolute z-30 mt-2 w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-stone-300 bg-white p-3 shadow-lg">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="text-sm font-medium text-stone-900">Chọn {label.toLocaleLowerCase("vi")}</p>
+            <button type="button" onClick={() => setIsOpen(false)} className="rounded px-2 py-1 text-xs text-stone-500 hover:bg-stone-100 hover:text-stone-800">
+              Đóng
             </button>
-          );
-        })}
-      </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {choices.map((option) => {
+              const selected = option.value === value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => {
+                    onChange(option.value);
+                    setIsOpen(false);
+                  }}
+                  className={`min-h-20 rounded-md border p-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 ${
+                    selected
+                      ? "border-emerald-700 bg-emerald-50 text-emerald-950"
+                      : "border-stone-300 bg-white text-stone-700 hover:border-stone-500 hover:bg-stone-50"
+                  }`}
+                >
+                  <LayoutPreview kind={option.value} selected={selected} />
+                  <span className="mt-2 block text-xs font-medium leading-tight">{option.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </fieldset>
   );
 }
 
-function LayoutPreview({ kind, selected }: { kind: LayoutKind | "none"; selected: boolean }) {
+function LayoutPreview({ kind, selected, compact = false }: { kind: LayoutKind | "none"; selected: boolean; compact?: boolean }) {
   const cellClass = `rounded-[2px] border ${selected ? "border-emerald-400 bg-emerald-100" : "border-stone-300 bg-stone-100"}`;
-  const frameClass = "grid h-9 gap-1 rounded-sm bg-stone-200/70 p-1";
+  const frameClass = `grid shrink-0 gap-1 rounded-sm bg-stone-200/70 p-1 ${compact ? "h-7 w-12" : "h-9"}`;
 
   if (kind === "single" || kind === "none") {
     return <span aria-hidden className={frameClass}><span className={cellClass} /></span>;
@@ -583,34 +639,65 @@ function reshapeRoot(root: DetailLayoutNode, kind: LayoutKind): { node: DetailLa
 
 function updateNestedKind(root: DetailLayoutNode, targetId: string, kind: LayoutKind | "none"): { node: DetailLayoutNode; consolidated: boolean } {
   let consolidated = false;
-  const node = {
-    ...root,
-    cells: root.cells.map((cell) => {
-      if (cell.id !== targetId) return cell;
-      const properties = propertiesInCell(cell);
-      if (kind === "none") return { id: cell.id, props: properties };
-      const priorNode: DetailLayoutNode = cell.kind && cell.cells
-        ? { kind: cell.kind, ...(cell.ratio ? { ratio: cell.ratio } : {}), cells: cell.cells }
-        : { kind: "single", cells: [{ id: cell.id, props: cell.props }] };
-      const reshaped = reshapeRoot(priorNode, kind);
-      consolidated = reshaped.consolidated;
-      return {
-        id: cell.id,
-        props: [],
-        kind: reshaped.node.kind,
-        ...(reshaped.node.ratio ? { ratio: reshaped.node.ratio } : {}),
-        cells: reshaped.node.cells,
-      };
+  const visit = (node: DetailLayoutNode): DetailLayoutNode => ({
+    ...node,
+    cells: node.cells.map((cell) => {
+      if (cell.id === targetId) {
+        const properties = propertiesInCell(cell);
+        if (kind === "none") return { id: cell.id, props: properties };
+        const priorNode: DetailLayoutNode = cell.kind && cell.cells
+          ? { kind: cell.kind, ...(cell.ratio ? { ratio: cell.ratio } : {}), cells: cell.cells }
+          : { kind: "single", cells: [{ id: cell.id, props: cell.props }] };
+        const reshaped = reshapeRoot(priorNode, kind);
+        consolidated = reshaped.consolidated;
+        return {
+          id: cell.id,
+          props: [],
+          kind: reshaped.node.kind,
+          ...(reshaped.node.ratio ? { ratio: reshaped.node.ratio } : {}),
+          cells: reshaped.node.cells,
+        };
+      }
+      if (cell.kind && cell.cells) {
+        const nested = visit(cell as DetailLayoutNode);
+        return { ...cell, cells: nested.cells };
+      }
+      return cell;
     }),
-  };
-  return { node, consolidated };
+  });
+  return { node: visit(root), consolidated };
 }
 
 function updateNestedRatio(root: DetailLayoutNode, targetId: string, ratio: LayoutRatio): DetailLayoutNode {
-  return {
-    ...root,
-    cells: root.cells.map((cell) => (cell.id === targetId && cell.kind ? { ...cell, ratio } : cell)),
-  };
+  const visit = (node: DetailLayoutNode): DetailLayoutNode => ({
+    ...node,
+    cells: node.cells.map((cell) => {
+      if (cell.id === targetId && cell.kind) return { ...cell, ratio };
+      if (cell.kind && cell.cells) {
+        const nested = visit(cell as DetailLayoutNode);
+        return { ...cell, cells: nested.cells };
+      }
+      return cell;
+    }),
+  });
+  return visit(root);
+}
+
+function addSiblingLayout(root: DetailLayoutNode, targetId: string): DetailLayoutNode {
+  const visit = (node: DetailLayoutNode): DetailLayoutNode => ({
+    ...node,
+    cells: node.cells.map((cell) => {
+      if (cell.id === targetId && cell.kind === "stack" && cell.cells && cell.cells.length < MAX_STACK_LAYOUT_CELLS) {
+        return { ...cell, cells: [...cell.cells, { id: `section-${crypto.randomUUID()}`, props: [] }] };
+      }
+      if (cell.kind && cell.cells) {
+        const nested = visit(cell as DetailLayoutNode);
+        return { ...cell, cells: nested.cells };
+      }
+      return cell;
+    }),
+  });
+  return visit(root);
 }
 
 function moveProperty(layout: DetailLayout, propertyId: string, targetCellId: string | null, beforeId?: string | null): DetailLayout {
