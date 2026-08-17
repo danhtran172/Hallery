@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { getNotionClient } from "@/lib/notion";
 import { getPageIcon, getPageTitle, getTitlePropertyName } from "@/lib/notion-schema";
 import { PropertyValue } from "@/components/property-value";
+import { parseDisplayConfig } from "@/lib/display-config";
 import { isFullDataSource, isFullPage } from "@notionhq/client";
 
 export default async function GalleryPage({ params }: PageProps<"/galleries/[galleryId]">) {
@@ -39,8 +40,14 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
             ← Tất cả gallery
           </Link>
           <h1 className="mt-1 text-2xl font-semibold text-stone-900">{gallery.name}</h1>
-          <p className="text-sm text-stone-500">{pages.length} item · đọc-only (Phase 0)</p>
+          <p className="text-sm text-stone-500">{pages.length} item</p>
         </div>
+        <Link
+          href={`/galleries/${galleryId}/settings/display`}
+          className="text-xs text-stone-500 hover:underline"
+        >
+          Cài đặt hiển thị
+        </Link>
       </div>
 
       {pages.length === 0 ? (
@@ -53,28 +60,35 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
             const title = getPageTitle(page, titlePropertyName);
             const icon = getPageIcon(page);
             return (
-              <a
+              <div
                 key={page.id}
-                href={page.url}
-                target="_blank"
-                rel="noreferrer"
-                className="flex flex-col gap-2 rounded-lg border border-stone-200 p-4 hover:border-emerald-600 hover:shadow-sm"
+                className="relative flex flex-col gap-2 rounded-lg border border-stone-200 p-4 hover:border-emerald-600 hover:shadow-sm"
               >
-                <div className="flex items-center gap-2">
-                  {icon && <span className="text-lg leading-none">{icon.length <= 4 ? icon : "📄"}</span>}
-                  <span className="font-medium text-stone-900">{title}</span>
+                <Link
+                  href={`/galleries/${galleryId}/items/${page.id}`}
+                  aria-label={title}
+                  className="absolute inset-0"
+                />
+                <div className="pointer-events-none relative flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    {icon && <span className="text-lg leading-none">{icon.length <= 4 ? icon : "📄"}</span>}
+                    <span className="font-medium text-stone-900">{title}</span>
+                  </div>
+                  <dl className="flex flex-col gap-1 text-sm text-stone-600">
+                    {visibleProps.map((cfg) => (
+                      <div key={cfg.id} className="flex items-baseline gap-2">
+                        <dt className="w-24 shrink-0 truncate text-xs text-stone-400">{cfg.notionPropertyName}</dt>
+                        <dd className="min-w-0 flex-1 [&_a]:pointer-events-auto">
+                          <PropertyValue
+                            value={page.properties[cfg.notionPropertyName]}
+                            displayConfig={parseDisplayConfig(cfg.displayConfig)}
+                          />
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
                 </div>
-                <dl className="flex flex-col gap-1 text-sm text-stone-600">
-                  {visibleProps.map((cfg) => (
-                    <div key={cfg.id} className="flex items-baseline gap-2">
-                      <dt className="w-24 shrink-0 truncate text-xs text-stone-400">{cfg.notionPropertyName}</dt>
-                      <dd className="min-w-0 flex-1">
-                        <PropertyValue value={page.properties[cfg.notionPropertyName]} />
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              </a>
+              </div>
             );
           })}
         </div>

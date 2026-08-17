@@ -1,9 +1,11 @@
 import type { PageObjectResponse } from "@notionhq/client";
+import { formatDateByGranularity, formatDuration, type DisplayConfig } from "@/lib/display-config";
 
 type PropertyValue = PageObjectResponse["properties"][string];
 
-/** Phase 0/1 default renderer: one sensible rendering per Notion property type, no custom display config yet. */
-export function PropertyValue({ value }: { value: PropertyValue }) {
+/** Default renderer per Notion property type, customized by an optional Hallery display config. */
+export function PropertyValue({ value, displayConfig }: { value: PropertyValue; displayConfig?: DisplayConfig }) {
+  const cfg = displayConfig ?? {};
   switch (value.type) {
     case "title":
       return null; // rendered separately as the card heading
@@ -12,17 +14,25 @@ export function PropertyValue({ value }: { value: PropertyValue }) {
       return text ? <span>{text}</span> : <Empty />;
     }
     case "number":
-      return value.number === null ? <Empty /> : <span>{value.number}</span>;
+      return <NumberValue value={value.number} cfg={cfg} />;
     case "select":
-      return value.select ? <Pill color={value.select.color}>{value.select.name}</Pill> : <Empty />;
+      return value.select ? (
+        <Pill color={value.select.color}>{withAffixes(value.select.name, cfg)}</Pill>
+      ) : (
+        <Empty />
+      );
     case "status":
-      return value.status ? <Pill color={value.status.color}>{value.status.name}</Pill> : <Empty />;
+      return value.status ? (
+        <Pill color={value.status.color}>{withAffixes(value.status.name, cfg)}</Pill>
+      ) : (
+        <Empty />
+      );
     case "multi_select":
       return value.multi_select.length ? (
         <div className="flex flex-wrap gap-1">
           {value.multi_select.map((opt) => (
             <Pill key={opt.id} color={opt.color}>
-              {opt.name}
+              {withAffixes(opt.name, cfg)}
             </Pill>
           ))}
         </div>
@@ -30,17 +40,11 @@ export function PropertyValue({ value }: { value: PropertyValue }) {
         <Empty />
       );
     case "date":
-      return value.date ? <span>{formatDate(value.date.start)}</span> : <Empty />;
+      return value.date ? <span>{formatDateByGranularity(value.date.start, cfg.kind)}</span> : <Empty />;
     case "checkbox":
       return <span>{value.checkbox ? "✓" : "—"}</span>;
     case "url":
-      return value.url ? (
-        <a href={value.url} target="_blank" rel="noreferrer" className="text-emerald-700 underline">
-          {value.url}
-        </a>
-      ) : (
-        <Empty />
-      );
+      return <UrlValue url={value.url} cfg={cfg} />;
     case "email":
       return value.email ? <span>{value.email}</span> : <Empty />;
     case "phone_number":
@@ -56,9 +60,9 @@ export function PropertyValue({ value }: { value: PropertyValue }) {
     case "relation":
       return value.relation.length ? <span>{value.relation.length} liên kết</span> : <Empty />;
     case "rollup":
-      return <RollupValue rollup={value.rollup} />;
+      return <RollupValue rollup={value.rollup} cfg={cfg} />;
     case "formula":
-      return <FormulaValue formula={value.formula} />;
+      return <FormulaValue formula={value.formula} cfg={cfg} />;
     case "created_time":
       return <span>{formatDate(value.created_time)}</span>;
     case "last_edited_time":
@@ -79,14 +83,53 @@ export function PropertyValue({ value }: { value: PropertyValue }) {
   }
 }
 
-function RollupValue({ rollup }: { rollup: { type: string; [key: string]: unknown } }) {
-  if (rollup.type === "number") {
-    const n = rollup.number as number | null;
-    return n === null || n === undefined ? <Empty /> : <span>{n}</span>;
+function withAffixes(text: string, cfg: DisplayConfig) {
+  return `${cfg.prefix ?? ""}${text}${cfg.suffix ?? ""}`;
+}
+
+function NumberValue({ value, cfg }: { value: number | null; cfg: DisplayConfig }) {
+  if (value === null) return <Empty />;
+  if (cfg.kind === "rate") {
+    const max = cfg.max && cfg.max > 0 ? cfg.max : 5;
+    const filled = Math.max(0, Math.min(max, Math.round(value)));
+    return (
+      <span aria-label={`${filled}/${max}`} className="text-amber-500">
+        {"★".repeat(filled)}
+        <span className="text-stone-300">{"★".repeat(max - filled)}</span>
+      </span>
+    );
   }
+  if (cfg.kind === "duration") return <span>{formatDuration(value)}</span>;
+  if (cfg.kind === "with_text") return <span>{withAffixes(String(value), cfg)}</span>;
+  return <span>{value}</span>;
+}
+
+function UrlValue({ url, cfg }: { url: string | null; cfg: DisplayConfig }) {
+  if (!url) return <Empty />;
+  if (cfg.kind === "button") {
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-block rounded-md bg-emerald-700 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-800"
+      >
+        {cfg.label || url}
+      </a>
+    );
+  }
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="text-emerald-700 underline">
+      {url}
+    </a>
+  );
+}
+
+function RollupValue({ rollup, cfg }: { rollup: { type: string; [key: string]: unknown }; cfg: DisplayConfig }) {
+  if (rollup.type === "number") return <NumberValue value={(rollup.number as number | null) ?? null} cfg={cfg} />;
   if (rollup.type === "date") {
     const d = rollup.date as { start: string } | null;
-    return d ? <span>{formatDate(d.start)}</span> : <Empty />;
+    return d ? <span>{formatDateByGranularity(d.start, cfg.kind)}</span> : <Empty />;
   }
   if (rollup.type === "array") {
     const arr = rollup.array as Array<{ type: string; [key: string]: unknown }>;
@@ -95,13 +138,13 @@ function RollupValue({ rollup }: { rollup: { type: string; [key: string]: unknow
   return <Empty />;
 }
 
-function FormulaValue({ formula }: { formula: { type: string; [key: string]: unknown } }) {
+function FormulaValue({ formula, cfg }: { formula: { type: string; [key: string]: unknown }; cfg: DisplayConfig }) {
   if (formula.type === "string") return formula.string ? <span>{formula.string as string}</span> : <Empty />;
-  if (formula.type === "number") return formula.number === null ? <Empty /> : <span>{formula.number as number}</span>;
+  if (formula.type === "number") return <NumberValue value={(formula.number as number | null) ?? null} cfg={cfg} />;
   if (formula.type === "boolean") return <span>{formula.boolean ? "✓" : "—"}</span>;
   if (formula.type === "date") {
     const d = formula.date as { start: string } | null;
-    return d ? <span>{formatDate(d.start)}</span> : <Empty />;
+    return d ? <span>{formatDateByGranularity(d.start, cfg.kind)}</span> : <Empty />;
   }
   return <Empty />;
 }
