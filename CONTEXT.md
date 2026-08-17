@@ -146,14 +146,15 @@ CoverPosition   → galleryId + notionPageId, posX, posY
 
 Thứ tự dưới đây là thứ tự **phụ thuộc thật**, đảo là phải làm lại.
 
-**Phase 2 — Layout Builder 2 lớp**
+**Phase 2 — Layout Builder 2 lớp** · [yêu cầu chi tiết](docs/phase-2-3.md#phase-2--layout-builder-2-lớp)
 Kéo-thả layout tổng (2 cột / 1 cột / 2-1 trên-dưới), lồng layout con vào từng ô, kéo prop vào ô.
-Lưu JSON có version hoá để nhân bản thành template.
+Lưu JSON có version hoá để nhân bản thành template. Detail và Edit dùng chung một layout.
 
-**Phase 3 — Formula & Category**
-Formula tự nhận kiểu hiển thị theo output cuối (formula ra number thì quản như number).
-Category = **chỉ đọc Rollup có sẵn**, không tự truy vết Relation (tránh N+1). Field chưa có Rollup thì hướng dẫn
-người dùng tự tạo trong Notion — Hallery không tạo hộ.
+**Phase 3 — Formula & Category** · [yêu cầu chi tiết](docs/phase-2-3.md#phase-3--formula--category)
+Formula tự nhận kiểu hiển thị theo output cuối (formula ra number thì quản như number) — lưu ý schema Notion
+**không** cho biết kiểu đầu ra, phải đọc giá trị một page mẫu.
+Category dùng **trục select/multi-select trước** (0 API call, chạy được ngay trên DB thật) rồi mới tới trục Relation
++ Rollup. Không tự truy vết Relation để tránh N+1; field chưa có Rollup thì hướng dẫn người dùng tự tạo trong Notion.
 
 **Phase 4 — Streak & Native button**
 Streak tự tính từ **bảng phụ của Hallery** (Notion API không có lịch sử thay đổi property, không suy ngược được).
