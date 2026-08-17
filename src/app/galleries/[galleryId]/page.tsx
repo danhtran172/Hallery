@@ -5,6 +5,8 @@ import { getNotionClient } from "@/lib/notion";
 import { getPageIcon, getPageTitle, getTitlePropertyName } from "@/lib/notion-schema";
 import { PropertyValue } from "@/components/property-value";
 import { parseDisplayConfig } from "@/lib/display-config";
+import { CardCover } from "@/components/card-cover";
+import { COVER_ASPECT_CLASS, CONTENT_IMAGE, parseGalleryConfig, resolveCoverUrl } from "@/lib/notion-cover";
 import { isFullDataSource, isFullPage } from "@notionhq/client";
 
 export default async function GalleryPage({ params }: PageProps<"/galleries/[galleryId]">) {
@@ -32,6 +34,27 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
     .filter((p) => p.notionPropertyType !== "title" && !p.hidden)
     .slice(0, 4);
 
+  const galleryConfig = parseGalleryConfig(gallery.displayConfig);
+  const coverClass = COVER_ASPECT_CLASS[galleryConfig.coverAspect ?? "landscape"];
+  const coverSource = galleryConfig.coverSource;
+
+  const positions = new Map(
+    (await db.coverPosition.findMany({ where: { galleryId } })).map((p) => [p.notionPageId, p]),
+  );
+
+  // Content images already resolved on a previous visit are still known here, so paint
+  // them server-side and leave the client to chase only the ones we've never seen.
+  const cachedImages =
+    coverSource === CONTENT_IMAGE
+      ? new Map(
+          (
+            await db.pageImageCache.findMany({
+              where: { notionPageId: { in: pages.map((p) => p.id) }, expiresAt: { gt: new Date() } },
+            })
+          ).map((c) => [c.notionPageId, c.imageUrl]),
+        )
+      : new Map<string, string | null>();
+
   return (
     <div className="mx-auto max-w-5xl px-6 py-12">
       <div className="mb-8 flex items-center justify-between">
@@ -42,12 +65,20 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
           <h1 className="mt-1 text-2xl font-semibold text-stone-900">{gallery.name}</h1>
           <p className="text-sm text-stone-500">{pages.length} item</p>
         </div>
-        <Link
-          href={`/galleries/${galleryId}/settings/display`}
-          className="text-xs text-stone-500 hover:underline"
-        >
-          Cài đặt hiển thị
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link
+            href={`/galleries/${galleryId}/settings/cover`}
+            className="text-xs text-stone-500 hover:underline"
+          >
+            Ảnh bìa
+          </Link>
+          <Link
+            href={`/galleries/${galleryId}/settings/display`}
+            className="text-xs text-stone-500 hover:underline"
+          >
+            Cài đặt hiển thị
+          </Link>
+        </div>
       </div>
 
       {pages.length === 0 ? (
@@ -59,17 +90,31 @@ export default async function GalleryPage({ params }: PageProps<"/galleries/[gal
           {pages.map((page) => {
             const title = getPageTitle(page, titlePropertyName);
             const icon = getPageIcon(page);
+            const coverUrl = coverClass
+              ? (resolveCoverUrl(page, coverSource) ?? cachedImages.get(page.id) ?? null)
+              : null;
             return (
               <div
                 key={page.id}
-                className="relative flex flex-col gap-2 rounded-lg border border-stone-200 p-4 hover:border-emerald-600 hover:shadow-sm"
+                className="group relative flex flex-col overflow-hidden rounded-lg border border-stone-200 hover:border-emerald-600 hover:shadow-sm"
               >
                 <Link
                   href={`/galleries/${galleryId}/items/${page.id}`}
                   aria-label={title}
-                  className="absolute inset-0"
+                  className="absolute inset-0 z-10"
                 />
-                <div className="pointer-events-none relative flex flex-col gap-2">
+                {coverClass && (
+                  <CardCover
+                    aspectClass={coverClass}
+                    url={coverUrl}
+                    galleryId={galleryId}
+                    pageId={page.id}
+                    lazy={coverSource === CONTENT_IMAGE}
+                    initialX={positions.get(page.id)?.posX ?? 50}
+                    initialY={positions.get(page.id)?.posY ?? 50}
+                  />
+                )}
+                <div className="pointer-events-none relative flex flex-col gap-2 p-4">
                   <div className="flex items-center gap-2">
                     {icon && <span className="text-lg leading-none">{icon.length <= 4 ? icon : "📄"}</span>}
                     <span className="font-medium text-stone-900">{title}</span>

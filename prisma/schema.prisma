@@ -37,6 +37,7 @@ model Gallery {
   icon               String?
   description        String?
   sortOrder          Int       @default(0)
+  displayConfig      String    @default("{}")
 
   parentGalleryId    String?
   parentGallery      Gallery?  @relation("SubGalleries", fields: [parentGalleryId], references: [id])
@@ -47,6 +48,29 @@ model Gallery {
   updatedAt          DateTime  @updatedAt
 
   @@unique([workspaceId, notionDataSourceId])
+}
+
+/// Remembers the first content image found in a Notion page, so the Gallery doesn't
+/// re-crawl every page's blocks on each render. Notion's file URLs are signed and
+/// short-lived, hence expiresAt — a miss just costs one API call to refresh.
+model PageImageCache {
+  notionPageId String   @id
+  imageUrl     String?
+  expiresAt    DateTime
+  checkedAt    DateTime @updatedAt
+}
+
+/// Where a card's cover image sits inside its frame, nudged by Ctrl-dragging the card.
+/// Percentages, matching CSS background-position.
+model CoverPosition {
+  id           String   @id @default(cuid())
+  galleryId    String
+  notionPageId String
+  posX         Float    @default(50)
+  posY         Float    @default(50)
+  updatedAt    DateTime @updatedAt
+
+  @@unique([galleryId, notionPageId])
 }
 
 model PropertyConfig {
