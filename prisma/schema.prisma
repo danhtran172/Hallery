@@ -59,6 +59,10 @@ model PageImageCache {
   notionPageId String   @id
   imageUrl     String?
   expiresAt    DateTime
+  /// Filename of the downloaded copy under the cover cache directory. Notion's own URLs
+  /// are signed and die within the hour, so caching one buys less than a day; a local
+  /// copy is what actually keeps a cover on screen without re-asking Notion.
+  storedFile   String?
   checkedAt    DateTime @updatedAt
 }
 

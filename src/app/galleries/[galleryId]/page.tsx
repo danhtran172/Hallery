@@ -17,6 +17,7 @@ import { isFullDataSource, isFullPage } from "@notionhq/client";
 import { syncPropertyConfigs, syncResolvedTypes } from "@/lib/property-config-sync";
 import { CategoryBar } from "@/components/category-bar";
 import { bucketPages, filterPagesByCategory } from "@/lib/category";
+import { storedCoverUrl } from "@/lib/cover-store";
 
 const GALLERY_GRID_COLUMNS: Record<number, string> = {
   1: "lg:grid-cols-1",
@@ -82,16 +83,20 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
     (await db.coverPosition.findMany({ where: { galleryId } })).map((p) => [p.notionPageId, p]),
   );
 
-  // Content images already resolved on a previous visit are still known here, so paint
-  // them server-side and leave the client to chase only the ones we've never seen.
+  // Content images already resolved on a previous visit are painted server-side, leaving
+  // the client to chase only the ones we've never seen. Pages we hold a local copy of are
+  // served from Hallery, so they keep working long after Notion's signed URL has expired.
   const cachedImages =
     coverSource === CONTENT_IMAGE
       ? new Map(
           (
             await db.pageImageCache.findMany({
-              where: { notionPageId: { in: pages.map((p) => p.id) }, expiresAt: { gt: new Date() } },
+              where: {
+                notionPageId: { in: pages.map((p) => p.id) },
+                OR: [{ storedFile: { not: null } }, { expiresAt: { gt: new Date() } }],
+              },
             })
-          ).map((c) => [c.notionPageId, c.imageUrl]),
+          ).map((c) => [c.notionPageId, c.storedFile ? storedCoverUrl(c.notionPageId) : c.imageUrl]),
         )
       : new Map<string, string | null>();
 
