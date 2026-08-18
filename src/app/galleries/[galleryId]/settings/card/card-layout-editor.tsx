@@ -24,6 +24,7 @@ import {
   canExtend,
   canMerge,
   cardKindOf,
+  detailLayoutFrom,
   makeGrid,
   maxRowsBesideCover,
   mergeBox,
@@ -39,15 +40,18 @@ import {
   type GridBox,
   type MergeDirection,
 } from "@/lib/card-layout";
-import { COVER_RATIOS } from "@/lib/notion-cover";
-import type { DisplayConfig } from "@/lib/display-config";
+import { COVER_RATIOS, MAX_DETAIL_WIDTH, MIN_DETAIL_WIDTH } from "@/lib/notion-cover";
+import { parseDisplayConfig, type DisplayConfig } from "@/lib/display-config";
 import { saveCardLayout, type SaveCardLayoutState } from "./actions";
 import { ArrangementGlyph, RatioGlyph } from "./glyphs";
 import { PropertyPanel, type PanelProperty } from "./property-panel";
 import { LayoutPanel } from "./layout-panel";
 
-export type EditableCardProperty = PanelProperty;
+export type EditableCardProperty = PanelProperty & { detailDisplayConfig: string };
 export type CoverShape = { aspect: CoverOrientation; ratio: string };
+
+/** The two things this screen arranges. They share a format and an editor, nothing else. */
+export type ViewMode = "gallery" | "detail";
 
 const ORIENTATIONS: { value: CoverOrientation; label: string }[] = [
   { value: "landscape", label: "Ngang" },
@@ -60,6 +64,8 @@ export function CardLayoutEditor({
   properties,
   initialShape,
   initialLayout,
+  initialDetailLayout,
+  initialDetailWidth,
   previewTitle,
   previewValues,
   previewCoverUrl,
@@ -68,18 +74,49 @@ export function CardLayoutEditor({
   properties: EditableCardProperty[];
   initialShape: CoverShape;
   initialLayout: CardLayout;
+  initialDetailLayout: CardLayout;
+  initialDetailWidth: number;
   previewTitle: string;
   previewValues: Record<string, string>;
   previewCoverUrl: string | null;
 }) {
-  const [layout, setLayout] = useState<CardLayout>(initialLayout);
+  const [mode, setMode] = useState<ViewMode>("gallery");
+
+  // Both arrangements live here at once so switching views costs nothing and one save
+  // commits the pair — a half-saved screen is worse than a slightly larger form.
+  const [galleryLayout, setGalleryLayout] = useState<CardLayout>(initialLayout);
+  const [detailLayout, setDetailLayout] = useState<CardLayout>(initialDetailLayout);
+  const [galleryConfigs, setGalleryConfigs] = useState<Record<string, DisplayConfig>>({});
+  const [detailConfigs, setDetailConfigs] = useState<Record<string, DisplayConfig>>({});
+  const [detailWidth, setDetailWidth] = useState(initialDetailWidth);
+
+  const detailMode = mode === "detail";
+  const layout = detailMode ? detailLayout : galleryLayout;
+  const setLayout = detailMode ? setDetailLayout : setGalleryLayout;
+  const configs = detailMode ? detailConfigs : galleryConfigs;
+  const setConfigs = detailMode ? setDetailConfigs : setGalleryConfigs;
+
   const [shape, setShape] = useState<CoverShape>(initialShape);
-  const [configs, setConfigs] = useState<Record<string, DisplayConfig>>({});
   const [selected, setSelected] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [recordPreview, setRecordPreview] = useState(true);
   const [editingLayout, setEditingLayout] = useState(false);
+
+  /** Makes the detail match the card, which is the state it starts in before anyone edits it. */
+  function syncFromGalleryCard() {
+    // The page already filtered these down to card-eligible ones.
+    setDetailLayout(detailLayoutFrom(galleryLayout, properties.map((p) => ({ ...p, isMissing: false }))));
+    setDetailConfigs(
+      Object.fromEntries(
+        properties.map((p) => [
+          p.notionPropertyId,
+          { ...parseDisplayConfig(p.displayConfig), ...(galleryConfigs[p.notionPropertyId] ?? {}) },
+        ]),
+      ),
+    );
+    setSelected(null);
+  }
 
   const action = saveCardLayout.bind(null, galleryId);
   const [state, formAction, pending] = useActionState<SaveCardLayoutState, FormData>(action, { error: null });
@@ -254,17 +291,26 @@ export function CardLayoutEditor({
   const applyUnmerge = (boxId: string) => mapGrids((grid) => walkGrid(grid, (g) => unmergeBox(g, boxId)));
 
   const rowCap = spec.sideBySide ? maxRowsBesideCover(shape.aspect, layout.ratio, shape.ratio) : MAX_ROWS;
-  const selectedProperty = selected && selected !== TITLE_FIELD_ID ? (byId.get(selected) ?? null) : null;
+  const rawSelected = selected && selected !== TITLE_FIELD_ID ? (byId.get(selected) ?? null) : null;
+  // The panel edits whichever view is open. A detail with no settings of its own opens on
+  // the card's, which is what it is currently rendering anyway.
+  const selectedProperty =
+    rawSelected && detailMode
+      ? { ...rawSelected, displayConfig: rawSelected.detailDisplayConfig || rawSelected.displayConfig }
+      : rawSelected;
   const selectedField = selected ? findField(layout, selected) : null;
   const draggingLabel =
     dragging === TITLE_FIELD_ID ? "Tiêu đề" : dragging ? byId.get(dragging)?.notionPropertyName : null;
 
   return (
     <form action={formAction} className="flex h-[calc(100vh-13rem)] min-h-[32rem] gap-4 pb-2">
-      <input type="hidden" name="layout" value={JSON.stringify(layout)} />
+      <input type="hidden" name="layout" value={JSON.stringify(galleryLayout)} />
+      <input type="hidden" name="detailLayout" value={JSON.stringify(detailLayout)} />
       <input type="hidden" name="coverAspect" value={shape.aspect} />
       <input type="hidden" name="coverRatio" value={shape.ratio} />
-      <input type="hidden" name="propertyConfigs" value={JSON.stringify(configs)} />
+      <input type="hidden" name="detailWidth" value={detailWidth} />
+      <input type="hidden" name="propertyConfigs" value={JSON.stringify(galleryConfigs)} />
+      <input type="hidden" name="detailPropertyConfigs" value={JSON.stringify(detailConfigs)} />
 
       <DndContext
         id="card-layout"
@@ -275,17 +321,39 @@ export function CardLayoutEditor({
       >
         {/* 1 + 2 + 3 */}
         <div className="flex w-64 shrink-0 flex-col gap-3">
-          <div className="flex items-stretch gap-2">
-            <CoverShapeButton shape={shape} onChange={changeShape} />
-            <ArrangementButton
-              value={layout.arrangement}
-              orientation={shape.aspect}
-              extended={layout.extended}
-              onChange={(arrangement, extended) => {
-                setArrangement(arrangement);
-                setLayout((c) => ({ ...c, extended }));
-              }}
+          <ModeSwitch
+            mode={mode}
+            onChange={(next) => {
+              setMode(next);
+              setSelected(null);
+              setEditingLayout(false);
+            }}
+          />
+
+          {detailMode && (
+            <DetailBar
+              width={detailWidth}
+              onWidth={setDetailWidth}
+              onSync={syncFromGalleryCard}
             />
+          )}
+
+          <div className="flex items-stretch gap-2">
+            {/* A Card Detail draws no cover, so its shape and placement mean nothing here. */}
+            {!detailMode && (
+              <>
+                <CoverShapeButton shape={shape} onChange={changeShape} />
+                <ArrangementButton
+                  value={layout.arrangement}
+                  orientation={shape.aspect}
+                  extended={layout.extended}
+                  onChange={(arrangement, extended) => {
+                    setArrangement(arrangement);
+                    setLayout((c) => ({ ...c, extended }));
+                  }}
+                />
+              </>
+            )}
             <button
               type="button"
               aria-label="Chỉnh khung bố cục"
@@ -295,7 +363,7 @@ export function CardLayoutEditor({
                 setEditingLayout((open) => !open);
                 setSelected(null);
               }}
-              className={`w-9 shrink-0 rounded-lg border text-sm ${
+              className={`shrink-0 rounded-lg border text-sm ${detailMode ? "flex-1 py-1.5" : "w-9"} ${
                 editingLayout
                   ? "border-emerald-700 bg-emerald-600 text-white"
                   : "border-stone-300 bg-white text-stone-500 hover:border-stone-500"
@@ -331,6 +399,9 @@ export function CardLayoutEditor({
                 onMerge={applyMerge}
                 onUnmerge={applyUnmerge}
                 cardKind={cardKind}
+                // A detail is sized in pixels, not in cards-per-row, so the preview shows
+                // its real width rather than a thumbnail's multiple.
+                widthOverride={detailMode ? detailWidth : undefined}
               />
             </div>
             <label className="flex items-center gap-2 border-t border-stone-200 bg-white px-4 py-2 text-xs text-stone-600">
@@ -363,7 +434,7 @@ export function CardLayoutEditor({
             />
           ) : (
             <PropertyPanel
-              key={selected ?? "none"}
+              key={`${mode}:${selected ?? "none"}`}
               property={selectedProperty}
               isTitle={selected === TITLE_FIELD_ID}
               showLabel={selectedField?.showLabel ?? true}
@@ -420,6 +491,70 @@ function findBoxOf(layout: CardLayout, fieldId: string): string | null {
 function walkGrid(grid: Grid, transform: (grid: Grid) => Grid): Grid {
   const applied = transform(grid);
   return applied;
+}
+
+/* ── 0: which view is being arranged ─────────────────────────────────────── */
+
+function ModeSwitch({ mode, onChange }: { mode: ViewMode; onChange: (mode: ViewMode) => void }) {
+  const tabs: { value: ViewMode; label: string }[] = [
+    { value: "gallery", label: "Gallery card" },
+    { value: "detail", label: "Card Detail" },
+  ];
+
+  return (
+    <div role="tablist" aria-label="Chỉnh bố cục cho" className="flex rounded-lg border border-stone-300 bg-white p-0.5">
+      {tabs.map((tab) => (
+        <button
+          key={tab.value}
+          type="button"
+          role="tab"
+          aria-selected={mode === tab.value}
+          onClick={() => onChange(tab.value)}
+          className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium ${
+            mode === tab.value ? "bg-emerald-600 text-white" : "text-stone-600 hover:bg-stone-100"
+          }`}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Width and the sync shortcut — the two settings a detail has that a card does not. */
+function DetailBar({
+  width,
+  onWidth,
+  onSync,
+}: {
+  width: number;
+  onWidth: (width: number) => void;
+  onSync: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-stone-200 bg-white p-2">
+      <label className="flex items-center gap-2 text-xs text-stone-600">
+        <span className="shrink-0">Rộng</span>
+        <input
+          type="range"
+          min={MIN_DETAIL_WIDTH}
+          max={MAX_DETAIL_WIDTH}
+          step={20}
+          value={width}
+          onChange={(event) => onWidth(Number(event.target.value))}
+          className="min-w-0 flex-1 accent-emerald-600"
+        />
+        <span className="w-12 shrink-0 text-right font-mono text-[11px] text-stone-500">{width}px</span>
+      </label>
+      <button
+        type="button"
+        onClick={onSync}
+        className="rounded-md border border-stone-300 px-2 py-1.5 text-xs font-medium text-stone-700 hover:border-emerald-600 hover:text-emerald-700"
+      >
+        Sync từ gallery card
+      </button>
+    </div>
+  );
 }
 
 /* ── 1: cover shape ──────────────────────────────────────────────────────── */
@@ -745,10 +880,12 @@ type CanvasProps = {
   onMerge: (boxId: string, direction: MergeDirection) => void;
   onUnmerge: (boxId: string) => void;
   cardKind: "ngang" | "extra" | "doc";
+  /** Exact preview width in px, for views not measured in cards per row. */
+  widthOverride?: number;
 };
 
 function CardCanvas(props: CanvasProps) {
-  const { layout, coverRatio, coverUrl, cardKind } = props;
+  const { layout, coverRatio, coverUrl, cardKind, widthOverride } = props;
   const spec = ARRANGEMENTS[layout.arrangement];
   const wide: boolean = spec.sideBySide;
   const regions: string[] = [...spec.regions];
@@ -767,7 +904,7 @@ function CardCanvas(props: CanvasProps) {
   );
 
   // Same proportions the gallery uses, so the preview is a real preview.
-  const previewWidth = 340 * CARD_WIDTH_FACTOR[cardKind];
+  const previewWidth = widthOverride ?? 340 * CARD_WIDTH_FACTOR[cardKind];
 
   return (
     <div className="relative w-full" style={{ maxWidth: previewWidth }}>

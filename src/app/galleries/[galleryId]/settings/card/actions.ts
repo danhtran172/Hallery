@@ -13,13 +13,19 @@ import {
   type Grid,
 } from "@/lib/card-layout";
 import { parseDisplayConfig, type DisplayConfig } from "@/lib/display-config";
-import { COVER_RATIOS, parseGalleryConfig, type CoverAspect } from "@/lib/notion-cover";
+import {
+  COVER_RATIOS,
+  MAX_DETAIL_WIDTH,
+  MIN_DETAIL_WIDTH,
+  parseGalleryConfig,
+  type CoverAspect,
+} from "@/lib/notion-cover";
 
 export type SaveCardLayoutState = { error: string | null };
 
 /**
- * Saves the card arrangement, the cover shape, and any property display settings touched
- * in the side panel — all edited on one screen, so all committed on one click.
+ * Saves both arrangements, the cover shape, the detail's width, and any property display
+ * settings touched in the side panel — one screen edits the pair, so one click commits it.
  *
  * Only ids still present in this gallery's shadow schema survive, and a property lands in
  * exactly one box, so a stale editor tab can neither resurrect a deleted property nor
@@ -41,34 +47,48 @@ export async function saveCardLayout(
 
   const allowed = new Set(cardEligibleProperties(gallery.propertyConfigs).map((p) => p.notionPropertyId));
   allowed.add(TITLE_FIELD_ID);
-  const taken = new Set<string>();
 
-  const keep = (fields: CardField[], limit?: number): CardField[] => {
-    const out: CardField[] = [];
-    for (const field of fields) {
-      if (limit !== undefined && out.length >= limit) break;
-      if (!allowed.has(field.id) || taken.has(field.id)) continue;
-      taken.add(field.id);
-      out.push(field);
+  /**
+   * Prunes one arrangement. Each view gets its own `taken` set: the two are stored
+   * separately and a property may sit on both, so sharing one would let whichever saved
+   * first swallow the id and blank the other view.
+   */
+  const sanitize = (layout: CardLayout): CardLayout => {
+    const taken = new Set<string>();
+    const keep = (fields: CardField[], limit?: number): CardField[] => {
+      const out: CardField[] = [];
+      for (const field of fields) {
+        if (limit !== undefined && out.length >= limit) break;
+        if (!allowed.has(field.id) || taken.has(field.id)) continue;
+        taken.add(field.id);
+        out.push(field);
+      }
+      return out;
+    };
+    const prune = (grid: Grid): Grid => ({
+      ...grid,
+      boxes: grid.boxes.map((box) => ({ ...box, fields: keep(box.fields) })),
+    });
+
+    // Overlay first: it holds the scarce slots, so it wins a contested property.
+    const overlay = keep(layout.overlay, MAX_OVERLAY_FIELDS);
+    const regions: Record<string, Grid> = {};
+    for (const id of ARRANGEMENTS[layout.arrangement].regions) {
+      regions[id] = prune(layout.regions[id]);
     }
-    return out;
+    return { ...layout, overlay, regions };
   };
 
-  const prune = (grid: Grid): Grid => ({
-    ...grid,
-    boxes: grid.boxes.map((box) => ({ ...box, fields: keep(box.fields) })),
-  });
-
-  // Overlay first: it holds the scarce slots, so it wins a contested property.
-  const overlay = keep(parsed.overlay, MAX_OVERLAY_FIELDS);
-  const regions: Record<string, Grid> = {};
-  for (const id of ARRANGEMENTS[parsed.arrangement].regions) {
-    regions[id] = prune(parsed.regions[id]);
-  }
-
-  const layout: CardLayout = { ...parsed, overlay, regions };
   const config = parseGalleryConfig(gallery.displayConfig);
-  config.card = layout;
+  config.card = sanitize(parsed);
+
+  const parsedDetail = parseCardLayout(readJson(formData.get("detailLayout")));
+  if (parsedDetail) config.detailCard = sanitize(parsedDetail);
+
+  const width = Number(formData.get("detailWidth"));
+  if (Number.isFinite(width)) {
+    config.detailWidth = Math.min(MAX_DETAIL_WIDTH, Math.max(MIN_DETAIL_WIDTH, Math.round(width)));
+  }
 
   const aspect = String(formData.get("coverAspect") ?? "");
   if (aspect === "landscape" || aspect === "portrait" || aspect === "square") {
@@ -80,7 +100,11 @@ export async function saveCardLayout(
 
   const writes = [
     db.gallery.update({ where: { id: galleryId }, data: { displayConfig: JSON.stringify(config) } }),
-    ...propertyConfigWrites(readJson(formData.get("propertyConfigs")), gallery.propertyConfigs),
+    ...propertyConfigWrites(
+      readJson(formData.get("propertyConfigs")),
+      readJson(formData.get("detailPropertyConfigs")),
+      gallery.propertyConfigs,
+    ),
   ];
   await db.$transaction(writes);
 
@@ -99,28 +123,49 @@ function readJson(raw: FormDataEntryValue | null): unknown {
   }
 }
 
-/** Merges the panel's edits into each property's existing display config. */
-function propertyConfigWrites(
-  raw: unknown,
-  existing: { id: string; notionPropertyId: string; displayConfig: string }[],
-) {
-  if (typeof raw !== "object" || raw === null) return [];
+type StoredPropertyConfig = {
+  id: string;
+  notionPropertyId: string;
+  displayConfig: string;
+  detailDisplayConfig: string;
+};
+
+/**
+ * Merges the panel's edits into each property, per view.
+ *
+ * The two views format independently, so an edit made while the detail was open must land
+ * in `detailDisplayConfig` alone — writing it to the shared column would drag the gallery
+ * card along with it, which is exactly what splitting them was meant to stop.
+ */
+function propertyConfigWrites(rawGallery: unknown, rawDetail: unknown, existing: StoredPropertyConfig[]) {
   const byProperty = new Map(existing.map((property) => [property.notionPropertyId, property]));
+  const edits = new Map<string, { displayConfig?: string; detailDisplayConfig?: string }>();
 
-  return Object.entries(raw as Record<string, unknown>).flatMap(([propertyId, value]) => {
+  const collect = (raw: unknown, column: "displayConfig" | "detailDisplayConfig") => {
+    if (typeof raw !== "object" || raw === null) return;
+    for (const [propertyId, value] of Object.entries(raw as Record<string, unknown>)) {
+      const property = byProperty.get(propertyId);
+      if (!property || typeof value !== "object" || value === null) continue;
+
+      // A detail with nothing of its own has been showing the card's settings, so that is
+      // what an edit there starts from.
+      const base =
+        column === "detailDisplayConfig"
+          ? property.detailDisplayConfig || property.displayConfig
+          : property.displayConfig;
+      const merged: DisplayConfig = { ...parseDisplayConfig(base), ...(value as DisplayConfig) };
+      // An emptied override should disappear rather than persist as "".
+      if (!merged.nameOverride?.trim()) delete merged.nameOverride;
+
+      edits.set(propertyId, { ...edits.get(propertyId), [column]: JSON.stringify(merged) });
+    }
+  };
+
+  collect(rawGallery, "displayConfig");
+  collect(rawDetail, "detailDisplayConfig");
+
+  return [...edits].flatMap(([propertyId, data]) => {
     const property = byProperty.get(propertyId);
-    if (!property || typeof value !== "object" || value === null) return [];
-
-    const incoming = value as DisplayConfig;
-    const merged: DisplayConfig = { ...parseDisplayConfig(property.displayConfig), ...incoming };
-    // An emptied override should disappear rather than persist as "".
-    if (!merged.nameOverride?.trim()) delete merged.nameOverride;
-
-    return [
-      db.propertyConfig.update({
-        where: { id: property.id },
-        data: { displayConfig: JSON.stringify(merged) },
-      }),
-    ];
+    return property ? [db.propertyConfig.update({ where: { id: property.id }, data })] : [];
   });
 }

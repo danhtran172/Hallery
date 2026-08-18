@@ -8,10 +8,11 @@ import {
   arrangementsFor,
   cardEligibleProperties,
   createDefaultCardLayout,
+  detailLayoutFrom,
   parseCardLayout,
   type CoverOrientation,
 } from "@/lib/card-layout";
-import { COVER_RATIOS, parseGalleryConfig, resolveCoverUrl } from "@/lib/notion-cover";
+import { COVER_RATIOS, parseGalleryConfig, resolveCoverUrl, resolveDetailWidth } from "@/lib/notion-cover";
 import { plainTextValue } from "@/lib/property-text";
 import { CardLayoutEditor } from "./card-layout-editor";
 
@@ -42,6 +43,10 @@ export default async function CardLayoutSettingsPage({
     ? config.coverRatio
     : COVER_RATIOS[aspect][0];
 
+  // An untouched detail opens on the card's arrangement without its cover — the same thing
+  // the Card Detail is already rendering, so the editor shows the truth rather than a blank.
+  const detailLayout = parseCardLayout(config.detailCard) ?? detailLayoutFrom(layout, gallery.propertyConfigs);
+
   const preview = await loadPreviewItem(
     gallery.notionDataSourceId,
     gallery.workspace.accessToken,
@@ -70,9 +75,12 @@ export default async function CardLayoutSettingsPage({
             notionPropertyType: p.notionPropertyType,
             resolvedType: p.resolvedType,
             displayConfig: p.displayConfig,
+            detailDisplayConfig: p.detailDisplayConfig,
           }))}
           initialShape={{ aspect, ratio }}
           initialLayout={layout}
+          initialDetailLayout={detailLayout}
+          initialDetailWidth={resolveDetailWidth(config)}
           previewTitle={preview.title}
           previewValues={preview.values}
           previewCoverUrl={preview.coverUrl}

@@ -41,9 +41,9 @@ KIND_OPTIONS.multi_select = KIND_OPTIONS.select;
 const AFFIX_TYPES = new Set(["number", "select", "status", "multi_select", "rich_text"]);
 
 /**
- * Config for whichever property is selected on the canvas. Edits here write to the
- * property's shared display config, so the Gallery and Card Detail follow along — this
- * is the same setting, reached from a different place.
+ * Config for whichever property is selected on the canvas. Edits land on the view being
+ * arranged, not on both: the gallery card and the Card Detail format independently, so a
+ * score can be stars on a thumbnail and a plain number on the page.
  */
 export function PropertyPanel({
   property,
