@@ -1,6 +1,6 @@
 "use client";
 
-import { CARD_RATIOS, MAX_ROWS, type CardRatio, type Grid } from "@/lib/card-layout";
+import { CARD_RATIOS, MAX_ROWS, type CardRatio, type FrameAlign, type Grid } from "@/lib/card-layout";
 import { GridGlyph } from "./glyphs";
 
 /**
@@ -15,6 +15,7 @@ export function LayoutPanel({
   ratio,
   showRatio,
   onResize,
+  onAlign,
   onRatio,
 }: {
   regions: { id: string; grid: Grid }[];
@@ -23,6 +24,7 @@ export function LayoutPanel({
   ratio: CardRatio;
   showRatio: boolean;
   onResize: (regionId: string, cols: 1 | 2, rows: number) => void;
+  onAlign: (regionId: string, align: FrameAlign) => void;
   onRatio: (ratio: CardRatio) => void;
 }) {
   return (
@@ -39,6 +41,7 @@ export function LayoutPanel({
             {regionLabel(id)}
           </p>
           <GridChooser grid={grid} maxRows={rowCap(id)} onChange={(cols, rows) => onResize(id, cols, rows)} />
+          <AlignChooser value={grid.align ?? "start"} onChange={(align) => onAlign(id, align)} />
         </section>
       ))}
 
@@ -79,6 +82,46 @@ export function LayoutPanel({
         </section>
       )}
     </aside>
+  );
+}
+
+const ALIGN_OPTIONS: { value: FrameAlign; label: string }[] = [
+  { value: "start", label: "Trên" },
+  { value: "center", label: "Giữa" },
+  { value: "end", label: "Dưới" },
+];
+
+/** Where the boxes sit when the frame is taller than they are. */
+function AlignChooser({ value, onChange }: { value: FrameAlign; onChange: (value: FrameAlign) => void }) {
+  return (
+    <div className="mt-2">
+      <p className="mb-1 text-[10px] text-stone-400">Căn theo chiều dọc</p>
+      <div className="flex gap-1">
+        {ALIGN_OPTIONS.map((option) => {
+          const selected = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onChange(option.value)}
+              className={`flex flex-1 items-center justify-center gap-1 rounded-md border px-1 py-1 text-[10px] ${
+                selected ? "border-emerald-700 bg-emerald-50 text-emerald-800" : "border-stone-300 text-stone-600 hover:border-stone-500"
+              }`}
+            >
+              <span
+                aria-hidden
+                className="flex h-4 w-4 rounded-sm bg-stone-200/70 p-0.5"
+                style={{ alignItems: option.value === "start" ? "flex-start" : option.value === "end" ? "flex-end" : "center" }}
+              >
+                <span className={`h-1 w-full rounded-[1px] ${selected ? "bg-emerald-400" : "bg-stone-400"}`} />
+              </span>
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

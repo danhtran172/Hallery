@@ -24,8 +24,11 @@ export function CardGrid({
 }) {
   return (
     <div
-      className="grid gap-x-3 gap-y-1"
-      style={{ gridTemplateColumns: `repeat(${grid.cols}, minmax(0, 1fr))` }}
+      className="grid h-full gap-x-3 gap-y-1"
+      style={{
+        gridTemplateColumns: `repeat(${grid.cols}, minmax(0, 1fr))`,
+        alignContent: grid.align ?? "start",
+      }}
     >
       {grid.boxes.map((box) => {
         // A folded box takes no track at all; its neighbour already spans over it.

@@ -63,6 +63,7 @@ export function PropertyPanel({
   const [config, setConfig] = useState<DisplayConfig>(() =>
     property ? parseDisplayConfig(property.displayConfig) : {},
   );
+  const [dirty, setDirty] = useState(false);
 
   if (isTitle) {
     return (
@@ -87,10 +88,11 @@ export function PropertyPanel({
   const kinds = KIND_OPTIONS[configType] ?? [];
   const allowAffix = AFFIX_TYPES.has(configType);
 
+  // Edits stay local until confirmed, so a half-typed name never lands in the draft the
+  // form is about to submit.
   const update = (patch: Partial<DisplayConfig>) => {
-    const next = { ...config, ...patch };
-    setConfig(next);
-    onChange(property.notionPropertyId, next);
+    setConfig((current) => ({ ...current, ...patch }));
+    setDirty(true);
   };
 
   return (
@@ -177,9 +179,22 @@ export function PropertyPanel({
         </Section>
       )}
 
-      <p className="mt-4 border-t border-stone-200 pt-3 text-[11px] text-stone-400">
-        Cấu hình này dùng chung với Gallery và Card Detail.
-      </p>
+      <div className="mt-4 border-t border-stone-200 pt-3">
+        <button
+          type="button"
+          disabled={!dirty}
+          onClick={() => {
+            onChange(property.notionPropertyId, config);
+            setDirty(false);
+          }}
+          className="w-full rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800 disabled:bg-stone-200 disabled:text-stone-400"
+        >
+          {dirty ? "Lưu cấu hình" : "Đã lưu"}
+        </button>
+        <p className="mt-2 text-[11px] text-stone-400">
+          Cấu hình này dùng chung với Gallery và Card Detail, ghi xuống khi bấm Lưu bố cục.
+        </p>
+      </div>
     </Frame>
   );
 }

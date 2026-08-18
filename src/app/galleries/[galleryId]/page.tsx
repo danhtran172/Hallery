@@ -16,17 +16,11 @@ import { syncPropertyConfigs, syncResolvedTypes } from "@/lib/property-config-sy
 import { CategoryBar } from "@/components/category-bar";
 import { bucketPages, filterPagesByCategory } from "@/lib/category";
 import { storedCoverUrl } from "@/lib/cover-store";
-import { parseCardLayout, resolveCardLayout } from "@/lib/card-layout";
+import { CARD_WIDTH_FACTOR, cardKindOf, parseCardLayout, resolveCardLayout } from "@/lib/card-layout";
 import { CardGrid } from "@/components/card-grid";
 
-const GALLERY_GRID_COLUMNS: Record<number, string> = {
-  1: "lg:grid-cols-1",
-  2: "lg:grid-cols-2",
-  3: "lg:grid-cols-3",
-  4: "lg:grid-cols-4",
-  5: "lg:grid-cols-5",
-  6: "lg:grid-cols-6",
-};
+/** Gap between cards, mirrored in the base-width calculation below. */
+const CARD_GAP_REM = 1;
 
 export default async function GalleryPage({ params, searchParams }: PageProps<"/galleries/[galleryId]">) {
   const { galleryId } = await params;
@@ -70,6 +64,10 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
     activeAxis && activeValue ? filterPagesByCategory(allPages, activeAxis, activeValue) : allPages;
 
   const galleryConfig = parseGalleryConfig(gallery.displayConfig);
+  const cardKindOrientation =
+    galleryConfig.coverAspect === "portrait" || galleryConfig.coverAspect === "square"
+      ? galleryConfig.coverAspect
+      : "landscape";
   const cardLayout = resolveCardLayout(
     parseCardLayout(galleryConfig.card),
     gallery.propertyConfigs,
@@ -78,6 +76,8 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
   const cardsPerRow = resolveCardsPerRow(galleryConfig);
   const coverRatio = resolveCoverRatio(galleryConfig);
   const coverSource = galleryConfig.coverSource;
+
+  const cardKind = cardKindOf(cardLayout.arrangement, cardKindOrientation, cardLayout.extended);
 
   const positions = new Map(
     (await db.coverPosition.findMany({ where: { galleryId } })).map((p) => [p.notionPageId, p]),
@@ -165,7 +165,16 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
             : "Database này chưa có item nào."}
         </p>
       ) : (
-        <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 ${GALLERY_GRID_COLUMNS[cardsPerRow]}`}>
+        // Cards are a fixed width per kind rather than stretching, so a gallery of mixed
+        // layouts still lines up. "Cards per row" now sets what one normal card is wide.
+        <div
+          className="flex flex-wrap gap-4"
+          style={
+            {
+              "--card-base": `calc((100% - ${(cardsPerRow - 1) * CARD_GAP_REM}rem) / ${cardsPerRow})`,
+            } as React.CSSProperties
+          }
+        >
           {pages.map((page) => {
             const title = getPageTitle(page, titlePropertyName);
             const icon = getPageIcon(page);
@@ -217,7 +226,8 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
             return (
               <div
                 key={page.id}
-                className="group relative flex flex-col overflow-hidden rounded-lg border border-stone-200 hover:border-emerald-600 hover:shadow-sm"
+                className="group relative flex shrink-0 flex-col overflow-hidden rounded-lg border border-stone-200 hover:border-emerald-600 hover:shadow-sm"
+                style={{ width: `calc(var(--card-base) * ${CARD_WIDTH_FACTOR[cardKind]})` }}
               >
                 <Link
                   href={`/galleries/${galleryId}/items/${page.id}`}

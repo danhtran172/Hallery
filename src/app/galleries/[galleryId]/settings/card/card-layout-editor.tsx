@@ -19,8 +19,11 @@ import {
   MAX_OVERLAY_FIELDS,
   MAX_ROWS,
   TITLE_FIELD_ID,
+  CARD_WIDTH_FACTOR,
   arrangementsFor,
+  canExtend,
   canMerge,
+  cardKindOf,
   makeGrid,
   maxRowsBesideCover,
   mergeBox,
@@ -31,6 +34,7 @@ import {
   type CardField,
   type CardLayout,
   type CoverOrientation,
+  type FrameAlign,
   type Grid,
   type GridBox,
   type MergeDirection,
@@ -87,6 +91,7 @@ export function CardLayoutEditor({
   const spec = ARRANGEMENTS[layout.arrangement];
   const regions: string[] = [...spec.regions];
   const coverRatio = shape.ratio.replace(":", " / ");
+  const cardKind = cardKindOf(layout.arrangement, shape.aspect, layout.extended);
   const byId = useMemo(() => new Map(properties.map((p) => [p.notionPropertyId, p])), [properties]);
 
   const placed = useMemo(() => {
@@ -232,6 +237,12 @@ export function CardLayoutEditor({
       return { ...current, arrangement, regions };
     });
 
+  const alignRegion = (regionId: string, align: FrameAlign) =>
+    setLayout((current) => ({
+      ...current,
+      regions: { ...current.regions, [regionId]: { ...current.regions[regionId], align } },
+    }));
+
   const resizeRegion = (regionId: string, cols: 1 | 2, rows: number) =>
     setLayout((current) => ({
       ...current,
@@ -249,7 +260,7 @@ export function CardLayoutEditor({
     dragging === TITLE_FIELD_ID ? "Tiêu đề" : dragging ? byId.get(dragging)?.notionPropertyName : null;
 
   return (
-    <form action={formAction} className="flex h-[calc(100vh-11rem)] min-h-[34rem] gap-4">
+    <form action={formAction} className="flex h-[calc(100vh-13rem)] min-h-[32rem] gap-4 pb-2">
       <input type="hidden" name="layout" value={JSON.stringify(layout)} />
       <input type="hidden" name="coverAspect" value={shape.aspect} />
       <input type="hidden" name="coverRatio" value={shape.ratio} />
@@ -264,12 +275,33 @@ export function CardLayoutEditor({
       >
         {/* 1 + 2 + 3 */}
         <div className="flex w-64 shrink-0 flex-col gap-3">
-          <div className="flex gap-3">
+          <div className="flex items-stretch gap-2">
             <CoverShapeButton shape={shape} onChange={changeShape} />
+            <button
+              type="button"
+              aria-label="Chỉnh khung bố cục"
+              title="Chỉnh khung bố cục"
+              aria-pressed={editingLayout}
+              onClick={() => {
+                setEditingLayout((open) => !open);
+                setSelected(null);
+              }}
+              className={`w-9 shrink-0 rounded-lg border text-sm ${
+                editingLayout
+                  ? "border-emerald-700 bg-emerald-600 text-white"
+                  : "border-stone-300 bg-white text-stone-500 hover:border-stone-500"
+              }`}
+            >
+              ✎
+            </button>
             <ArrangementButton
               value={layout.arrangement}
               orientation={shape.aspect}
-              onChange={setArrangement}
+              extended={layout.extended}
+              onChange={(arrangement, extended) => {
+                setArrangement(arrangement);
+                setLayout((c) => ({ ...c, extended }));
+              }}
             />
           </div>
           <PropertyList
@@ -284,7 +316,7 @@ export function CardLayoutEditor({
         {/* 4 */}
         <div className="flex min-w-0 flex-1 flex-col gap-3">
           <div className="flex flex-1 flex-col overflow-hidden rounded-lg border border-stone-200 bg-stone-50">
-            <div className="flex flex-1 items-center justify-center overflow-auto p-6">
+            <div className="flex flex-1 justify-center overflow-auto p-6 pb-24">
               <CardCanvas
                 layout={layout}
                 coverRatio={coverRatio}
@@ -298,11 +330,7 @@ export function CardLayoutEditor({
                 onRemove={(id) => place(id, "tray")}
                 onMerge={applyMerge}
                 onUnmerge={applyUnmerge}
-                editingLayout={editingLayout}
-                onToggleLayoutEdit={() => {
-                  setEditingLayout((open) => !open);
-                  setSelected(null);
-                }}
+                cardKind={cardKind}
               />
             </div>
             <label className="flex items-center gap-2 border-t border-stone-200 bg-white px-4 py-2 text-xs text-stone-600">
@@ -316,13 +344,6 @@ export function CardLayoutEditor({
           </div>
 
           {state.error && <p className="text-sm text-red-600">{state.error}</p>}
-          <button
-            type="submit"
-            disabled={pending}
-            className="self-start rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
-          >
-            {pending ? "Đang lưu…" : "Lưu bố cục"}
-          </button>
         </div>
 
         {/* 5 */}
@@ -337,6 +358,7 @@ export function CardLayoutEditor({
               ratio={layout.ratio}
               showRatio={spec.sideBySide}
               onResize={resizeRegion}
+              onAlign={alignRegion}
               onRatio={(ratio) => setLayout((c) => ({ ...c, ratio }))}
             />
           ) : (
@@ -350,6 +372,14 @@ export function CardLayoutEditor({
             />
           )}
         </div>
+
+        <button
+          type="submit"
+          disabled={pending}
+          className="fixed bottom-6 right-6 z-40 rounded-md bg-emerald-700 px-5 py-2.5 text-sm font-medium text-white shadow-lg hover:bg-emerald-800 disabled:opacity-50"
+        >
+          {pending ? "Đang lưu…" : "Lưu bố cục"}
+        </button>
 
         <DragOverlay>
           {draggingLabel && (
@@ -396,15 +426,19 @@ function walkGrid(grid: Grid, transform: (grid: Grid) => Grid): Grid {
 
 function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (value: CoverShape) => void }) {
   const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(shape);
 
   return (
-    <div className="relative">
+    <div className="relative flex-1">
       <button
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className={`flex h-24 w-28 flex-col items-center justify-center gap-1 rounded-lg border bg-white p-2 ${
+        onClick={() => {
+          if (!open) setDraft(shape);
+          setOpen((o) => !o);
+        }}
+        className={`flex h-24 w-full flex-col items-center justify-center gap-1 rounded-lg border bg-white p-1.5 ${
           open ? "border-emerald-700" : "border-stone-300 hover:border-stone-500"
         }`}
       >
@@ -418,21 +452,16 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
           aria-label="Chiều ảnh"
           className="absolute left-0 top-full z-30 mt-2 w-72 rounded-lg border border-stone-300 bg-white p-3 shadow-lg"
         >
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-medium uppercase tracking-wide text-stone-500">Chiều ảnh</p>
-            <button type="button" onClick={() => setOpen(false)} className="text-xs text-stone-400 hover:text-stone-700">
-              Đóng
-            </button>
-          </div>
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-500">Chiều ảnh</p>
           <div className="mb-3 flex gap-1">
             {ORIENTATIONS.map((option) => (
               <button
                 key={option.value}
                 type="button"
-                aria-pressed={shape.aspect === option.value}
-                onClick={() => onChange({ aspect: option.value, ratio: COVER_RATIOS[option.value][0] })}
+                aria-pressed={draft.aspect === option.value}
+                onClick={() => setDraft({ aspect: option.value, ratio: COVER_RATIOS[option.value][0] })}
                 className={`flex-1 rounded border px-2 py-1 text-xs ${
-                  shape.aspect === option.value
+                  draft.aspect === option.value
                     ? "border-emerald-700 bg-emerald-50 font-medium text-emerald-800"
                     : "border-stone-300 text-stone-600 hover:border-stone-500"
                 }`}
@@ -442,17 +471,14 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
             ))}
           </div>
           <div className="grid grid-cols-3 gap-2">
-            {COVER_RATIOS[shape.aspect].map((ratio) => {
-              const selected = shape.ratio === ratio;
+            {COVER_RATIOS[draft.aspect].map((ratio) => {
+              const selected = draft.ratio === ratio;
               return (
                 <button
                   key={ratio}
                   type="button"
                   aria-pressed={selected}
-                  onClick={() => {
-                    onChange({ ...shape, ratio });
-                    setOpen(false);
-                  }}
+                  onClick={() => setDraft({ ...draft, ratio })}
                   className={`flex flex-col items-center gap-1 rounded-md border p-2 ${
                     selected ? "border-emerald-700 bg-emerald-50" : "border-stone-300 hover:border-stone-500"
                   }`}
@@ -462,6 +488,26 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
                 </button>
               );
             })}
+          </div>
+
+          <div className="mt-3 flex justify-end gap-2 border-t border-stone-200 pt-3">
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded border border-stone-300 px-2 py-1 text-xs text-stone-600 hover:border-stone-500"
+            >
+              Huỷ
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onChange(draft);
+                setOpen(false);
+              }}
+              className="rounded bg-emerald-700 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-800"
+            >
+              OK
+            </button>
           </div>
         </div>
       )}
@@ -474,23 +520,35 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
 function ArrangementButton({
   value,
   orientation,
+  extended,
   onChange,
 }: {
   value: ArrangementId;
   orientation: CoverOrientation;
-  onChange: (value: ArrangementId) => void;
+  extended: boolean;
+  onChange: (value: ArrangementId, extended: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [draftArrangement, setDraftArrangement] = useState(value);
+  const [draftExtended, setDraftExtended] = useState(extended);
   const options = arrangementsFor(orientation);
+  const extendable = canExtend(draftArrangement, orientation);
+  const kind = cardKindOf(draftArrangement, orientation, draftExtended && extendable);
+
+  const openPicker = () => {
+    setDraftArrangement(value);
+    setDraftExtended(extended);
+    setOpen(true);
+  };
 
   return (
-    <div className="relative">
+    <div className="relative flex-1">
       <button
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className={`flex h-24 w-28 flex-col items-center justify-center gap-1 rounded-lg border bg-white p-2 ${
+        onClick={() => (open ? setOpen(false) : openPicker())}
+        className={`flex h-24 w-full flex-col items-center justify-center gap-1 rounded-lg border bg-white p-1.5 ${
           open ? "border-emerald-700" : "border-stone-300 hover:border-stone-500"
         }`}
       >
@@ -506,24 +564,16 @@ function ArrangementButton({
           aria-label="Bố cục ảnh"
           className="absolute left-0 top-full z-30 mt-2 w-72 rounded-lg border border-stone-300 bg-white p-3 shadow-lg"
         >
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-medium uppercase tracking-wide text-stone-500">Ảnh nằm ở đâu</p>
-            <button type="button" onClick={() => setOpen(false)} className="text-xs text-stone-400 hover:text-stone-700">
-              Đóng
-            </button>
-          </div>
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-500">Ảnh nằm ở đâu</p>
           <div className="grid grid-cols-2 gap-2">
             {options.map((id) => {
-              const selected = id === value;
+              const selected = id === draftArrangement;
               return (
                 <button
                   key={id}
                   type="button"
                   aria-pressed={selected}
-                  onClick={() => {
-                    onChange(id);
-                    setOpen(false);
-                  }}
+                  onClick={() => setDraftArrangement(id)}
                   className={`rounded-md border p-2 text-left ${
                     selected ? "border-emerald-700 bg-emerald-50" : "border-stone-300 hover:border-stone-500"
                   }`}
@@ -535,6 +585,53 @@ function ArrangementButton({
                 </button>
               );
             })}
+          </div>
+
+          <label
+            className={`mt-3 flex items-start gap-2 text-xs ${
+              extendable ? "text-stone-700" : "text-stone-400"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={extendable && draftExtended}
+              disabled={!extendable}
+              onChange={(event) => setDraftExtended(event.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              Extended width
+              <span className="block text-[10px]">
+                {extendable
+                  ? "Card rộng 120% so với card ngang thường."
+                  : "Chỉ áp dụng cho card ngang; bố cục này cho ra card dọc."}
+              </span>
+            </span>
+          </label>
+
+          <div className="mt-3 flex items-center justify-between border-t border-stone-200 pt-3">
+            <span className="text-[11px] text-stone-500">
+              Loại card: <b>{kind === "doc" ? "Dọc" : kind === "extra" ? "Extra ngang" : "Ngang"}</b>
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded border border-stone-300 px-2 py-1 text-xs text-stone-600 hover:border-stone-500"
+              >
+                Huỷ
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(draftArrangement, extendable && draftExtended);
+                  setOpen(false);
+                }}
+                className="rounded bg-emerald-700 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-800"
+              >
+                OK
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -647,12 +744,11 @@ type CanvasProps = {
   onRemove: (id: string) => void;
   onMerge: (boxId: string, direction: MergeDirection) => void;
   onUnmerge: (boxId: string) => void;
-  editingLayout: boolean;
-  onToggleLayoutEdit: () => void;
+  cardKind: "ngang" | "extra" | "doc";
 };
 
 function CardCanvas(props: CanvasProps) {
-  const { layout, coverRatio, coverUrl, editingLayout, onToggleLayoutEdit } = props;
+  const { layout, coverRatio, coverUrl, cardKind } = props;
   const spec = ARRANGEMENTS[layout.arrangement];
   const wide: boolean = spec.sideBySide;
   const regions: string[] = [...spec.regions];
@@ -670,21 +766,11 @@ function CardCanvas(props: CanvasProps) {
     </div>
   );
 
+  // Same proportions the gallery uses, so the preview is a real preview.
+  const previewWidth = 340 * CARD_WIDTH_FACTOR[cardKind];
+
   return (
-    <div className="relative w-full" style={{ maxWidth: wide ? 620 : 380 }}>
-      <button
-        type="button"
-        aria-label="Chỉnh khung bố cục"
-        aria-pressed={editingLayout}
-        onClick={onToggleLayoutEdit}
-        className={`absolute -right-3 -top-3 z-30 rounded-full border px-2 py-1 text-[11px] shadow-sm ${
-          editingLayout
-            ? "border-emerald-700 bg-emerald-600 text-white"
-            : "border-stone-300 bg-white text-stone-600 hover:border-stone-500"
-        }`}
-      >
-        ✎ khung
-      </button>
+    <div className="relative w-full" style={{ maxWidth: previewWidth }}>
       <div className="overflow-hidden rounded-lg border border-stone-300 bg-white shadow-sm">
         {wide ? (
           <>
@@ -729,7 +815,28 @@ function GridBlock({ grid, ...props }: CanvasProps & { grid: Grid }) {
       style={{ gridTemplateColumns: `repeat(${grid.cols}, minmax(0, 1fr))` }}
     >
       {grid.boxes.map((box, index) => {
-        if (box.mergedInto) return null;
+        if (box.mergedInto) {
+          // Kept as a sliver rather than removed: the absorbing box grows over the space,
+          // and this strip is where the merge can be handed back.
+          return (
+            <div
+              key={box.id}
+              className={`flex items-center justify-center rounded bg-stone-100/70 ${
+                box.mergedInto === "left" ? "w-4" : "h-4"
+              }`}
+            >
+              <button
+                type="button"
+                aria-label="Bỏ gộp ô"
+                title="Bỏ gộp"
+                onClick={() => props.onUnmerge(box.id)}
+                className="text-[9px] leading-none text-stone-400 hover:text-stone-700"
+              >
+                ⤢
+              </button>
+            </div>
+          );
+        }
         const { colSpan, rowSpan } = spanOf(grid, index);
         return (
           <BoxSlot
@@ -845,24 +952,6 @@ function BoxSlot({
         </div>
       )}
 
-      {/* A folded neighbour can be handed back. */}
-      {absorbed && (
-        <button
-          type="button"
-          onClick={() => {
-            const folded = grid.boxes.find(
-              (other, at) =>
-                other.mergedInto &&
-                ((other.mergedInto === "left" && at === index + 1) ||
-                  (other.mergedInto === "up" && at === index + grid.cols)),
-            );
-            if (folded) props.onUnmerge(folded.id);
-          }}
-          className="absolute bottom-0.5 right-0.5 z-20 rounded border border-stone-300 bg-white px-1 text-[9px] text-stone-500 hover:border-stone-500"
-        >
-          bỏ gộp
-        </button>
-      )}
     </div>
   );
 }

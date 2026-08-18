@@ -78,7 +78,10 @@ export type GridBox = {
   mergedInto?: MergeDirection;
 };
 
-export type Grid = { cols: 1 | 2; rows: number; boxes: GridBox[] };
+/** Where a frame's content sits when the frame is taller than its boxes. */
+export type FrameAlign = "start" | "center" | "end";
+
+export type Grid = { cols: 1 | 2; rows: number; boxes: GridBox[]; align?: FrameAlign };
 
 export type CardRatio = [30, 70] | [40, 60] | [50, 50] | [60, 40] | [70, 30];
 export const CARD_RATIOS: CardRatio[] = [
@@ -89,9 +92,44 @@ export const CARD_RATIOS: CardRatio[] = [
   [70, 30],
 ];
 
+/**
+ * Card widths are fixed per kind rather than stretching to fill a column, so a gallery of
+ * mixed layouts still lines up. The base is whatever one normal card is wide; the rest are
+ * multiples of it.
+ */
+export type CardKind = "ngang" | "extra" | "doc";
+
+export const CARD_WIDTH_FACTOR: Record<CardKind, number> = {
+  ngang: 1,
+  extra: 1.2,
+  doc: 0.6,
+};
+
+/**
+ * Which kind a layout produces. A cover beside its text always reads wide; a cover above
+ * its text is only wide when the cover itself is. Extra width is opt-in and meaningless
+ * for a tall card, so it is ignored there.
+ */
+export function cardKindOf(
+  arrangement: ArrangementId,
+  orientation: CoverOrientation,
+  extended: boolean,
+): CardKind {
+  const tall = !ARRANGEMENTS[arrangement].sideBySide && orientation !== "landscape";
+  if (tall) return "doc";
+  return extended ? "extra" : "ngang";
+}
+
+/** Extra width only applies to the wide kinds. */
+export function canExtend(arrangement: ArrangementId, orientation: CoverOrientation): boolean {
+  return cardKindOf(arrangement, orientation, false) !== "doc";
+}
+
 export type CardLayout = {
   version: typeof CARD_LAYOUT_VERSION;
   arrangement: ArrangementId;
+  /** Widen a already-wide card to 120%. Ignored for tall cards. */
+  extended: boolean;
   /** Cover vs content split, used when they share a row. */
   ratio: CardRatio;
   /** Burned onto the cover. Capped — a cover buried under text stops being an image. */
@@ -147,7 +185,8 @@ export function gridFields(grid: Grid): CardField[] {
 
 /** Resizes a grid, preserving as much placement as the new shape allows. */
 export function resizeGrid(grid: Grid, cols: 1 | 2, rows: number): Grid {
-  return makeGrid(cols, rows, grid.boxes.map((box) => box.fields));
+  const resized = makeGrid(cols, rows, grid.boxes.map((box) => box.fields));
+  return grid.align ? { ...resized, align: grid.align } : resized;
 }
 
 /** Folds an empty box into its left or upper neighbour. Reversible; nothing is deleted. */
@@ -228,6 +267,7 @@ export function createDefaultCardLayout(properties: CardEligibleProperty[]): Car
   return {
     version: CARD_LAYOUT_VERSION,
     arrangement: "cover-top",
+    extended: false,
     ratio: [40, 60],
     overlay: [],
     regions: { main: makeGrid(1, 1, [fields]) },
@@ -274,10 +314,12 @@ function parseGrid(raw: unknown): Grid | null {
   }
   if (parsed.length === 0) return null;
 
+  const align = (raw as { align?: unknown }).align;
   return {
     cols: cols === 2 ? 2 : 1,
     rows: typeof rows === "number" && rows > 0 ? Math.min(MAX_ROWS, rows) : 1,
     boxes: parsed,
+    ...(align === "center" || align === "end" ? { align } : {}),
   };
 }
 
@@ -297,6 +339,7 @@ export function parseCardLayout(raw: unknown): CardLayout | null {
   return {
     version: CARD_LAYOUT_VERSION,
     arrangement,
+    extended: value.extended === true,
     ratio: parseRatio(value.ratio),
     overlay: parseFields(value.overlay).slice(0, MAX_OVERLAY_FIELDS),
     regions,
@@ -307,7 +350,7 @@ export function parseCardLayout(raw: unknown): CardLayout | null {
 function liftLegacyLayout(value: Record<string, unknown>): CardLayout | null {
   const overlay = parseFields(value.overlay ?? value.overlayFields).slice(0, MAX_OVERLAY_FIELDS);
   const ratio = parseRatio(value.ratio);
-  const base = { version: CARD_LAYOUT_VERSION, ratio, overlay } as const;
+  const base = { version: CARD_LAYOUT_VERSION, extended: false, ratio, overlay } as const;
 
   const collect = (): { main: CardField[]; below: CardField[]; cover: CoverSlot } => {
     if (value.cells && typeof value.cells === "object") {
@@ -363,12 +406,13 @@ export type ResolvedBox<T> = {
   merged: boolean;
   fields: ResolvedField<T>[];
 };
-export type ResolvedGrid<T> = { cols: 1 | 2; rows: number; boxes: ResolvedBox<T>[] };
+export type ResolvedGrid<T> = { cols: 1 | 2; rows: number; boxes: ResolvedBox<T>[]; align?: FrameAlign };
 
 export type ResolvedCardLayout<T> = {
   arrangement: ArrangementId;
   cover: CoverSlot;
   sideBySide: boolean;
+  extended: boolean;
   ratio: CardRatio;
   overlay: ResolvedField<T>[];
   regions: Record<string, ResolvedGrid<T>>;
@@ -409,6 +453,7 @@ export function resolveCardLayout<T extends CardEligibleProperty>(
   const resolveGrid = (grid: Grid): ResolvedGrid<T> => ({
     cols: grid.cols,
     rows: grid.rows,
+    align: grid.align,
     boxes: grid.boxes.map((box, index) => {
       const { colSpan, rowSpan } = spanOf(grid, index);
       return {
@@ -432,6 +477,7 @@ export function resolveCardLayout<T extends CardEligibleProperty>(
     arrangement: source.arrangement,
     cover,
     sideBySide: spec.sideBySide && cover === "left",
+    extended: source.extended,
     ratio: source.ratio,
     overlay,
     regions,
