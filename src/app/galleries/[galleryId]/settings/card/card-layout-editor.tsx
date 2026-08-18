@@ -277,6 +277,15 @@ export function CardLayoutEditor({
         <div className="flex w-64 shrink-0 flex-col gap-3">
           <div className="flex items-stretch gap-2">
             <CoverShapeButton shape={shape} onChange={changeShape} />
+            <ArrangementButton
+              value={layout.arrangement}
+              orientation={shape.aspect}
+              extended={layout.extended}
+              onChange={(arrangement, extended) => {
+                setArrangement(arrangement);
+                setLayout((c) => ({ ...c, extended }));
+              }}
+            />
             <button
               type="button"
               aria-label="Chỉnh khung bố cục"
@@ -294,15 +303,6 @@ export function CardLayoutEditor({
             >
               ✎
             </button>
-            <ArrangementButton
-              value={layout.arrangement}
-              orientation={shape.aspect}
-              extended={layout.extended}
-              onChange={(arrangement, extended) => {
-                setArrangement(arrangement);
-                setLayout((c) => ({ ...c, extended }));
-              }}
-            />
           </div>
           <PropertyList
             entries={unplaced}

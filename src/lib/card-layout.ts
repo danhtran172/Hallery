@@ -65,7 +65,7 @@ export function isArrangement(value: unknown): value is ArrangementId {
 /* ── Grids ───────────────────────────────────────────────────────────────── */
 
 export const MAX_COLS = 2;
-export const MAX_ROWS = 4;
+export const MAX_ROWS = 3;
 
 export type MergeDirection = "left" | "up";
 
@@ -318,10 +318,25 @@ function parseGrid(raw: unknown): Grid | null {
   if (parsed.length === 0) return null;
 
   const align = (raw as { align?: unknown }).align;
+  const gridCols: 1 | 2 = cols === 2 ? 2 : 1;
+  const gridRows = typeof rows === "number" && rows > 0 ? Math.min(MAX_ROWS, rows) : 1;
+
+  // A grid saved taller than the current limit keeps its fields: anything past the last
+  // surviving box folds into it rather than disappearing with the row.
+  const capacity = gridCols * gridRows;
+  const kept =
+    parsed.length > capacity
+      ? parsed.slice(0, capacity).map((box, index) =>
+          index === capacity - 1
+            ? { ...box, fields: [...box.fields, ...parsed.slice(capacity).flatMap((extra) => extra.fields)] }
+            : box,
+        )
+      : parsed;
+
   return {
-    cols: cols === 2 ? 2 : 1,
-    rows: typeof rows === "number" && rows > 0 ? Math.min(MAX_ROWS, rows) : 1,
-    boxes: parsed,
+    cols: gridCols,
+    rows: gridRows,
+    boxes: kept,
     ...(align === "center" || align === "end" ? { align } : {}),
   };
 }
