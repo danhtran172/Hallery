@@ -158,7 +158,7 @@ nằm trên URL nên share/back được.
 |---|---|---|
 | Ngang | ảnh trái/phải, hoặc ảnh trên + ảnh ngang, hoặc không ảnh | 100% |
 | Extra ngang | như trên + tick Extended width | 120% |
-| Dọc | ảnh trên + ảnh dọc/vuông | 60% |
+| Dọc | ảnh trên + ảnh dọc/vuông | 75% |
 
 "Số card mỗi hàng" giờ định nghĩa *một card ngang thường rộng bao nhiêu*.
 

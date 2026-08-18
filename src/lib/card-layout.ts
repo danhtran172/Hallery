@@ -104,7 +104,7 @@ export type CardKind = "ngang" | "extra" | "doc";
 export const CARD_WIDTH_FACTOR: Record<CardKind, number> = {
   ngang: 1,
   extra: 1.2,
-  doc: 0.6,
+  doc: 0.75,
 };
 
 /**
