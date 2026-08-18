@@ -25,7 +25,28 @@ export type GalleryConfig = {
   cardsPerRow?: number;
   /** Which properties a card shows and in what order — see lib/card-layout. */
   card?: CardLayout;
+  /**
+   * The same arrangement again, for the Card Detail. Detail is a page rather than a
+   * thumbnail, so it carries no cover and sets its own width — the two views share an
+   * editor and a format, not their settings.
+   *
+   * Absent means "not customised yet", and the detail falls back to `card`.
+   */
+  detailCard?: CardLayout;
+  /** Max width of the Card Detail, in px. */
+  detailWidth?: number;
 };
+
+export const MIN_DETAIL_WIDTH = 480;
+export const MAX_DETAIL_WIDTH = 1600;
+export const DEFAULT_DETAIL_WIDTH = 880;
+
+export function resolveDetailWidth(config: GalleryConfig): number {
+  const value = config.detailWidth;
+  return typeof value === "number" && Number.isFinite(value) && value >= MIN_DETAIL_WIDTH && value <= MAX_DETAIL_WIDTH
+    ? Math.round(value)
+    : DEFAULT_DETAIL_WIDTH;
+}
 
 export function parseGalleryConfig(raw: string): GalleryConfig {
   try {

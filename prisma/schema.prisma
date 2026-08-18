@@ -38,7 +38,6 @@ model Gallery {
   description        String?
   sortOrder          Int       @default(0)
   displayConfig      String    @default("{}")
-  detailLayout       String    @default("")
 
   /// Added by following another gallery's relation rather than picked by hand. These stay
   /// out of the dashboard — a database only reachable as someone else's relation target is
@@ -85,15 +84,6 @@ model CoverPosition {
   @@unique([galleryId, notionPageId])
 }
 
-/// A reusable Hallery-only Card Detail arrangement. Its JSON carries source
-/// property names as well as IDs so it can be applied to another database.
-model LayoutTemplate {
-  id        String   @id @default(cuid())
-  name      String
-  layout    String
-  createdAt DateTime @default(now())
-}
-
 /// A property used to sort items into categories — Series, Genre, and so on.
 /// Select-like sources cost nothing to browse because their values already ride along
 /// with the page data; relation sources need one request to list the linked items.
@@ -125,6 +115,11 @@ model PropertyConfig {
   /// sampled page. Null means not determined yet. Unused for other property types.
   resolvedType       String?
   displayConfig      String   @default("{}")
+  /// The same settings again for the Card Detail, which formats its properties
+  /// independently of the gallery card — a score can be stars on a thumbnail and a plain
+  /// number on the page. Empty means untouched, and the detail borrows `displayConfig`;
+  /// the editor's sync button fills this in by copying it across.
+  detailDisplayConfig String  @default("")
   sortOrder          Int      @default(0)
   hidden             Boolean  @default(false)
   isMissing          Boolean  @default(false)

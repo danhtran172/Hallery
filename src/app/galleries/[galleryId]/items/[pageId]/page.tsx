@@ -5,7 +5,13 @@ import { getNotionClient } from "@/lib/notion";
 import { getPageIcon, getPageTitle, getTitlePropertyName } from "@/lib/notion-schema";
 import { EDITABLE_PROPERTY_TYPES, READONLY_PROPERTY_TYPES } from "@/lib/notion-write";
 import { parseDisplayConfig } from "@/lib/display-config";
-import { parseDetailLayout } from "@/lib/detail-layout";
+import {
+  createDefaultCardLayout,
+  detailLayoutFrom,
+  parseCardLayout,
+  resolveCardLayout,
+} from "@/lib/card-layout";
+import { parseGalleryConfig, resolveDetailWidth } from "@/lib/notion-cover";
 import { isFullDataSource, isFullPage } from "@notionhq/client";
 import { ItemDetail, type FieldData } from "./item-detail";
 
@@ -49,7 +55,11 @@ export default async function ItemDetailPage({
         editable: EDITABLE_PROPERTY_TYPES.has(value.type),
         readonly: READONLY_PROPERTY_TYPES.has(value.type),
         options,
-        displayConfig: propertyConfig ? parseDisplayConfig(propertyConfig.displayConfig) : {},
+        // The detail formats its properties on its own settings, falling back to the
+        // gallery card's while it has none of its own.
+        displayConfig: propertyConfig
+          ? parseDisplayConfig(propertyConfig.detailDisplayConfig || propertyConfig.displayConfig)
+          : {},
       };
     })
     .sort((a, b) => {
@@ -58,11 +68,25 @@ export default async function ItemDetailPage({
       return aOrder - bOrder || a.name.localeCompare(b.name, "vi");
     });
 
-  const parsedLayout = parseDetailLayout(gallery.detailLayout, gallery.propertyConfigs);
-  if (parsedLayout.usedFallback) console.warn(`Gallery ${galleryId}: ${parsedLayout.reason}`);
+  // An untouched detail borrows the gallery card's arrangement, minus its cover — that is
+  // what "giống gallery card cho tới khi custom" means in storage.
+  const galleryConfig = parseGalleryConfig(gallery.displayConfig);
+  const galleryCard = parseCardLayout(galleryConfig.card) ?? createDefaultCardLayout(gallery.propertyConfigs);
+  const detailCard =
+    parseCardLayout(galleryConfig.detailCard) ?? detailLayoutFrom(galleryCard, gallery.propertyConfigs);
+  const layout = resolveCardLayout(
+    detailCard,
+    gallery.propertyConfigs.map((p) => ({
+      notionPropertyId: p.notionPropertyId,
+      notionPropertyName: p.notionPropertyName,
+      notionPropertyType: p.notionPropertyType,
+      isMissing: p.isMissing,
+    })),
+    "none",
+  );
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-12">
+    <div className="mx-auto px-6 py-12" style={{ maxWidth: resolveDetailWidth(galleryConfig) }}>
       <Link href={`/galleries/${galleryId}`} className="text-xs text-stone-500 hover:underline">
         ← {gallery.name}
       </Link>
@@ -71,7 +95,7 @@ export default async function ItemDetailPage({
         <h1 className="text-2xl font-semibold text-stone-900">{title}</h1>
       </div>
 
-      <ItemDetail galleryId={galleryId} pageId={pageId} fields={fields} layout={parsedLayout.layout} notionUrl={pageRes.url} />
+      <ItemDetail galleryId={galleryId} pageId={pageId} fields={fields} layout={layout} notionUrl={pageRes.url} />
     </div>
   );
 }

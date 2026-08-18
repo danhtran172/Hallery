@@ -277,6 +277,66 @@ export function createDefaultCardLayout(properties: CardEligibleProperty[]): Car
   };
 }
 
+/**
+ * The same arrangement rebuilt for the Card Detail, which has no cover.
+ *
+ * Used both to seed an uncustomised detail from the gallery card and to answer the editor's
+ * sync button. Everything the card showed has to survive the trip: the cover is gone, so
+ * fields burned onto it would silently vanish, and a two-frame arrangement collapses to one.
+ * Overlay fields lead, then the main frame as laid out, then whatever sat below.
+ */
+export function detailLayoutFrom(layout: CardLayout, properties: CardEligibleProperty[]): CardLayout {
+  // `as const` narrows each arrangement's regions to its own tuple, so widen to compare.
+  const regionIds: readonly string[] = ARRANGEMENTS[layout.arrangement].regions;
+  const main = regionIds.includes("main") ? layout.regions.main : undefined;
+  const below = regionIds.includes("below") ? layout.regions.below : undefined;
+
+  // "Chỉ ảnh" keeps its properties nowhere but the overlay, so a detail built from it would
+  // otherwise come out blank.
+  if (!main) {
+    const carried = [...layout.overlay, ...(below ? gridFields(below) : [])];
+    return {
+      version: CARD_LAYOUT_VERSION,
+      arrangement: "no-cover",
+      extended: false,
+      ratio: layout.ratio,
+      overlay: [],
+      regions: {
+        main: makeGrid(1, 1, [carried.length ? carried : createDefaultCardLayout(properties).regions.main.boxes[0].fields]),
+      },
+    };
+  }
+
+  const live = main.boxes.map((box, index) => ({ box, index })).filter(({ box }) => !box.mergedInto);
+  const first = live[0]?.index ?? 0;
+  const last = live[live.length - 1]?.index ?? 0;
+  const trailing = below ? gridFields(below) : [];
+
+  return {
+    version: CARD_LAYOUT_VERSION,
+    arrangement: "no-cover",
+    extended: false,
+    ratio: layout.ratio,
+    overlay: [],
+    regions: {
+      main: {
+        ...main,
+        boxes: main.boxes.map((box, index) => {
+          if (box.mergedInto) return box;
+          return {
+            ...box,
+            fields: [
+              ...(index === first ? layout.overlay : []),
+              ...box.fields,
+              ...(index === last ? trailing : []),
+            ],
+          };
+        }),
+      },
+    },
+  };
+}
+
 /* ── Parsing ─────────────────────────────────────────────────────────────── */
 
 function parseFields(raw: unknown): CardField[] {

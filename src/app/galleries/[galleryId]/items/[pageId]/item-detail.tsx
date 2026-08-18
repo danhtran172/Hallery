@@ -5,8 +5,11 @@ import type { PageObjectResponse } from "@notionhq/client";
 import { PropertyValue } from "@/components/property-value";
 import { getEditableValue } from "@/lib/notion-schema";
 import { formatDuration, type DisplayConfig } from "@/lib/display-config";
-import type { DetailLayout, DetailLayoutCell, DetailLayoutNode } from "@/lib/detail-layout";
+import type { CardEligibleProperty, ResolvedCardLayout, ResolvedGrid } from "@/lib/card-layout";
 import { saveItem, type SaveItemState } from "./actions";
+
+/** The detail carries no cover, so only its single frame is ever drawn. */
+type DetailLayout = ResolvedCardLayout<CardEligibleProperty>;
 
 export type FieldData = {
   propertyId: string;
@@ -80,7 +83,7 @@ export function ItemDetail({
   );
 }
 
-/** Shared tree renderer for Card Detail and inline edit mode. */
+/** Shared renderer for Card Detail and inline edit mode. */
 function DetailLayoutRenderer({
   fields,
   layout,
@@ -91,101 +94,83 @@ function DetailLayoutRenderer({
   editing: boolean;
 }) {
   const fieldsById = new Map(fields.map((field) => [field.propertyId, field]));
-  const placedFields = [...fieldsById.values()].filter((field) => containsProperty(layout.root, field.propertyId));
+  const grid = layout.regions.main;
+  const placed = grid?.boxes.some((box) => box.fields.some((f) => !f.isTitle && f.property));
 
-  if (!placedFields.length) {
+  if (!grid || !placed) {
     return (
       <p className="rounded-lg border border-dashed border-stone-300 px-4 py-8 text-center text-sm text-stone-500">
-        Chưa có property nào trong layout này. Vào Cài đặt bố cục để thêm field vào Card Detail.
+        Chưa có property nào trong bố cục này. Vào Bố cục card → Card Detail để thêm field.
       </p>
     );
   }
 
-  return <LayoutNodeView node={layout.root} fieldsById={fieldsById} editing={editing} />;
+  return <DetailGridView grid={grid} fieldsById={fieldsById} editing={editing} />;
 }
 
-function LayoutNodeView({
-  node,
+function DetailGridView({
+  grid,
   fieldsById,
   editing,
 }: {
-  node: DetailLayoutNode;
+  grid: ResolvedGrid<CardEligibleProperty>;
   fieldsById: Map<string, FieldData>;
   editing: boolean;
 }) {
   return (
-    <div className={`grid gap-4 ${layoutGridClass(node)}`}>
-      {node.cells.map((cell, index) => (
-        <div key={cell.id} className={cellPlacementClass(node.kind, index)}>
-          <LayoutCellView cell={cell} fieldsById={fieldsById} editing={editing} />
-        </div>
-      ))}
-    </div>
-  );
-}
+    <div
+      className="grid gap-4"
+      style={{
+        gridTemplateColumns: `repeat(${grid.cols}, minmax(0, 1fr))`,
+        alignContent: grid.align ?? "start",
+      }}
+    >
+      {grid.boxes.map((box) => {
+        // A folded box takes no track; the neighbour it merged into spans over it.
+        if (box.merged) return null;
 
-function LayoutCellView({
-  cell,
-  fieldsById,
-  editing,
-}: {
-  cell: DetailLayoutCell;
-  fieldsById: Map<string, FieldData>;
-  editing: boolean;
-}) {
-  if (cell.kind && cell.cells) {
-    return <LayoutNodeView node={cell as DetailLayoutNode} fieldsById={fieldsById} editing={editing} />;
-  }
+        const boxFields = box.fields
+          .map((resolved) => (resolved.property ? fieldsById.get(resolved.property.notionPropertyId) : undefined))
+          .filter((field): field is FieldData => Boolean(field));
 
-  const fields = cell.props.map((propertyId) => fieldsById.get(propertyId)).filter((field): field is FieldData => !!field);
-  if (!fields.length) return <div className="min-h-20 rounded-lg border border-dashed border-stone-200" />;
-
-  return (
-    <div className="overflow-hidden rounded-lg border border-stone-200">
-      {fields.map((field, index) => (
-        <div key={field.propertyId} className={index ? "border-t border-stone-100" : ""}>
-          {editing ? (
-            <div className="p-4"><EditField field={field} /></div>
-          ) : (
-            <div className="grid grid-cols-3 gap-3 px-4 py-3">
-              <div className="text-sm text-stone-500">{field.name}</div>
-              <div className="col-span-2 text-sm text-stone-800">
-                <PropertyValue value={field.value} displayConfig={field.displayConfig} />
+        return (
+          <div
+            key={box.id}
+            className="min-w-0"
+            style={{
+              gridColumn: box.colSpan > 1 ? `span ${box.colSpan}` : undefined,
+              gridRow: box.rowSpan > 1 ? `span ${box.rowSpan}` : undefined,
+            }}
+          >
+            {boxFields.length === 0 ? (
+              <div className="h-full min-h-20 rounded-lg border border-dashed border-stone-200" />
+            ) : (
+              <div className="overflow-hidden rounded-lg border border-stone-200">
+                {boxFields.map((field, index) => (
+                  <div key={field.propertyId} className={index ? "border-t border-stone-100" : ""}>
+                    {editing ? (
+                      <div className="p-4">
+                        <EditField field={field} />
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-3 px-4 py-3">
+                        <div className="text-sm text-stone-500">
+                          {field.displayConfig.nameOverride?.trim() || field.name}
+                        </div>
+                        <div className="col-span-2 text-sm text-stone-800">
+                          <PropertyValue value={field.value} displayConfig={field.displayConfig} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
-            </div>
-          )}
-        </div>
-      ))}
+            )}
+          </div>
+        );
+      })}
     </div>
   );
-}
-
-function containsProperty(node: DetailLayoutNode, propertyId: string): boolean {
-  return node.cells.some((cell) =>
-    cell.props.includes(propertyId) || (cell.kind && cell.cells ? containsProperty(cell as DetailLayoutNode, propertyId) : false),
-  );
-}
-
-function layoutGridClass(node: DetailLayoutNode) {
-  const ratio = node.ratio?.join(":") ?? "50:50";
-  if (node.kind === "single") return "grid-cols-1";
-  if (node.kind === "stack") return "grid-cols-1";
-  const ratioClass: Record<string, string> = {
-    "50:50": "md:grid-cols-2",
-    "60:40": "md:grid-cols-[3fr_2fr]",
-    "40:60": "md:grid-cols-[2fr_3fr]",
-    "70:30": "md:grid-cols-[7fr_3fr]",
-    "30:70": "md:grid-cols-[3fr_7fr]",
-  };
-  return `grid-cols-1 ${ratioClass[ratio] ?? ratioClass["50:50"]}`;
-}
-
-function cellPlacementClass(kind: DetailLayoutNode["kind"], index: number) {
-  if (kind === "two-col-split-left") {
-    if (index === 2) return "md:col-start-2 md:row-span-2";
-  }
-  if (kind === "two-col-split-right" && index === 0) return "md:row-span-2";
-  return "";
 }
 
 function EditField({ field }: { field: FieldData }) {
