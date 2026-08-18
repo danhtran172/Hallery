@@ -21,7 +21,7 @@ export type CardField = { id: string; showLabel: boolean };
 
 /* ── Layer 1 ─────────────────────────────────────────────────────────────── */
 
-export type CoverSlot = "top" | "left" | "none";
+export type CoverSlot = "top" | "left" | "right" | "none";
 export type CoverOrientation = "landscape" | "portrait" | "square";
 
 export type Arrangement = {
@@ -42,7 +42,9 @@ export const ARRANGEMENTS = {
     regions: ["main", "below"],
     sideBySide: true,
   },
+  "cover-right": { label: "Ảnh phải, content trái", cover: "right", regions: ["main"], sideBySide: true },
   "cover-only": { label: "Chỉ ảnh", cover: "top", regions: [], sideBySide: false },
+  "no-cover": { label: "Không ảnh", cover: "none", regions: ["main"], sideBySide: false },
 } as const satisfies Record<string, Arrangement>;
 
 export type ArrangementId = keyof typeof ARRANGEMENTS;
@@ -52,8 +54,8 @@ export type ArrangementId = keyof typeof ARRANGEMENTS;
  * strip too short to hold anything, so only the taller shapes offer the side layouts.
  */
 export function arrangementsFor(orientation: CoverOrientation): ArrangementId[] {
-  if (orientation === "landscape") return ["cover-top", "cover-only"];
-  return ["cover-top", "cover-left", "cover-left-below", "cover-only"];
+  if (orientation === "landscape") return ["cover-top", "cover-only", "no-cover"];
+  return ["cover-top", "cover-left", "cover-left-below", "cover-right", "cover-only", "no-cover"];
 }
 
 export function isArrangement(value: unknown): value is ArrangementId {
@@ -115,7 +117,8 @@ export function cardKindOf(
   orientation: CoverOrientation,
   extended: boolean,
 ): CardKind {
-  const tall = !ARRANGEMENTS[arrangement].sideBySide && orientation !== "landscape";
+  const spec = ARRANGEMENTS[arrangement];
+  const tall = spec.cover !== "none" && !spec.sideBySide && orientation !== "landscape";
   if (tall) return "doc";
   return extended ? "extra" : "ngang";
 }
@@ -467,7 +470,7 @@ export function resolveCardLayout<T extends CardEligibleProperty>(
   });
 
   const spec = ARRANGEMENTS[source.arrangement];
-  const cover: CoverSlot = coverAspect === "none" ? "none" : spec.cover;
+  const cover: CoverSlot = coverAspect === "none" || spec.cover === "none" ? "none" : spec.cover;
   const overlay = cover === "none" ? [] : pick(source.overlay, MAX_OVERLAY_FIELDS);
 
   const regions: Record<string, ResolvedGrid<T>> = {};
@@ -476,7 +479,7 @@ export function resolveCardLayout<T extends CardEligibleProperty>(
   return {
     arrangement: source.arrangement,
     cover,
-    sideBySide: spec.sideBySide && cover === "left",
+    sideBySide: spec.sideBySide && (cover === "left" || cover === "right"),
     extended: source.extended,
     ratio: source.ratio,
     overlay,

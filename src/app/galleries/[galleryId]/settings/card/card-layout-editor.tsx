@@ -753,7 +753,7 @@ function CardCanvas(props: CanvasProps) {
   const wide: boolean = spec.sideBySide;
   const regions: string[] = [...spec.regions];
 
-  const cover = (
+  const cover = spec.cover === "none" ? null : (
     <div
       className="relative shrink-0 overflow-hidden rounded bg-stone-200 bg-cover bg-center"
       style={{
@@ -775,10 +775,11 @@ function CardCanvas(props: CanvasProps) {
         {wide ? (
           <>
             <div className="flex">
-              {cover}
+              {spec.cover === "left" && cover}
               <div className="min-w-0 flex-1 p-2">
                 <RegionBlock {...props} regionId="main" />
               </div>
+              {spec.cover === "right" && cover}
             </div>
             {regions.includes("below") && (
               <div className="p-2 pt-0">

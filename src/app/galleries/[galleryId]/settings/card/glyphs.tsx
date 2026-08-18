@@ -24,11 +24,21 @@ export function ArrangementGlyph({ id, selected }: { id: ArrangementId; selected
     );
   }
 
-  if (spec.cover === "left") {
+  if (spec.cover === "none") {
+    return (
+      <span aria-hidden className={box}>
+        <span className={`${cell(selected)} flex-1`} />
+      </span>
+    );
+  }
+
+  if (spec.cover === "left" || spec.cover === "right") {
+    const image = <span className={`${cover(selected)} w-1/3`} />;
+    const text = <span className={`${cell(selected)} flex-1`} />;
     const row = (
       <span className="flex flex-1 gap-1">
-        <span className={`${cover(selected)} w-1/3`} />
-        <span className={`${cell(selected)} flex-1`} />
+        {spec.cover === "left" ? image : text}
+        {spec.cover === "left" ? text : image}
       </span>
     );
     return spec.regions.length === 2 ? (

@@ -238,8 +238,9 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
                 {cardLayout.sideBySide ? (
                   <>
                     <div className="flex">
-                      {cover}
+                      {cardLayout.cover === "left" && cover}
                       <div className="pointer-events-none relative min-w-0 flex-1 p-4">{region("main")}</div>
+                      {cardLayout.cover === "right" && cover}
                     </div>
                     {cardLayout.regions.below && (
                       <div className="pointer-events-none relative px-4 pb-4">{region("below")}</div>
