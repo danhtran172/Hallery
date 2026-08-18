@@ -18,6 +18,7 @@ import { syncPropertyConfigs, syncResolvedTypes } from "@/lib/property-config-sy
 import { CategoryBar } from "@/components/category-bar";
 import { bucketPages, filterPagesByCategory } from "@/lib/category";
 import { storedCoverUrl } from "@/lib/cover-store";
+import { parseCardLayout, resolveCardFields } from "@/lib/card-layout";
 
 const GALLERY_GRID_COLUMNS: Record<number, string> = {
   1: "lg:grid-cols-1",
@@ -69,12 +70,8 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
   const pages =
     activeAxis && activeValue ? filterPagesByCategory(allPages, activeAxis, activeValue) : allPages;
 
-  // Show up to 4 non-title properties per card by default; Phase 1 will make this configurable.
-  const visibleProps = gallery.propertyConfigs
-    .filter((p) => p.notionPropertyType !== "title" && !p.hidden && !p.isMissing)
-    .slice(0, 4);
-
   const galleryConfig = parseGalleryConfig(gallery.displayConfig);
+  const cardFields = resolveCardFields(parseCardLayout(galleryConfig.card), gallery.propertyConfigs);
   const cardsPerRow = resolveCardsPerRow(galleryConfig);
   const coverRatio = resolveCoverRatio(galleryConfig);
   const coverSource = galleryConfig.coverSource;
@@ -119,6 +116,12 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
             className="text-xs text-stone-500 hover:underline"
           >
             Phân loại
+          </Link>
+          <Link
+            href={`/galleries/${galleryId}/settings/card`}
+            className="text-xs text-stone-500 hover:underline"
+          >
+            Bố cục card
           </Link>
           <Link
             href={`/galleries/${galleryId}/settings/layout`}
@@ -193,20 +196,24 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
                     <span className="font-medium text-stone-900">{title}</span>
                   </div>
                   <dl className="flex flex-col gap-1 text-sm text-stone-600">
-                    {visibleProps.map((cfg) => (
-                      (() => {
-                        const value = Object.values(page.properties).find((property) => property.id === cfg.notionPropertyId);
-                        if (!value) return null;
-                        return (
-                          <div key={cfg.id} className="flex items-baseline gap-2">
-                            <dt className="w-24 shrink-0 truncate text-xs text-stone-400">{cfg.notionPropertyName}</dt>
-                            <dd className="min-w-0 flex-1 [&_a]:pointer-events-auto">
-                              <PropertyValue value={value} displayConfig={parseDisplayConfig(cfg.displayConfig)} />
-                            </dd>
-                          </div>
-                        );
-                      })()
-                    ))}
+                    {cardFields.map(({ property: cfg, showLabel }) => {
+                      const value = Object.values(page.properties).find(
+                        (property) => property.id === cfg.notionPropertyId,
+                      );
+                      if (!value) return null;
+                      return (
+                        <div key={cfg.id} className="flex items-baseline gap-2">
+                          {showLabel && (
+                            <dt className="w-24 shrink-0 truncate text-xs text-stone-400">
+                              {cfg.notionPropertyName}
+                            </dt>
+                          )}
+                          <dd className="min-w-0 flex-1 [&_a]:pointer-events-auto">
+                            <PropertyValue value={value} displayConfig={parseDisplayConfig(cfg.displayConfig)} />
+                          </dd>
+                        </div>
+                      );
+                    })}
                   </dl>
                 </div>
               </div>

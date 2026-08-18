@@ -1,4 +1,5 @@
 import type { Client, DataSourceObjectResponse, PageObjectResponse } from "@notionhq/client";
+import type { CardLayout } from "@/lib/card-layout";
 
 /** Where a card's cover image comes from. Anything but `content_image` is free — it rides along
  *  with the page data the Gallery already fetches. */
@@ -22,6 +23,8 @@ export type GalleryConfig = {
   coverSource?: string;
   /** Number of cards shown across the gallery on desktop. */
   cardsPerRow?: number;
+  /** Which properties a card shows and in what order — see lib/card-layout. */
+  card?: CardLayout;
 };
 
 export function parseGalleryConfig(raw: string): GalleryConfig {
