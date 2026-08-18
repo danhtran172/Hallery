@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { isFullPage } from "@notionhq/client";
+import { isFullDataSource, isFullPage } from "@notionhq/client";
 import { db } from "@/lib/db";
 import { getNotionClient } from "@/lib/notion";
 import { getPageTitle, getTitlePropertyName } from "@/lib/notion-schema";
@@ -8,11 +8,18 @@ import {
   arrangementsFor,
   cardEligibleProperties,
   createDefaultCardLayout,
-  detailLayoutFrom,
   parseCardLayout,
   type CoverOrientation,
 } from "@/lib/card-layout";
-import { COVER_RATIOS, parseGalleryConfig, resolveCoverUrl, resolveDetailWidth } from "@/lib/notion-cover";
+import {
+  COVER_RATIOS,
+  PAGE_COVER,
+  listImagePropertyNames,
+  parseGalleryConfig,
+  resolveCoverUrl,
+  resolveDetailCoverShape,
+  resolveDetailWidth,
+} from "@/lib/notion-cover";
 import { plainTextValue } from "@/lib/property-text";
 import { CardLayoutEditor } from "./card-layout-editor";
 
@@ -43,9 +50,10 @@ export default async function CardLayoutSettingsPage({
     ? config.coverRatio
     : COVER_RATIOS[aspect][0];
 
-  // An untouched detail opens on the card's arrangement without its cover — the same thing
-  // the Card Detail is already rendering, so the editor shows the truth rather than a blank.
-  const detailLayout = parseCardLayout(config.detailCard) ?? detailLayoutFrom(layout, gallery.propertyConfigs);
+  // An untouched detail opens on the card's own arrangement — the same thing the Card
+  // Detail is already rendering, so the editor shows the truth rather than a blank.
+  const detailLayout = parseCardLayout(config.detailCard) ?? layout;
+  const detailShape = resolveDetailCoverShape(config);
 
   const preview = await loadPreviewItem(
     gallery.notionDataSourceId,
@@ -78,9 +86,15 @@ export default async function CardLayoutSettingsPage({
             detailDisplayConfig: p.detailDisplayConfig,
           }))}
           initialShape={{ aspect, ratio }}
+          initialDetailShape={{
+            aspect: detailShape.aspect === "none" ? "landscape" : detailShape.aspect,
+            ratio: detailShape.ratio,
+          }}
           initialLayout={layout}
           initialDetailLayout={detailLayout}
           initialDetailWidth={resolveDetailWidth(config)}
+          initialCoverSource={config.coverSource ?? PAGE_COVER}
+          imageProperties={preview.imageProperties}
           previewTitle={preview.title}
           previewValues={preview.values}
           previewCoverUrl={preview.coverUrl}
@@ -90,8 +104,14 @@ export default async function CardLayoutSettingsPage({
   );
 }
 
-type PreviewItem = { title: string; values: Record<string, string>; coverUrl: string | null };
-const EMPTY_PREVIEW: PreviewItem = { title: "Item mẫu", values: {}, coverUrl: null };
+type PreviewItem = {
+  title: string;
+  values: Record<string, string>;
+  coverUrl: string | null;
+  /** Files/URL properties that could serve as a cover — the source picker's options. */
+  imageProperties: string[];
+};
+const EMPTY_PREVIEW: PreviewItem = { title: "Item mẫu", values: {}, coverUrl: null, imageProperties: [] };
 
 async function loadPreviewItem(
   dataSourceId: string,
@@ -115,6 +135,7 @@ async function loadPreviewItem(
     return {
       title: getPageTitle(page, titleProperty),
       values,
+      imageProperties: isFullDataSource(dataSource) ? listImagePropertyNames(dataSource) : [],
       // Content-image covers resolve lazily elsewhere; the preview settles for the frame
       // rather than spending a blocks crawl here.
       coverUrl: resolveCoverUrl(page, coverSource),

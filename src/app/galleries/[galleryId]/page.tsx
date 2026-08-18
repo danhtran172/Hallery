@@ -136,12 +136,6 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
             Bố cục card
           </Link>
           <Link
-            href={`/galleries/${galleryId}/settings/cover`}
-            className="text-xs text-stone-500 hover:underline"
-          >
-            Ảnh bìa
-          </Link>
-          <Link
             href={`/galleries/${galleryId}/settings/display`}
             className="text-xs text-stone-500 hover:underline"
           >

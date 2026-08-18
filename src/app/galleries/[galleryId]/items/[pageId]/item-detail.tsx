@@ -27,12 +27,16 @@ export function ItemDetail({
   pageId,
   fields,
   layout,
+  coverUrl,
+  coverRatio,
   notionUrl,
 }: {
   galleryId: string;
   pageId: string;
   fields: FieldData[];
   layout: DetailLayout;
+  coverUrl: string | null;
+  coverRatio: string;
   notionUrl: string;
 }) {
   const [editing, setEditing] = useState(false);
@@ -64,7 +68,13 @@ export function ItemDetail({
 
       {editing ? (
         <form action={formAction} className="flex flex-col gap-4">
-          <DetailLayoutRenderer fields={fields} layout={layout} editing />
+          <DetailLayoutRenderer
+            fields={fields}
+            layout={layout}
+            coverUrl={coverUrl}
+            coverRatio={coverRatio}
+            editing
+          />
           {state.error && <p className="text-sm text-red-600">{state.error}</p>}
           <div className="flex gap-2">
             <button
@@ -77,27 +87,43 @@ export function ItemDetail({
           </div>
         </form>
       ) : (
-        <DetailLayoutRenderer fields={fields} layout={layout} editing={false} />
+        <DetailLayoutRenderer
+          fields={fields}
+          layout={layout}
+          coverUrl={coverUrl}
+          coverRatio={coverRatio}
+          editing={false}
+        />
       )}
     </div>
   );
 }
 
-/** Shared renderer for Card Detail and inline edit mode. */
+/**
+ * Shared renderer for Card Detail and inline edit mode.
+ *
+ * Lays the cover out the way the card does — above, beside, or absent — so the detail is
+ * the same arrangement at page size rather than a second design.
+ */
 function DetailLayoutRenderer({
   fields,
   layout,
+  coverUrl,
+  coverRatio,
   editing,
 }: {
   fields: FieldData[];
   layout: DetailLayout;
+  coverUrl: string | null;
+  coverRatio: string;
   editing: boolean;
 }) {
   const fieldsById = new Map(fields.map((field) => [field.propertyId, field]));
-  const grid = layout.regions.main;
-  const placed = grid?.boxes.some((box) => box.fields.some((f) => !f.isTitle && f.property));
+  const hasFields = Object.values(layout.regions).some((grid) =>
+    grid.boxes.some((box) => box.fields.some((f) => !f.isTitle && f.property)),
+  );
 
-  if (!grid || !placed) {
+  if (!hasFields && layout.cover === "none") {
     return (
       <p className="rounded-lg border border-dashed border-stone-300 px-4 py-8 text-center text-sm text-stone-500">
         Chưa có property nào trong bố cục này. Vào Bố cục card → Card Detail để thêm field.
@@ -105,7 +131,41 @@ function DetailLayoutRenderer({
     );
   }
 
-  return <DetailGridView grid={grid} fieldsById={fieldsById} editing={editing} />;
+  const cover =
+    layout.cover === "none" ? null : (
+      <div
+        className="shrink-0 overflow-hidden rounded-lg bg-stone-200 bg-cover bg-center"
+        style={{
+          aspectRatio: coverRatio,
+          width: layout.sideBySide ? `${layout.ratio[0]}%` : "100%",
+          ...(coverUrl ? { backgroundImage: `url(${JSON.stringify(coverUrl)})` } : {}),
+        }}
+      />
+    );
+
+  const content = (
+    <div className="flex min-w-0 flex-1 flex-col gap-4">
+      {Object.entries(layout.regions).map(([id, grid]) => (
+        <DetailGridView key={id} grid={grid} fieldsById={fieldsById} editing={editing} />
+      ))}
+    </div>
+  );
+
+  if (layout.sideBySide) {
+    return (
+      <div className={`flex gap-5 ${layout.cover === "right" ? "flex-row-reverse" : ""}`}>
+        {cover}
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      {cover}
+      {content}
+    </div>
+  );
 }
 
 function DetailGridView({

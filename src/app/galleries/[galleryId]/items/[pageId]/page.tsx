@@ -7,11 +7,17 @@ import { EDITABLE_PROPERTY_TYPES, READONLY_PROPERTY_TYPES } from "@/lib/notion-w
 import { parseDisplayConfig } from "@/lib/display-config";
 import {
   createDefaultCardLayout,
-  detailLayoutFrom,
   parseCardLayout,
   resolveCardLayout,
 } from "@/lib/card-layout";
-import { parseGalleryConfig, resolveDetailWidth } from "@/lib/notion-cover";
+import {
+  CONTENT_IMAGE,
+  parseGalleryConfig,
+  resolveCoverUrl,
+  resolveDetailCoverShape,
+  resolveDetailWidth,
+} from "@/lib/notion-cover";
+import { storedCoverUrl } from "@/lib/cover-store";
 import { isFullDataSource, isFullPage } from "@notionhq/client";
 import { ItemDetail, type FieldData } from "./item-detail";
 
@@ -68,12 +74,12 @@ export default async function ItemDetailPage({
       return aOrder - bOrder || a.name.localeCompare(b.name, "vi");
     });
 
-  // An untouched detail borrows the gallery card's arrangement, minus its cover — that is
-  // what "giống gallery card cho tới khi custom" means in storage.
+  // An untouched detail borrows the gallery card's arrangement whole — that is what
+  // "giống gallery card cho tới khi custom" means in storage.
   const galleryConfig = parseGalleryConfig(gallery.displayConfig);
   const galleryCard = parseCardLayout(galleryConfig.card) ?? createDefaultCardLayout(gallery.propertyConfigs);
-  const detailCard =
-    parseCardLayout(galleryConfig.detailCard) ?? detailLayoutFrom(galleryCard, gallery.propertyConfigs);
+  const detailCard = parseCardLayout(galleryConfig.detailCard) ?? galleryCard;
+  const coverShape = resolveDetailCoverShape(galleryConfig);
   const layout = resolveCardLayout(
     detailCard,
     gallery.propertyConfigs.map((p) => ({
@@ -82,8 +88,26 @@ export default async function ItemDetailPage({
       notionPropertyType: p.notionPropertyType,
       isMissing: p.isMissing,
     })),
-    "none",
+    coverShape.aspect,
   );
+
+  // Free when the cover is the page's own or a property; a content image costs a blocks
+  // crawl, so that one is served from whatever an earlier gallery visit already cached.
+  const coverSource = galleryConfig.coverSource;
+  const cached =
+    layout.cover !== "none" && coverSource === CONTENT_IMAGE
+      ? await db.pageImageCache.findFirst({
+          where: {
+            notionPageId: pageId,
+            OR: [{ storedFile: { not: null } }, { expiresAt: { gt: new Date() } }],
+          },
+        })
+      : null;
+  const coverUrl =
+    layout.cover === "none"
+      ? null
+      : (resolveCoverUrl(pageRes, coverSource) ??
+        (cached?.storedFile ? storedCoverUrl(pageId) : (cached?.imageUrl ?? null)));
 
   return (
     <div className="mx-auto px-6 py-12" style={{ maxWidth: resolveDetailWidth(galleryConfig) }}>
@@ -95,7 +119,15 @@ export default async function ItemDetailPage({
         <h1 className="text-2xl font-semibold text-stone-900">{title}</h1>
       </div>
 
-      <ItemDetail galleryId={galleryId} pageId={pageId} fields={fields} layout={layout} notionUrl={pageRes.url} />
+      <ItemDetail
+        galleryId={galleryId}
+        pageId={pageId}
+        fields={fields}
+        layout={layout}
+        coverUrl={coverUrl}
+        coverRatio={coverShape.ratio.replace(":", " / ")}
+        notionUrl={pageRes.url}
+      />
     </div>
   );
 }

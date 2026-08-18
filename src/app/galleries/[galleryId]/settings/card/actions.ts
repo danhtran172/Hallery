@@ -14,9 +14,12 @@ import {
 } from "@/lib/card-layout";
 import { parseDisplayConfig, type DisplayConfig } from "@/lib/display-config";
 import {
+  CONTENT_IMAGE,
   COVER_RATIOS,
   MAX_DETAIL_WIDTH,
   MIN_DETAIL_WIDTH,
+  PAGE_COVER,
+  PROPERTY_PREFIX,
   parseGalleryConfig,
   type CoverAspect,
 } from "@/lib/notion-cover";
@@ -96,6 +99,19 @@ export async function saveCardLayout(
     const ratio = String(formData.get("coverRatio") ?? "");
     config.coverAspect = aspect as CoverAspect;
     config.coverRatio = ratios.includes(ratio) ? ratio : ratios[0];
+  }
+
+  const source = String(formData.get("coverSource") ?? "");
+  if (source === PAGE_COVER || source === CONTENT_IMAGE || source.startsWith(PROPERTY_PREFIX)) {
+    config.coverSource = source;
+  }
+
+  const detailAspect = String(formData.get("detailCoverAspect") ?? "");
+  if (detailAspect === "landscape" || detailAspect === "portrait" || detailAspect === "square") {
+    const ratios = COVER_RATIOS[detailAspect];
+    const detailRatio = String(formData.get("detailCoverRatio") ?? "");
+    config.detailCoverAspect = detailAspect as CoverAspect;
+    config.detailCoverRatio = ratios.includes(detailRatio) ? detailRatio : ratios[0];
   }
 
   const writes = [

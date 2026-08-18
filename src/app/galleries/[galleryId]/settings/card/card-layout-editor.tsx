@@ -24,7 +24,6 @@ import {
   canExtend,
   canMerge,
   cardKindOf,
-  detailLayoutFrom,
   makeGrid,
   maxRowsBesideCover,
   mergeBox,
@@ -40,7 +39,14 @@ import {
   type GridBox,
   type MergeDirection,
 } from "@/lib/card-layout";
-import { COVER_RATIOS, MAX_DETAIL_WIDTH, MIN_DETAIL_WIDTH } from "@/lib/notion-cover";
+import {
+  CONTENT_IMAGE,
+  COVER_RATIOS,
+  MAX_DETAIL_WIDTH,
+  MIN_DETAIL_WIDTH,
+  PAGE_COVER,
+  PROPERTY_PREFIX,
+} from "@/lib/notion-cover";
 import { parseDisplayConfig, type DisplayConfig } from "@/lib/display-config";
 import { saveCardLayout, type SaveCardLayoutState } from "./actions";
 import { ArrangementGlyph, RatioGlyph } from "./glyphs";
@@ -63,9 +69,12 @@ export function CardLayoutEditor({
   galleryId,
   properties,
   initialShape,
+  initialDetailShape,
   initialLayout,
   initialDetailLayout,
   initialDetailWidth,
+  initialCoverSource,
+  imageProperties,
   previewTitle,
   previewValues,
   previewCoverUrl,
@@ -73,9 +82,12 @@ export function CardLayoutEditor({
   galleryId: string;
   properties: EditableCardProperty[];
   initialShape: CoverShape;
+  initialDetailShape: CoverShape;
   initialLayout: CardLayout;
   initialDetailLayout: CardLayout;
   initialDetailWidth: number;
+  initialCoverSource: string;
+  imageProperties: string[];
   previewTitle: string;
   previewValues: Record<string, string>;
   previewCoverUrl: string | null;
@@ -89,6 +101,8 @@ export function CardLayoutEditor({
   const [galleryConfigs, setGalleryConfigs] = useState<Record<string, DisplayConfig>>({});
   const [detailConfigs, setDetailConfigs] = useState<Record<string, DisplayConfig>>({});
   const [detailWidth, setDetailWidth] = useState(initialDetailWidth);
+  // Where the image comes from is a property of the data, not of a view, so both share it.
+  const [coverSource, setCoverSource] = useState(initialCoverSource);
 
   const detailMode = mode === "detail";
   const layout = detailMode ? detailLayout : galleryLayout;
@@ -96,7 +110,11 @@ export function CardLayoutEditor({
   const configs = detailMode ? detailConfigs : galleryConfigs;
   const setConfigs = detailMode ? setDetailConfigs : setGalleryConfigs;
 
-  const [shape, setShape] = useState<CoverShape>(initialShape);
+  const [galleryShape, setGalleryShape] = useState<CoverShape>(initialShape);
+  const [detailShape, setDetailShape] = useState<CoverShape>(initialDetailShape);
+  const shape = detailMode ? detailShape : galleryShape;
+  const setShape = detailMode ? setDetailShape : setGalleryShape;
+
   const [selected, setSelected] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -105,8 +123,9 @@ export function CardLayoutEditor({
 
   /** Makes the detail match the card, which is the state it starts in before anyone edits it. */
   function syncFromGalleryCard() {
-    // The page already filtered these down to card-eligible ones.
-    setDetailLayout(detailLayoutFrom(galleryLayout, properties.map((p) => ({ ...p, isMissing: false }))));
+    setDetailLayout(galleryLayout);
+    setDetailShape(galleryShape);
+    setDetailWidth(initialDetailWidth);
     setDetailConfigs(
       Object.fromEntries(
         properties.map((p) => [
@@ -306,9 +325,12 @@ export function CardLayoutEditor({
     <form action={formAction} className="flex h-[calc(100vh-13rem)] min-h-[32rem] gap-4 pb-2">
       <input type="hidden" name="layout" value={JSON.stringify(galleryLayout)} />
       <input type="hidden" name="detailLayout" value={JSON.stringify(detailLayout)} />
-      <input type="hidden" name="coverAspect" value={shape.aspect} />
-      <input type="hidden" name="coverRatio" value={shape.ratio} />
+      <input type="hidden" name="coverAspect" value={galleryShape.aspect} />
+      <input type="hidden" name="coverRatio" value={galleryShape.ratio} />
+      <input type="hidden" name="detailCoverAspect" value={detailShape.aspect} />
+      <input type="hidden" name="detailCoverRatio" value={detailShape.ratio} />
       <input type="hidden" name="detailWidth" value={detailWidth} />
+      <input type="hidden" name="coverSource" value={coverSource} />
       <input type="hidden" name="propertyConfigs" value={JSON.stringify(galleryConfigs)} />
       <input type="hidden" name="detailPropertyConfigs" value={JSON.stringify(detailConfigs)} />
 
@@ -338,22 +360,23 @@ export function CardLayoutEditor({
             />
           )}
 
+          <CoverSourceSelect
+            value={coverSource}
+            imageProperties={imageProperties}
+            onChange={setCoverSource}
+          />
+
           <div className="flex items-stretch gap-2">
-            {/* A Card Detail draws no cover, so its shape and placement mean nothing here. */}
-            {!detailMode && (
-              <>
-                <CoverShapeButton shape={shape} onChange={changeShape} />
-                <ArrangementButton
-                  value={layout.arrangement}
-                  orientation={shape.aspect}
-                  extended={layout.extended}
-                  onChange={(arrangement, extended) => {
-                    setArrangement(arrangement);
-                    setLayout((c) => ({ ...c, extended }));
-                  }}
-                />
-              </>
-            )}
+            <CoverShapeButton shape={shape} onChange={changeShape} />
+            <ArrangementButton
+              value={layout.arrangement}
+              orientation={shape.aspect}
+              extended={layout.extended}
+              onChange={(arrangement, extended) => {
+                setArrangement(arrangement);
+                setLayout((c) => ({ ...c, extended }));
+              }}
+            />
             <button
               type="button"
               aria-label="Chỉnh khung bố cục"
@@ -363,7 +386,7 @@ export function CardLayoutEditor({
                 setEditingLayout((open) => !open);
                 setSelected(null);
               }}
-              className={`shrink-0 rounded-lg border text-sm ${detailMode ? "flex-1 py-1.5" : "w-9"} ${
+              className={`w-9 shrink-0 rounded-lg border text-sm ${
                 editingLayout
                   ? "border-emerald-700 bg-emerald-600 text-white"
                   : "border-stone-300 bg-white text-stone-500 hover:border-stone-500"
@@ -554,6 +577,40 @@ function DetailBar({
         Sync từ gallery card
       </button>
     </div>
+  );
+}
+
+/**
+ * Which image a cover shows. Shared by both views on purpose: the source says where the
+ * picture comes from, and a card and its detail showing different pictures of the same
+ * item would just look like a bug.
+ */
+function CoverSourceSelect({
+  value,
+  imageProperties,
+  onChange,
+}: {
+  value: string;
+  imageProperties: string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-600">
+      <span className="shrink-0">Ảnh</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="min-w-0 flex-1 rounded border border-stone-300 px-1 py-1 text-xs outline-none focus:border-emerald-600"
+      >
+        <option value={PAGE_COVER}>Ảnh bìa của page</option>
+        {imageProperties.map((name) => (
+          <option key={name} value={`${PROPERTY_PREFIX}${name}`}>
+            Prop: {name}
+          </option>
+        ))}
+        <option value={CONTENT_IMAGE}>Ảnh trong nội dung page</option>
+      </select>
+    </label>
   );
 }
 

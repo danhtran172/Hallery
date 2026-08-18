@@ -35,7 +35,24 @@ export type GalleryConfig = {
   detailCard?: CardLayout;
   /** Max width of the Card Detail, in px. */
   detailWidth?: number;
+  /**
+   * The detail's own cover shape. A thumbnail and a page rarely want the same crop — square
+   * reads well in a grid, wide reads well above an article — so the two are set apart, the
+   * way their widths and their property formatting are. Absent falls back to the card's.
+   */
+  detailCoverAspect?: CoverAspect;
+  detailCoverRatio?: string;
 };
+
+/** Cover shape for a view, falling back to the gallery card's while the detail has none. */
+export function resolveDetailCoverShape(config: GalleryConfig): { aspect: CoverAspect; ratio: string } {
+  const aspect = config.detailCoverAspect ?? config.coverAspect ?? "landscape";
+  if (aspect === "none") return { aspect, ratio: COVER_RATIOS.landscape[0] };
+
+  const allowed = COVER_RATIOS[aspect];
+  const stored = config.detailCoverAspect ? config.detailCoverRatio : config.coverRatio;
+  return { aspect, ratio: stored && allowed.includes(stored) ? stored : allowed[0] };
+}
 
 export const MIN_DETAIL_WIDTH = 480;
 export const MAX_DETAIL_WIDTH = 1600;
