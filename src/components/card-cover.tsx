@@ -3,12 +3,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { saveCoverPosition } from "@/app/galleries/[galleryId]/cover-position-actions";
 
+// The source URL arrives after the preview API resolves it, so next/image cannot optimize
+// this two-stage load without starting the full image early.
+/* eslint-disable @next/next/no-img-element */
+
 /**
  * Card cover image, with Ctrl-drag to reposition.
  *
- * A URL known at render time is painted immediately. The `content_image` source has
- * none, so it resolves its own — but only once the card scrolls into view, which keeps
- * a 90-card gallery from firing 90 Notion calls at once and tripping the rate limit.
+ * Each source starts with a tiny local WebP preview, then fades into the full image only
+ * after that preview appears. Resolution stays near the viewport so a 90-card gallery
+ * never starts 90 image jobs at once.
  *
  * Painted as a background image on purpose: some Notion cover URLs refuse to be
  * hotlinked, and a background degrades to the plain block instead of a broken icon.
@@ -18,34 +22,40 @@ import { saveCoverPosition } from "@/app/galleries/[galleryId]/cover-position-ac
  */
 export function CardCover({
   ratio,
-  url,
   galleryId,
   pageId,
-  lazy,
   initialX,
   initialY,
 }: {
   ratio: string;
-  url: string | null;
   galleryId: string;
   pageId: string;
-  lazy: boolean;
   initialX: number;
   initialY: number;
 }) {
-  const [resolved, setResolved] = useState<string | null>(url);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [resolved, setResolved] = useState<string | null>(null);
   const [pos, setPos] = useState({ x: initialX, y: initialY });
   const [ctrlHeld, setCtrlHeld] = useState(false);
   const [dragging, setDragging] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const fullUrlRef = useRef<string | null>(null);
+  const requestedFullRef = useRef<string | null>(null);
   // Mirrors `pos` so the drag-end handler can read the final value without reaching
   // into a state updater — updaters must stay pure, and a server action inside one
   // fires a Router update mid-render.
   const posRef = useRef({ x: initialX, y: initialY });
 
-  // Resolve the content image lazily, once the card is near the viewport.
+  const loadFullImage = useCallback((url: string | null) => {
+    if (!url || requestedFullRef.current === url) return;
+    requestedFullRef.current = url;
+    const image = new Image();
+    image.onload = () => setResolved(url);
+    image.src = url;
+  }, []);
+
+  // Resolve any cover lazily, once the card is near the viewport.
   useEffect(() => {
-    if (url || !lazy) return;
     const node = ref.current;
     if (!node) return;
 
@@ -56,10 +66,13 @@ export function CardCover({
         if (!entries.some((e) => e.isIntersecting)) return;
         observer.disconnect();
 
-        fetch(`/api/galleries/${galleryId}/content-image?pageId=${encodeURIComponent(pageId)}`)
+        fetch(`/api/galleries/${galleryId}/cover-preview?pageId=${encodeURIComponent(pageId)}`)
           .then((res) => (res.ok ? res.json() : null))
           .then((data) => {
-            if (!cancelled && data?.url) setResolved(data.url);
+            if (cancelled || !data) return;
+            fullUrlRef.current = data.fullUrl ?? null;
+            setPreviewUrl(data.previewUrl ?? null);
+            if (!data.previewUrl) loadFullImage(data.fullUrl ?? null);
           })
           .catch(() => {});
       },
@@ -71,7 +84,7 @@ export function CardCover({
       cancelled = true;
       observer.disconnect();
     };
-  }, [url, lazy, galleryId, pageId]);
+  }, [galleryId, pageId, loadFullImage]);
 
   // Ctrl arms repositioning; without it the cover stays click-through so the card link works.
   useEffect(() => {
@@ -131,16 +144,33 @@ export function CardCover({
     <div
       ref={ref}
       onPointerDown={onPointerDown}
-      className={`relative w-full shrink-0 bg-stone-100 bg-cover ${
+      className={`relative w-full shrink-0 overflow-hidden bg-stone-100 ${
         armed ? `z-20 ${dragging ? "cursor-grabbing" : "cursor-grab"} ring-2 ring-emerald-500` : "pointer-events-none"
       }`}
       style={{
         aspectRatio: ratio,
-        ...(resolved
-          ? { backgroundImage: `url(${JSON.stringify(resolved)})`, backgroundPosition: `${pos.x}% ${pos.y}%` }
-          : {}),
       }}
     >
+      {previewUrl && (
+        <img
+          src={previewUrl}
+          alt=""
+          className={`absolute inset-0 h-full w-full scale-105 object-cover blur-lg transition-opacity duration-300 ${
+            resolved ? "opacity-0" : "opacity-100"
+          }`}
+          style={{ objectPosition: `${pos.x}% ${pos.y}%` }}
+          onLoad={() => loadFullImage(fullUrlRef.current)}
+          onError={() => loadFullImage(fullUrlRef.current)}
+        />
+      )}
+      {resolved && (
+        <img
+          src={resolved}
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover opacity-100 transition-opacity duration-300"
+          style={{ objectPosition: `${pos.x}% ${pos.y}%` }}
+        />
+      )}
       {resolved && (
         <span
           className={`pointer-events-none absolute bottom-2 left-2 rounded bg-black/65 px-2 py-1 text-[11px] text-white transition-opacity ${

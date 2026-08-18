@@ -5,17 +5,14 @@ import { getGalleryNotionSnapshot } from "@/lib/gallery-notion-cache";
 import { getPageIcon, getPageTitle, getTitlePropertyName } from "@/lib/notion-schema";
 import { CardCover } from "@/components/card-cover";
 import {
-  CONTENT_IMAGE,
   parseGalleryConfig,
   resolveCardsPerRow,
   resolveCoverRatio,
-  resolveCoverUrl,
 } from "@/lib/notion-cover";
 import { isFullDataSource, isFullPage } from "@notionhq/client";
 import { syncPropertyConfigs, syncResolvedTypes } from "@/lib/property-config-sync";
 import { CategoryBar } from "@/components/category-bar";
 import { bucketPages, filterPagesByCategory } from "@/lib/category";
-import { storedCoverUrl } from "@/lib/cover-store";
 import { CARD_WIDTH_FACTOR, cardKindOf, parseCardLayout, resolveCardLayout } from "@/lib/card-layout";
 import { CardGrid } from "@/components/card-grid";
 import { RelationGalleryMenu } from "@/components/relation-gallery-menu";
@@ -81,30 +78,12 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
   );
   const cardsPerRow = resolveCardsPerRow(galleryConfig);
   const coverRatio = resolveCoverRatio(galleryConfig);
-  const coverSource = galleryConfig.coverSource;
 
   const cardKind = cardKindOf(cardLayout.arrangement, cardKindOrientation, cardLayout.extended);
 
   const positions = new Map(
     (await db.coverPosition.findMany({ where: { galleryId } })).map((p) => [p.notionPageId, p]),
   );
-
-  // Content images already resolved on a previous visit are painted server-side, leaving
-  // the client to chase only the ones we've never seen. Pages we hold a local copy of are
-  // served from Hallery, so they keep working long after Notion's signed URL has expired.
-  const cachedImages =
-    coverSource === CONTENT_IMAGE
-      ? new Map(
-          (
-            await db.pageImageCache.findMany({
-              where: {
-                notionPageId: { in: pages.map((p) => p.id) },
-                OR: [{ storedFile: { not: null } }, { expiresAt: { gt: new Date() } }],
-              },
-            })
-          ).map((c) => [c.notionPageId, c.storedFile ? storedCoverUrl(c.notionPageId) : c.imageUrl]),
-        )
-      : new Map<string, string | null>();
 
   return (
     <div className="w-full px-6 py-12">
@@ -173,9 +152,6 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
           {pages.map((page) => {
             const title = getPageTitle(page, titlePropertyName);
             const icon = getPageIcon(page);
-            const coverUrl = coverRatio
-              ? (resolveCoverUrl(page, coverSource) ?? cachedImages.get(page.id) ?? null)
-              : null;
             const showCover = cardLayout.cover !== "none" && coverRatio;
             const valueOf = (propertyId: string) =>
               Object.values(page.properties).find((property) => property.id === propertyId);
@@ -191,10 +167,8 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
               >
                 <CardCover
                   ratio={coverRatio}
-                  url={coverUrl}
                   galleryId={galleryId}
                   pageId={page.id}
-                  lazy={coverSource === CONTENT_IMAGE}
                   initialX={positions.get(page.id)?.posX ?? 50}
                   initialY={positions.get(page.id)?.posY ?? 50}
                 />
