@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { UpdatePageParameters } from "@notionhq/client";
 import { db } from "@/lib/db";
+import { invalidateGalleryNotionCache } from "@/lib/gallery-notion-cache";
 import { getNotionClient } from "@/lib/notion";
 import { buildPropertyUpdate } from "@/lib/notion-write";
 
@@ -43,6 +44,7 @@ export async function saveItem(
     return { error: "Không lưu được — Notion từ chối request. Có thể property đã đổi kiểu hoặc bị xoá." };
   }
 
+  await invalidateGalleryNotionCache(galleryId);
   revalidatePath(`/galleries/${galleryId}/items/${pageId}`);
   revalidatePath(`/galleries/${galleryId}`);
   return { error: null };

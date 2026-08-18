@@ -51,10 +51,23 @@ model Gallery {
 
   propertyConfigs    PropertyConfig[]
   categoryAxes       CategoryAxis[]
+  notionCache        GalleryNotionCache?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
   @@unique([workspaceId, notionDataSourceId])
+}
+
+/// A short-lived, persisted snapshot of the Notion calls needed to render a Gallery.
+/// Keeping it separate from `Gallery` makes expiration and invalidation cheap, while
+/// cascading deletion keeps it from outliving a removed Gallery.
+model GalleryNotionCache {
+  galleryId       String   @id
+  gallery         Gallery  @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+  dataSourceJson  String
+  queryJson       String
+  expiresAt       DateTime
+  updatedAt       DateTime @updatedAt
 }
 
 /// Remembers the first content image found in a Notion page, so the Gallery doesn't

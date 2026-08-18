@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
-import { getNotionClient } from "@/lib/notion";
+import { getGalleryNotionSnapshot } from "@/lib/gallery-notion-cache";
 import { getPageIcon, getPageTitle, getTitlePropertyName } from "@/lib/notion-schema";
 import { CardCover } from "@/components/card-cover";
 import {
@@ -37,17 +37,15 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
   });
   if (!gallery) notFound();
 
-  const notion = getNotionClient(gallery.workspace.accessToken);
-
-  const dataSourceRes = await notion.dataSources.retrieve({ data_source_id: gallery.notionDataSourceId });
+  const { dataSourceRes, queryRes } = await getGalleryNotionSnapshot({
+    galleryId,
+    dataSourceId: gallery.notionDataSourceId,
+    accessToken: gallery.workspace.accessToken,
+  });
   const dataSource = isFullDataSource(dataSourceRes) ? dataSourceRes : null;
   if (dataSource) await syncPropertyConfigs(galleryId, gallery.propertyConfigs, dataSource);
   const titlePropertyName = dataSource ? getTitlePropertyName(dataSource.properties) : null;
 
-  const queryRes = await notion.dataSources.query({
-    data_source_id: gallery.notionDataSourceId,
-    page_size: 100,
-  });
   const allPages = queryRes.results.filter(isFullPage);
 
   // What each formula/rollup evaluates to is only visible on a page value, and we already
