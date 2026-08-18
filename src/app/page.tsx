@@ -3,7 +3,14 @@ import { db } from "@/lib/db";
 
 export default async function Home() {
   const workspaces = await db.workspace.findMany({
-    include: { galleries: { where: { parentGalleryId: null }, orderBy: { sortOrder: "asc" } } },
+    // autoAdded galleries are relation targets, reachable from the gallery that links to
+    // them rather than listed here — otherwise one database drags a dozen along with it.
+    include: {
+      galleries: {
+        where: { parentGalleryId: null, autoAdded: false },
+        orderBy: { sortOrder: "asc" },
+      },
+    },
     orderBy: { createdAt: "asc" },
   });
 

@@ -18,6 +18,8 @@ import { bucketPages, filterPagesByCategory } from "@/lib/category";
 import { storedCoverUrl } from "@/lib/cover-store";
 import { CARD_WIDTH_FACTOR, cardKindOf, parseCardLayout, resolveCardLayout } from "@/lib/card-layout";
 import { CardGrid } from "@/components/card-grid";
+import { RelationGalleryMenu } from "@/components/relation-gallery-menu";
+import { listRelationGalleries } from "@/lib/relation-galleries";
 
 /** Gap between cards, mirrored in the base-width calculation below. */
 const CARD_GAP_REM = 1;
@@ -51,6 +53,12 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
   // What each formula/rollup evaluates to is only visible on a page value, and we already
   // have pages here — so learn it now rather than spending a request on it in Settings.
   await syncResolvedTypes(gallery.propertyConfigs, allPages[0]);
+
+  // Relation axes name other tables rather than values inside this one, so they cannot be
+  // bucketed alongside the rest — they drive the gallery-switching menu instead.
+  const relationGalleries = dataSource
+    ? await listRelationGalleries(gallery.workspaceId, dataSource.properties)
+    : [];
 
   // Category axes bucket and filter the pages already in hand — no extra Notion request.
   // Counts therefore describe the loaded page, hence the "+" when more remain.
@@ -114,6 +122,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
           </p>
         </div>
         <div className="flex items-center gap-4">
+          <RelationGalleryMenu entries={relationGalleries} />
           <Link
             href={`/galleries/${galleryId}/settings/category`}
             className="text-xs text-stone-500 hover:underline"

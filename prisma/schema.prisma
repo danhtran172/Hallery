@@ -40,6 +40,12 @@ model Gallery {
   displayConfig      String    @default("{}")
   detailLayout       String    @default("")
 
+  /// Added by following another gallery's relation rather than picked by hand. These stay
+  /// out of the dashboard — a database only reachable as someone else's relation target is
+  /// noise there — and surface through the relation popup on the gallery that reached it.
+  /// Picking one by hand later clears the flag and promotes it to a normal gallery.
+  autoAdded          Boolean   @default(false)
+
   parentGalleryId    String?
   parentGallery      Gallery?  @relation("SubGalleries", fields: [parentGalleryId], references: [id])
   subGalleries       Gallery[] @relation("SubGalleries")
