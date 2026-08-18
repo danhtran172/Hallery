@@ -81,6 +81,11 @@ model PageImageCache {
   /// are signed and die within the hour, so caching one buys less than a day; a local
   /// copy is what actually keeps a cover on screen without re-asking Notion.
   storedFile   String?
+  /// Tiny local WebP shown while a card's full cover loads.
+  thumbnailFile String?
+  /// The full-image URL (or local filename) this preview was derived from. It keeps a
+  /// changed cover from accidentally reusing an old thumbnail.
+  thumbnailSource String?
   checkedAt    DateTime @updatedAt
 }
 
