@@ -18,7 +18,10 @@ import { syncPropertyConfigs, syncResolvedTypes } from "@/lib/property-config-sy
 import { CategoryBar } from "@/components/category-bar";
 import { bucketPages, filterPagesByCategory } from "@/lib/category";
 import { storedCoverUrl } from "@/lib/cover-store";
-import { parseCardLayout, resolveCardFields } from "@/lib/card-layout";
+import { parseCardLayout, resolveCardLayout } from "@/lib/card-layout";
+
+/** Written out rather than interpolated so Tailwind keeps the class in the build. */
+const CARD_SPAN_CLASS = "sm:col-span-2";
 
 const GALLERY_GRID_COLUMNS: Record<number, string> = {
   1: "lg:grid-cols-1",
@@ -71,7 +74,11 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
     activeAxis && activeValue ? filterPagesByCategory(allPages, activeAxis, activeValue) : allPages;
 
   const galleryConfig = parseGalleryConfig(gallery.displayConfig);
-  const cardFields = resolveCardFields(parseCardLayout(galleryConfig.card), gallery.propertyConfigs);
+  const cardLayout = resolveCardLayout(
+    parseCardLayout(galleryConfig.card),
+    gallery.propertyConfigs,
+    galleryConfig.coverAspect,
+  );
   const cardsPerRow = resolveCardsPerRow(galleryConfig);
   const coverRatio = resolveCoverRatio(galleryConfig);
   const coverSource = galleryConfig.coverSource;
@@ -169,55 +176,85 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
             const coverUrl = coverRatio
               ? (resolveCoverUrl(page, coverSource) ?? cachedImages.get(page.id) ?? null)
               : null;
-            return (
-              <div
-                key={page.id}
-                className="group relative flex flex-col overflow-hidden rounded-lg border border-stone-200 hover:border-emerald-600 hover:shadow-sm"
-              >
-                <Link
-                  href={`/galleries/${galleryId}/items/${page.id}`}
-                  aria-label={title}
-                  className="absolute inset-0 z-10"
-                />
-                {coverRatio && (
-                  <CardCover
-                    ratio={coverRatio}
-                    url={coverUrl}
-                    galleryId={galleryId}
-                    pageId={page.id}
-                    lazy={coverSource === CONTENT_IMAGE}
-                    initialX={positions.get(page.id)?.posX ?? 50}
-                    initialY={positions.get(page.id)?.posY ?? 50}
+            const beside = cardLayout.preset === "beside";
+            const valueOf = (propertyId: string) =>
+                Object.values(page.properties).find((property) => property.id === propertyId);
+
+              return (
+                <div
+                  key={page.id}
+                  className={`group relative overflow-hidden rounded-lg border border-stone-200 hover:border-emerald-600 hover:shadow-sm ${
+                    beside ? "flex" : "flex flex-col"
+                  } ${cardLayout.span === 2 ? CARD_SPAN_CLASS : ""}`}
+                >
+                  <Link
+                    href={`/galleries/${galleryId}/items/${page.id}`}
+                    aria-label={title}
+                    className="absolute inset-0 z-10"
                   />
-                )}
-                <div className="pointer-events-none relative flex flex-col gap-2 p-4">
-                  <div className="flex items-center gap-2">
-                    {icon && <span className="text-lg leading-none">{icon.length <= 4 ? icon : "📄"}</span>}
-                    <span className="font-medium text-stone-900">{title}</span>
-                  </div>
-                  <dl className="flex flex-col gap-1 text-sm text-stone-600">
-                    {cardFields.map(({ property: cfg, showLabel }) => {
-                      const value = Object.values(page.properties).find(
-                        (property) => property.id === cfg.notionPropertyId,
-                      );
-                      if (!value) return null;
-                      return (
-                        <div key={cfg.id} className="flex items-baseline gap-2">
-                          {showLabel && (
-                            <dt className="w-24 shrink-0 truncate text-xs text-stone-400">
-                              {cfg.notionPropertyName}
-                            </dt>
-                          )}
-                          <dd className="min-w-0 flex-1 [&_a]:pointer-events-auto">
-                            <PropertyValue value={value} displayConfig={parseDisplayConfig(cfg.displayConfig)} />
-                          </dd>
+                  {coverRatio && (
+                    <div className={beside ? "relative w-2/5 shrink-0" : "relative"}>
+                      <CardCover
+                        ratio={coverRatio}
+                        url={coverUrl}
+                        galleryId={galleryId}
+                        pageId={page.id}
+                        lazy={coverSource === CONTENT_IMAGE}
+                        initialX={positions.get(page.id)?.posX ?? 50}
+                        initialY={positions.get(page.id)?.posY ?? 50}
+                      />
+                      {cardLayout.overlayFields.length > 0 && (
+                        // Sits above the card-wide link so overlaid links stay clickable,
+                        // and carries a scrim because the image underneath is unknowable.
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-0.5 bg-gradient-to-t from-black/75 via-black/40 to-transparent p-2">
+                          {cardLayout.overlayFields.map(({ property: cfg, showLabel }) => {
+                            const value = valueOf(cfg.notionPropertyId);
+                            if (!value) return null;
+                            return (
+                              <span
+                                key={cfg.id}
+                                className="flex items-baseline gap-1.5 truncate text-xs text-white [&_a]:pointer-events-auto"
+                              >
+                                {showLabel && (
+                                  <span className="shrink-0 text-white/60">{cfg.notionPropertyName}</span>
+                                )}
+                                <PropertyValue
+                                  value={value}
+                                  displayConfig={parseDisplayConfig(cfg.displayConfig)}
+                                />
+                              </span>
+                            );
+                          })}
                         </div>
-                      );
-                    })}
-                  </dl>
+                      )}
+                    </div>
+                  )}
+                  <div className="pointer-events-none relative flex min-w-0 flex-1 flex-col gap-2 p-4">
+                    <div className="flex items-center gap-2">
+                      {icon && <span className="text-lg leading-none">{icon.length <= 4 ? icon : "📄"}</span>}
+                      <span className="min-w-0 truncate font-medium text-stone-900">{title}</span>
+                    </div>
+                    <dl className="flex flex-col gap-1 text-sm text-stone-600">
+                      {cardLayout.fields.map(({ property: cfg, showLabel }) => {
+                        const value = valueOf(cfg.notionPropertyId);
+                        if (!value) return null;
+                        return (
+                          <div key={cfg.id} className="flex items-baseline gap-2">
+                            {showLabel && (
+                              <dt className="w-24 shrink-0 truncate text-xs text-stone-400">
+                                {cfg.notionPropertyName}
+                              </dt>
+                            )}
+                            <dd className="min-w-0 flex-1 [&_a]:pointer-events-auto">
+                              <PropertyValue value={value} displayConfig={parseDisplayConfig(cfg.displayConfig)} />
+                            </dd>
+                          </div>
+                        );
+                      })}
+                    </dl>
+                  </div>
                 </div>
-              </div>
-            );
+              );
           })}
         </div>
       )}

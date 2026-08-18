@@ -2,15 +2,21 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { cardEligibleProperties, type CardField } from "@/lib/card-layout";
+import {
+  MAX_OVERLAY_FIELDS,
+  cardEligibleProperties,
+  isPreset,
+  type CardField,
+  type CardLayout,
+} from "@/lib/card-layout";
 import { parseGalleryConfig } from "@/lib/notion-cover";
 
 export type SaveCardLayoutState = { error: string | null };
 
 /**
- * Stores which properties the gallery cards show and in what order. Only ids that still
- * exist in this gallery's shadow schema are kept, so a stale editor tab can't reintroduce
- * a property Notion has since dropped.
+ * Stores how the gallery's cards are arranged. Only ids still present in this gallery's
+ * shadow schema survive, so a stale editor tab can't reintroduce a property Notion has
+ * since dropped, and a property can only land in one zone.
  */
 export async function saveCardLayout(
   galleryId: string,
@@ -25,30 +31,42 @@ export async function saveCardLayout(
 
   let submitted: unknown;
   try {
-    submitted = JSON.parse(String(formData.get("fields") ?? "[]"));
+    submitted = JSON.parse(String(formData.get("layout") ?? "null"));
   } catch {
     return { error: "Không đọc được cấu hình. Tải lại trang rồi thử lại." };
   }
-  if (!Array.isArray(submitted)) {
+  if (typeof submitted !== "object" || submitted === null) {
     return { error: "Không đọc được cấu hình. Tải lại trang rồi thử lại." };
   }
 
-  const allowed = new Set(
-    cardEligibleProperties(gallery.propertyConfigs).map((p) => p.notionPropertyId),
-  );
-  const seen = new Set<string>();
-  const fields: CardField[] = [];
+  const { preset, span, fields, overlayFields } = submitted as Record<string, unknown>;
+  const allowed = new Set(cardEligibleProperties(gallery.propertyConfigs).map((p) => p.notionPropertyId));
+  const taken = new Set<string>();
 
-  for (const entry of submitted) {
-    if (typeof entry !== "object" || entry === null) continue;
-    const { id, showLabel } = entry as { id?: unknown; showLabel?: unknown };
-    if (typeof id !== "string" || !allowed.has(id) || seen.has(id)) continue;
-    seen.add(id);
-    fields.push({ id, showLabel: showLabel !== false });
-  }
+  const clean = (raw: unknown, limit?: number): CardField[] => {
+    if (!Array.isArray(raw)) return [];
+    const out: CardField[] = [];
+    for (const entry of raw) {
+      if (limit !== undefined && out.length >= limit) break;
+      if (typeof entry !== "object" || entry === null) continue;
+      const { id, showLabel } = entry as { id?: unknown; showLabel?: unknown };
+      if (typeof id !== "string" || !allowed.has(id) || taken.has(id)) continue;
+      taken.add(id);
+      out.push({ id, showLabel: showLabel !== false });
+    }
+    return out;
+  };
+
+  const layout: CardLayout = {
+    preset: isPreset(preset) ? preset : "stack",
+    span: span === 2 ? 2 : 1,
+    // Overlay first: it holds the scarce slots, so it should win a contested property.
+    overlayFields: clean(overlayFields, MAX_OVERLAY_FIELDS),
+    fields: clean(fields),
+  };
 
   const config = parseGalleryConfig(gallery.displayConfig);
-  config.card = { fields };
+  config.card = layout;
 
   await db.gallery.update({
     where: { id: galleryId },

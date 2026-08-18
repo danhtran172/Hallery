@@ -1,6 +1,26 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  KeyboardSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
+  MAX_OVERLAY_FIELDS,
+  presetsFor,
+  type CardField,
+  type CardPreset,
+  type CardSpan,
+  type PresetOption,
+} from "@/lib/card-layout";
 import { saveCardLayout, type SaveCardLayoutState } from "./actions";
 
 export type EditableCardProperty = {
@@ -9,223 +29,461 @@ export type EditableCardProperty = {
   notionPropertyType: string;
 };
 
-type Row = { id: string; showLabel: boolean };
+type Zone = "overlay" | "body" | "tray";
 
-/**
- * Reordering uses buttons rather than dragging: the list is short, and buttons stay
- * usable from the keyboard without pulling in a sortable library.
- */
 export function CardLayoutEditor({
   galleryId,
   properties,
-  initialFields,
+  coverAspect,
+  coverRatio,
+  initial,
   previewTitle,
   previewValues,
+  previewCoverUrl,
 }: {
   galleryId: string;
   properties: EditableCardProperty[];
-  initialFields: Row[];
+  coverAspect: string | undefined;
+  coverRatio: string | null;
+  initial: { preset: CardPreset; span: CardSpan; fields: CardField[]; overlayFields: CardField[] };
   previewTitle: string;
   previewValues: Record<string, string>;
+  previewCoverUrl: string | null;
 }) {
-  const [rows, setRows] = useState<Row[]>(initialFields);
+  const presetOptions = presetsFor(coverAspect);
+  const [preset, setPreset] = useState<CardPreset>(initial.preset);
+  const [span, setSpan] = useState<CardSpan>(initial.span);
+  const [body, setBody] = useState<CardField[]>(initial.fields);
+  const [overlay, setOverlay] = useState<CardField[]>(initial.overlayFields);
+  const [dragging, setDragging] = useState<string | null>(null);
+
   const action = saveCardLayout.bind(null, galleryId);
-  const [state, formAction, pending] = useActionState<SaveCardLayoutState, FormData>(action, {
-    error: null,
-  });
+  const [state, formAction, pending] = useActionState<SaveCardLayoutState, FormData>(action, { error: null });
+
+  const sensors = useSensors(
+    // A small threshold keeps a click on the label checkbox from starting a drag.
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor),
+  );
 
   const byId = new Map(properties.map((p) => [p.notionPropertyId, p]));
-  const shown = rows.filter((row) => byId.has(row.id));
-  const hidden = properties.filter((p) => !rows.some((row) => row.id === p.notionPropertyId));
+  const placed = new Set([...body, ...overlay].map((f) => f.id));
+  const tray = properties.filter((p) => !placed.has(p.notionPropertyId));
+  const overlayAllowed = coverAspect !== "none";
+  const overlayFull = overlay.length >= MAX_OVERLAY_FIELDS;
 
-  const move = (index: number, delta: number) =>
-    setRows((current) => {
-      const next = [...current];
-      const target = index + delta;
-      if (target < 0 || target >= next.length) return current;
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
+  function zoneOf(id: string): Zone {
+    if (overlay.some((f) => f.id === id)) return "overlay";
+    if (body.some((f) => f.id === id)) return "body";
+    return "tray";
+  }
 
-  const toggleLabel = (id: string) =>
-    setRows((current) =>
-      current.map((row) => (row.id === id ? { ...row, showLabel: !row.showLabel } : row)),
-    );
+  /** Moves a field into a zone, optionally in front of a specific neighbour. */
+  function place(id: string, target: Zone, beforeId?: string) {
+    const field: CardField = [...overlay, ...body].find((f) => f.id === id) ?? { id, showLabel: true };
+    const nextOverlay = overlay.filter((f) => f.id !== id);
+    const nextBody = body.filter((f) => f.id !== id);
+
+    const insert = (list: CardField[]) => {
+      const at = beforeId ? list.findIndex((f) => f.id === beforeId) : -1;
+      if (at === -1) list.push(field);
+      else list.splice(at, 0, field);
+    };
+
+    if (target === "overlay") {
+      if (!overlayAllowed || nextOverlay.length >= MAX_OVERLAY_FIELDS) return;
+      insert(nextOverlay);
+    } else if (target === "body") {
+      insert(nextBody);
+    }
+
+    setOverlay(nextOverlay);
+    setBody(nextBody);
+  }
+
+  function handleDragEnd({ active, over }: DragEndEvent) {
+    setDragging(null);
+    if (!over) return;
+    const id = String(active.id).replace("field:", "");
+    const target = String(over.id);
+
+    if (target.startsWith("zone:")) place(id, target.slice(5) as Zone);
+    else if (target.startsWith("before:")) {
+      const beforeId = target.slice(7);
+      if (beforeId !== id) place(id, zoneOf(beforeId), beforeId);
+    }
+  }
+
+  const toggleLabel = (id: string) => {
+    const flip = (fields: CardField[]) =>
+      fields.map((f) => (f.id === id ? { ...f, showLabel: !f.showLabel } : f));
+    setOverlay(flip);
+    setBody(flip);
+  };
+
+  const activeProperty = dragging ? byId.get(dragging) : null;
 
   return (
-    <form action={formAction} className="flex flex-col gap-6 lg:flex-row lg:items-start">
-      <input type="hidden" name="fields" value={JSON.stringify(shown)} />
-
-      <div className="min-w-0 flex-1 flex flex-col gap-6">
-        <section>
-          <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-400">
-            Hiện trên card
-          </h2>
-          {shown.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-stone-300 px-4 py-6 text-center text-sm text-stone-500">
-              Card sẽ chỉ có ảnh bìa và tiêu đề.
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {shown.map((row, index) => {
-                const property = byId.get(row.id)!;
-                return (
-                  <li
-                    key={row.id}
-                    className="flex items-center gap-3 rounded-lg border border-stone-200 px-3 py-2"
-                  >
-                    <span className="w-5 shrink-0 text-center text-xs tabular-nums text-stone-400">
-                      {index + 1}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-sm text-stone-800">
-                      {property.notionPropertyName}
-                      <span className="ml-2 font-mono text-xs text-stone-400">
-                        {property.notionPropertyType}
-                      </span>
-                    </span>
-
-                    <label className="flex shrink-0 items-center gap-1.5 text-xs text-stone-600">
-                      <input
-                        type="checkbox"
-                        checked={row.showLabel}
-                        onChange={() => toggleLabel(row.id)}
-                      />
-                      Hiện tên
-                    </label>
-
-                    <div className="flex shrink-0 items-center gap-1">
-                      <IconButton label="Lên" disabled={index === 0} onClick={() => move(index, -1)}>
-                        ↑
-                      </IconButton>
-                      <IconButton
-                        label="Xuống"
-                        disabled={index === shown.length - 1}
-                        onClick={() => move(index, 1)}
-                      >
-                        ↓
-                      </IconButton>
-                      <IconButton
-                        label="Bỏ khỏi card"
-                        onClick={() => setRows((c) => c.filter((r) => r.id !== row.id))}
-                      >
-                        ✕
-                      </IconButton>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-
-        <section>
-          <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-400">
-            Chưa hiện
-          </h2>
-          {hidden.length === 0 ? (
-            <p className="text-sm text-stone-400">Mọi property đều đang hiện trên card.</p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {hidden.map((property) => (
-                <button
-                  key={property.notionPropertyId}
-                  type="button"
-                  onClick={() =>
-                    setRows((c) => [...c, { id: property.notionPropertyId, showLabel: true }])
-                  }
-                  className="rounded-md border border-stone-300 px-3 py-1.5 text-sm text-stone-600 hover:border-emerald-600 hover:text-emerald-800"
-                >
-                  + {property.notionPropertyName}
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {state.error && <p className="text-sm text-red-600">{state.error}</p>}
-
-        <button
-          type="submit"
-          disabled={pending}
-          className="self-start rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
-        >
-          {pending ? "Đang lưu…" : "Lưu"}
-        </button>
-      </div>
-
-      <CardPreview
-        title={previewTitle}
-        rows={shown}
-        byId={byId}
-        values={previewValues}
+    <form action={formAction} className="flex flex-col gap-8">
+      <input
+        type="hidden"
+        name="layout"
+        value={JSON.stringify({ preset, span, fields: body, overlayFields: overlay })}
       />
+
+      <PresetPicker
+        options={presetOptions}
+        preset={preset}
+        span={span}
+        onPreset={(next, defaultSpan) => {
+          setPreset(next);
+          setSpan(defaultSpan);
+        }}
+        onSpan={setSpan}
+      />
+
+      <DndContext
+        id="card-layout"
+        sensors={sensors}
+        onDragStart={({ active }: DragStartEvent) => setDragging(String(active.id).replace("field:", ""))}
+        onDragEnd={handleDragEnd}
+        onDragCancel={() => setDragging(null)}
+      >
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+          <div className="min-w-0 flex-1 flex flex-col gap-6">
+            {overlayAllowed && (
+              <DropZone
+                id="overlay"
+                title="Đè lên ảnh bìa"
+                note={`Tối đa ${MAX_OVERLAY_FIELDS} prop${overlayFull ? " — đã đầy" : ""}`}
+                empty="Kéo prop vào đây để hiện đè lên ảnh."
+              >
+                {overlay.map((field) => (
+                  <FieldChip
+                    key={field.id}
+                    field={field}
+                    property={byId.get(field.id)}
+                    onToggleLabel={() => toggleLabel(field.id)}
+                    onRemove={() => setOverlay((c) => c.filter((f) => f.id !== field.id))}
+                  />
+                ))}
+              </DropZone>
+            )}
+
+            <DropZone
+              id="body"
+              title="Trong thân card"
+              note={preset === "beside" ? "Nằm cạnh ảnh" : "Nằm dưới ảnh"}
+              empty="Kéo prop vào đây."
+            >
+              {body.map((field) => (
+                <FieldChip
+                  key={field.id}
+                  field={field}
+                  property={byId.get(field.id)}
+                  onToggleLabel={() => toggleLabel(field.id)}
+                  onRemove={() => setBody((c) => c.filter((f) => f.id !== field.id))}
+                />
+              ))}
+            </DropZone>
+
+            <DropZone id="tray" title="Chưa dùng" note={`${tray.length} prop`} empty="Mọi prop đều đã được đặt.">
+              {tray.map((property) => (
+                <FieldChip
+                  key={property.notionPropertyId}
+                  field={{ id: property.notionPropertyId, showLabel: true }}
+                  property={property}
+                  muted
+                />
+              ))}
+            </DropZone>
+
+            {state.error && <p className="text-sm text-red-600">{state.error}</p>}
+
+            <button
+              type="submit"
+              disabled={pending}
+              className="self-start rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
+            >
+              {pending ? "Đang lưu…" : "Lưu"}
+            </button>
+          </div>
+
+          <CardPreview
+            preset={preset}
+            span={span}
+            coverRatio={coverRatio}
+            coverUrl={previewCoverUrl}
+            title={previewTitle}
+            body={body}
+            overlay={overlay}
+            byId={byId}
+            values={previewValues}
+          />
+        </div>
+
+        <DragOverlay>
+          {activeProperty && (
+            <span className="rounded-md border border-emerald-600 bg-white px-2.5 py-1 text-sm shadow-lg">
+              {activeProperty.notionPropertyName}
+            </span>
+          )}
+        </DragOverlay>
+      </DndContext>
     </form>
   );
 }
 
-function CardPreview({
-  title,
-  rows,
-  byId,
-  values,
+function PresetPicker({
+  options,
+  preset,
+  span,
+  onPreset,
+  onSpan,
 }: {
-  title: string;
-  rows: Row[];
-  byId: Map<string, EditableCardProperty>;
-  values: Record<string, string>;
+  options: PresetOption[];
+  preset: CardPreset;
+  span: CardSpan;
+  onPreset: (value: CardPreset, defaultSpan: CardSpan) => void;
+  onSpan: (value: CardSpan) => void;
 }) {
+  const active = options.find((option) => option.value === preset) ?? options[0];
+
   return (
-    <div className="w-full shrink-0 lg:w-72">
-      <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-400">Xem trước</h2>
-      <div className="rounded-lg border border-stone-200 bg-white p-4">
-        <div className="mb-2 aspect-[16/9] w-full rounded bg-stone-100" />
-        <p className="mb-2 font-medium text-stone-900">{title}</p>
-        <dl className="flex flex-col gap-1 text-sm text-stone-600">
-          {rows.map((row) => {
-            const property = byId.get(row.id);
-            if (!property) return null;
-            const value = values[row.id] ?? "—";
-            return (
-              <div key={row.id} className="flex items-baseline gap-2">
-                {row.showLabel && (
-                  <dt className="w-24 shrink-0 truncate text-xs text-stone-400">
-                    {property.notionPropertyName}
-                  </dt>
-                )}
-                <dd className="min-w-0 flex-1 truncate">{value}</dd>
-              </div>
-            );
-          })}
-        </dl>
+    <section>
+      <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-400">Kiểu bố cục</h2>
+      <div className="flex flex-wrap gap-3">
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onPreset(option.value, option.defaultSpan)}
+            aria-pressed={option.value === preset}
+            className={`flex w-44 flex-col gap-2 rounded-lg border p-3 text-left ${
+              option.value === preset
+                ? "border-emerald-600 bg-emerald-50"
+                : "border-stone-300 hover:border-stone-400"
+            }`}
+          >
+            <PresetGlyph preset={option.value} />
+            <span className="text-sm font-medium text-stone-800">{option.label}</span>
+            <span className="text-[11px] leading-snug text-stone-500">{option.hint}</span>
+          </button>
+        ))}
       </div>
-      <p className="mt-2 text-[11px] text-stone-400">
-        Ảnh bìa và số card mỗi hàng chỉnh ở trang Ảnh bìa và Cài đặt hiển thị.
-      </p>
-    </div>
+
+      <div className="mt-4 flex items-center gap-3">
+        <span className="text-xs text-stone-500">Độ rộng card</span>
+        {([1, 2] as CardSpan[]).map((value) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => onSpan(value)}
+            aria-pressed={span === value}
+            className={`rounded-md border px-3 py-1.5 text-xs ${
+              span === value
+                ? "border-emerald-600 bg-emerald-50 font-medium text-emerald-800"
+                : "border-stone-300 text-stone-600 hover:border-stone-400"
+            }`}
+          >
+            {value === 1 ? "1 cột" : "2 cột"}
+          </button>
+        ))}
+        {active?.defaultSpan === 2 && span === 1 && (
+          <span className="text-[11px] text-amber-700">Bố cục này thường cần 2 cột mới đủ chỗ.</span>
+        )}
+      </div>
+    </section>
   );
 }
 
-function IconButton({
-  label,
-  disabled,
-  onClick,
+/** Tiny diagram of where the cover sits, so the choice reads at a glance. */
+function PresetGlyph({ preset }: { preset: CardPreset }) {
+  if (preset === "beside") {
+    return (
+      <span className="flex h-12 w-full gap-1 rounded border border-stone-200 bg-white p-1">
+        <span className="h-full w-1/3 rounded-sm bg-stone-300" />
+        <span className="flex flex-1 flex-col gap-1 pt-1">
+          <span className="h-1.5 w-3/4 rounded-sm bg-stone-200" />
+          <span className="h-1 w-full rounded-sm bg-stone-100" />
+          <span className="h-1 w-2/3 rounded-sm bg-stone-100" />
+        </span>
+      </span>
+    );
+  }
+  return (
+    <span className="flex h-12 w-full flex-col gap-1 rounded border border-stone-200 bg-white p-1">
+      <span className="h-1/2 w-full rounded-sm bg-stone-300" />
+      <span className="h-1.5 w-3/4 rounded-sm bg-stone-200" />
+      <span className="h-1 w-full rounded-sm bg-stone-100" />
+    </span>
+  );
+}
+
+function DropZone({
+  id,
+  title,
+  note,
+  empty,
   children,
 }: {
-  label: string;
-  disabled?: boolean;
-  onClick: () => void;
+  id: Zone;
+  title: string;
+  note: string;
+  empty: string;
   children: React.ReactNode;
 }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `zone:${id}` });
+  const items = Array.isArray(children) ? children.filter(Boolean) : children ? [children] : [];
+
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      onClick={onClick}
-      className="h-7 w-7 rounded border border-stone-300 text-xs text-stone-600 hover:border-stone-400 disabled:opacity-30"
+    <section>
+      <div className="mb-2 flex items-baseline justify-between">
+        <h2 className="text-xs font-medium uppercase tracking-wide text-stone-400">{title}</h2>
+        <span className="text-[11px] text-stone-400">{note}</span>
+      </div>
+      <div
+        ref={setNodeRef}
+        className={`flex min-h-16 flex-wrap items-start gap-2 rounded-lg border border-dashed p-3 ${
+          isOver ? "border-emerald-500 bg-emerald-50" : "border-stone-300"
+        }`}
+      >
+        {items.length === 0 ? <span className="text-xs text-stone-400">{empty}</span> : items}
+      </div>
+    </section>
+  );
+}
+
+function FieldChip({
+  field,
+  property,
+  muted,
+  onToggleLabel,
+  onRemove,
+}: {
+  field: CardField;
+  property: EditableCardProperty | undefined;
+  muted?: boolean;
+  onToggleLabel?: () => void;
+  onRemove?: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `field:${field.id}` });
+  // Dropping onto a chip inserts before it, which is how ordering happens without a
+  // sortable library.
+  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: `before:${field.id}` });
+  if (!property) return null;
+
+  return (
+    <span
+      ref={setDropRef}
+      className={`flex items-center gap-2 rounded-md border bg-white px-2 py-1 text-sm ${
+        isOver ? "border-emerald-500" : "border-stone-300"
+      } ${isDragging ? "opacity-40" : ""} ${muted ? "text-stone-500" : "text-stone-800"}`}
     >
-      {children}
-    </button>
+      <span
+        ref={setNodeRef}
+        {...listeners}
+        {...attributes}
+        className="cursor-grab select-none active:cursor-grabbing"
+      >
+        ⠿ {property.notionPropertyName}
+      </span>
+
+      {onToggleLabel && (
+        <label className="flex items-center gap-1 text-[11px] text-stone-500">
+          <input type="checkbox" checked={field.showLabel} onChange={onToggleLabel} />
+          tên
+        </label>
+      )}
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Bỏ ${property.notionPropertyName}`}
+          className="text-xs text-stone-400 hover:text-stone-700"
+        >
+          ✕
+        </button>
+      )}
+    </span>
+  );
+}
+
+function CardPreview({
+  preset,
+  span,
+  coverRatio,
+  coverUrl,
+  title,
+  body,
+  overlay,
+  byId,
+  values,
+}: {
+  preset: CardPreset;
+  span: CardSpan;
+  coverRatio: string | null;
+  coverUrl: string | null;
+  title: string;
+  body: CardField[];
+  overlay: CardField[];
+  byId: Map<string, EditableCardProperty>;
+  values: Record<string, string>;
+}) {
+  const cover = coverRatio && (
+    <div
+      className="relative shrink-0 overflow-hidden bg-stone-200 bg-cover bg-center"
+      style={{
+        aspectRatio: coverRatio,
+        ...(preset === "beside" ? { width: "40%" } : { width: "100%" }),
+        ...(coverUrl ? { backgroundImage: `url(${JSON.stringify(coverUrl)})` } : {}),
+      }}
+    >
+      {overlay.length > 0 && (
+        <div className="absolute inset-x-0 bottom-0 flex flex-col gap-0.5 bg-gradient-to-t from-black/75 to-transparent p-2">
+          {overlay.map((field) => (
+            <span key={field.id} className="truncate text-[11px] text-white">
+              {field.showLabel && (
+                <span className="text-white/60">{byId.get(field.id)?.notionPropertyName}: </span>
+              )}
+              {values[field.id] || "—"}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const text = (
+    <div className="flex min-w-0 flex-1 flex-col gap-1 p-3">
+      <p className="truncate font-medium text-stone-900">{title}</p>
+      {body.map((field) => (
+        <span key={field.id} className="flex items-baseline gap-2 text-xs text-stone-600">
+          {field.showLabel && (
+            <span className="w-20 shrink-0 truncate text-stone-400">
+              {byId.get(field.id)?.notionPropertyName}
+            </span>
+          )}
+          <span className="min-w-0 flex-1 truncate">{values[field.id] || "—"}</span>
+        </span>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="w-full shrink-0 lg:w-80">
+      <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-400">Xem trước</h2>
+      <div
+        className={`overflow-hidden rounded-lg border border-stone-200 bg-white ${
+          preset === "beside" ? "flex" : "flex flex-col"
+        }`}
+      >
+        {cover}
+        {text}
+      </div>
+      <p className="mt-2 text-[11px] text-stone-400">
+        Card chiếm {span === 2 ? "2 cột" : "1 cột"} trong lưới Gallery. Khung ảnh chỉnh ở trang Ảnh bìa.
+      </p>
+    </div>
   );
 }

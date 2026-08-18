@@ -4,8 +4,8 @@ import { isFullPage } from "@notionhq/client";
 import { db } from "@/lib/db";
 import { getNotionClient } from "@/lib/notion";
 import { getPageTitle, getTitlePropertyName } from "@/lib/notion-schema";
-import { cardEligibleProperties, parseCardLayout, resolveCardFields } from "@/lib/card-layout";
-import { parseGalleryConfig } from "@/lib/notion-cover";
+import { cardEligibleProperties, parseCardLayout, resolveCardLayout } from "@/lib/card-layout";
+import { parseGalleryConfig, resolveCoverRatio, resolveCoverUrl } from "@/lib/notion-cover";
 import { plainTextValue } from "@/lib/property-text";
 import { CardLayoutEditor } from "./card-layout-editor";
 
@@ -20,14 +20,21 @@ export default async function CardLayoutSettingsPage({
   if (!gallery) notFound();
 
   const properties = cardEligibleProperties(gallery.propertyConfigs);
-  const layout = parseCardLayout(parseGalleryConfig(gallery.displayConfig).card);
-  const initialFields = resolveCardFields(layout, gallery.propertyConfigs).map((field) => ({
-    id: field.property.notionPropertyId,
-    showLabel: field.showLabel,
-  }));
+  const galleryConfig = parseGalleryConfig(gallery.displayConfig);
+  const resolved = resolveCardLayout(
+    parseCardLayout(galleryConfig.card),
+    gallery.propertyConfigs,
+    galleryConfig.coverAspect,
+  );
+  const toFields = (list: typeof resolved.fields) =>
+    list.map((field) => ({ id: field.property.notionPropertyId, showLabel: field.showLabel }));
 
-  // One real item, so the preview shows the actual shape of the data rather than filler.
-  const { title, values } = await loadPreviewItem(gallery.notionDataSourceId, gallery.workspace.accessToken);
+  // One real item, so the preview shows the actual data rather than filler.
+  const preview = await loadPreviewItem(
+    gallery.notionDataSourceId,
+    gallery.workspace.accessToken,
+    galleryConfig.coverSource,
+  );
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-12">
@@ -36,7 +43,8 @@ export default async function CardLayoutSettingsPage({
       </Link>
       <h1 className="mt-2 mb-1 text-2xl font-semibold text-stone-900">Bố cục card</h1>
       <p className="mb-8 text-sm text-stone-600">
-        Chọn property nào hiện trên card ngoài Gallery, theo thứ tự nào, và property nào cần hiện kèm tên field.
+        Chọn kiểu sắp xếp ảnh và chữ, độ rộng card, rồi kéo property vào chỗ muốn hiện. Kiểu bố cục có sẵn tuỳ theo
+        khung ảnh bìa đang dùng.
       </p>
 
       {properties.length === 0 ? (
@@ -51,19 +59,32 @@ export default async function CardLayoutSettingsPage({
             notionPropertyName: p.notionPropertyName,
             notionPropertyType: p.notionPropertyType,
           }))}
-          initialFields={initialFields}
-          previewTitle={title}
-          previewValues={values}
+          coverAspect={galleryConfig.coverAspect}
+          coverRatio={resolveCoverRatio(galleryConfig)}
+          initial={{
+            preset: resolved.preset,
+            span: resolved.span,
+            fields: toFields(resolved.fields),
+            overlayFields: toFields(resolved.overlayFields),
+          }}
+          previewTitle={preview.title}
+          previewValues={preview.values}
+          previewCoverUrl={preview.coverUrl}
         />
       )}
     </div>
   );
 }
 
+type PreviewItem = { title: string; values: Record<string, string>; coverUrl: string | null };
+
+const EMPTY_PREVIEW: PreviewItem = { title: "Item mẫu", values: {}, coverUrl: null };
+
 async function loadPreviewItem(
   dataSourceId: string,
   accessToken: string,
-): Promise<{ title: string; values: Record<string, string> }> {
+  coverSource: string | undefined,
+): Promise<PreviewItem> {
   try {
     const notion = getNotionClient(accessToken);
     const [dataSource, query] = await Promise.all([
@@ -72,7 +93,7 @@ async function loadPreviewItem(
     ]);
 
     const page = query.results.filter(isFullPage)[0];
-    if (!page) return { title: "Item mẫu", values: {} };
+    if (!page) return EMPTY_PREVIEW;
 
     const titleProperty =
       "properties" in dataSource ? getTitlePropertyName(dataSource.properties) : null;
@@ -81,8 +102,15 @@ async function loadPreviewItem(
     for (const value of Object.values(page.properties)) {
       values[value.id] = plainTextValue(value);
     }
-    return { title: getPageTitle(page, titleProperty), values };
+
+    return {
+      title: getPageTitle(page, titleProperty),
+      values,
+      // Content-image covers are resolved lazily elsewhere; the preview settles for the
+      // frame rather than spending a blocks crawl here.
+      coverUrl: resolveCoverUrl(page, coverSource),
+    };
   } catch {
-    return { title: "Item mẫu", values: {} };
+    return EMPTY_PREVIEW;
   }
 }
