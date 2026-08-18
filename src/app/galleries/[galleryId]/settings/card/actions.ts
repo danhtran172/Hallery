@@ -56,11 +56,7 @@ export async function saveCardLayout(
 
   const prune = (grid: Grid): Grid => ({
     ...grid,
-    boxes: grid.boxes.map((box) => ({
-      ...box,
-      fields: box.grid ? [] : keep(box.fields),
-      ...(box.grid ? { grid: prune(box.grid) } : {}),
-    })),
+    boxes: grid.boxes.map((box) => ({ ...box, fields: keep(box.fields) })),
   });
 
   // Overlay first: it holds the scarce slots, so it wins a contested property.

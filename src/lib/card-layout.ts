@@ -70,8 +70,6 @@ export type MergeDirection = "left" | "up";
 export type GridBox = {
   id: string;
   fields: CardField[];
-  /** Layer 2. Only frames of the layer-1 grid carry one; boxes inside it do not. */
-  grid?: Grid;
   /**
    * This box has been folded into the neighbour to its left or above. Kept in the grid
    * rather than deleted so the merge stays reversible, and so dropping a property in can
@@ -144,17 +142,12 @@ export function makeGrid(cols: 1 | 2, rows: number, carried: CardField[][] = [])
 
 /** Fields held anywhere in a grid, in visual order. */
 export function gridFields(grid: Grid): CardField[] {
-  return grid.boxes.flatMap((box) => (box.grid ? gridFields(box.grid) : box.fields));
-}
-
-/** Per-box field lists, used when a grid is resized and its contents must be carried. */
-function gridCarry(grid: Grid): CardField[][] {
-  return grid.boxes.map((box) => (box.grid ? gridFields(box.grid) : box.fields));
+  return grid.boxes.flatMap((box) => box.fields);
 }
 
 /** Resizes a grid, preserving as much placement as the new shape allows. */
 export function resizeGrid(grid: Grid, cols: 1 | 2, rows: number): Grid {
-  return makeGrid(cols, rows, gridCarry(grid));
+  return makeGrid(cols, rows, grid.boxes.map((box) => box.fields));
 }
 
 /** Folds an empty box into its left or upper neighbour. Reversible; nothing is deleted. */
@@ -186,7 +179,7 @@ export function canMerge(grid: Grid, boxId: string, direction: MergeDirection): 
   const index = grid.boxes.findIndex((box) => box.id === boxId);
   if (index === -1) return false;
   const box = grid.boxes[index];
-  if (box.mergedInto || box.fields.length > 0 || box.grid) return false;
+  if (box.mergedInto || box.fields.length > 0) return false;
 
   if (direction === "left") {
     if (grid.cols === 1 || index % grid.cols === 0) return false;
@@ -263,7 +256,7 @@ function parseRatio(raw: unknown): CardRatio {
   return [40, 60];
 }
 
-function parseGrid(raw: unknown, depth: number): Grid | null {
+function parseGrid(raw: unknown): Grid | null {
   if (typeof raw !== "object" || raw === null) return null;
   const { cols, rows, boxes } = raw as { cols?: unknown; rows?: unknown; boxes?: unknown };
   if (!Array.isArray(boxes)) return null;
@@ -272,12 +265,10 @@ function parseGrid(raw: unknown, depth: number): Grid | null {
   for (const entry of boxes) {
     if (typeof entry !== "object" || entry === null) continue;
     const box = entry as Record<string, unknown>;
-    const nested = depth === 0 ? parseGrid(box.grid, depth + 1) : null;
     const merged = box.mergedInto === "left" || box.mergedInto === "up" ? box.mergedInto : undefined;
     parsed.push({
       id: typeof box.id === "string" && box.id ? box.id : makeBox().id,
-      fields: nested || merged ? [] : parseFields(box.fields),
-      ...(nested ? { grid: nested } : {}),
+      fields: merged ? [] : parseFields(box.fields),
       ...(merged ? { mergedInto: merged } : {}),
     });
   }
@@ -300,7 +291,7 @@ export function parseCardLayout(raw: unknown): CardLayout | null {
   const regionsRaw = (value.regions ?? {}) as Record<string, unknown>;
   const regions: Record<string, Grid> = {};
   for (const id of ARRANGEMENTS[arrangement].regions) {
-    regions[id] = parseGrid(regionsRaw[id], 0) ?? makeGrid(1, 1);
+    regions[id] = parseGrid(regionsRaw[id]) ?? makeGrid(1, 1);
   }
 
   return {
@@ -371,7 +362,6 @@ export type ResolvedBox<T> = {
   /** Folded into a neighbour: it occupies no grid track and draws nothing. */
   merged: boolean;
   fields: ResolvedField<T>[];
-  grid?: ResolvedGrid<T>;
 };
 export type ResolvedGrid<T> = { cols: 1 | 2; rows: number; boxes: ResolvedBox<T>[] };
 
@@ -426,8 +416,7 @@ export function resolveCardLayout<T extends CardEligibleProperty>(
         colSpan,
         rowSpan,
         merged: Boolean(box.mergedInto),
-        fields: box.grid || box.mergedInto ? [] : pick(box.fields),
-        ...(box.grid ? { grid: resolveGrid(box.grid) } : {}),
+        fields: box.mergedInto ? [] : pick(box.fields),
       };
     }),
   });

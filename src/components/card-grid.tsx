@@ -39,11 +39,7 @@ export function CardGrid({
               gridRow: box.rowSpan > 1 ? `span ${box.rowSpan}` : undefined,
             }}
           >
-            {box.grid ? (
-              <CardGrid grid={box.grid} title={title} valueOf={valueOf} />
-            ) : (
-              <BoxFields fields={box.fields} title={title} valueOf={valueOf} />
-            )}
+            <BoxFields fields={box.fields} title={title} valueOf={valueOf} />
           </div>
         );
       })}
