@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useMemo, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -15,39 +15,38 @@ import {
 } from "@dnd-kit/core";
 import {
   ARRANGEMENTS,
-  ARRANGEMENT_IDS,
-  CARD_RATIOS,
-  CELL_DISPLAYS,
-  CELL_DISPLAY_IDS,
+  MAX_COLS,
   MAX_OVERLAY_FIELDS,
+  MAX_ROWS,
+  TITLE_FIELD_ID,
+  arrangementsFor,
+  canMerge,
+  makeGrid,
+  maxRowsBesideCover,
+  mergeBox,
+  resizeGrid,
+  spanOf,
+  unmergeBox,
   type ArrangementId,
-  type CardCell,
   type CardField,
+  type CardLayout,
   type CardRatio,
-  type CardSpan,
-  type CellDisplay,
+  type CoverOrientation,
+  type Grid,
+  type GridBox,
+  type MergeDirection,
 } from "@/lib/card-layout";
-import { COVER_RATIOS, type CoverAspect } from "@/lib/notion-cover";
+import { CARD_RATIOS } from "@/lib/card-layout";
+import { COVER_RATIOS } from "@/lib/notion-cover";
+import type { DisplayConfig } from "@/lib/display-config";
 import { saveCardLayout, type SaveCardLayoutState } from "./actions";
-import { ArrangementGlyph, CellDisplayGlyph, RatioGlyph } from "./glyphs";
+import { ArrangementGlyph, GridGlyph, RatioGlyph } from "./glyphs";
+import { PropertyPanel, type PanelProperty } from "./property-panel";
 
-export type EditableCardProperty = {
-  notionPropertyId: string;
-  notionPropertyName: string;
-  notionPropertyType: string;
-};
+export type EditableCardProperty = PanelProperty;
+export type CoverShape = { aspect: CoverOrientation; ratio: string };
 
-export type CoverShape = { aspect: Exclude<CoverAspect, "none">; ratio: string };
-
-export type Draft = {
-  arrangement: ArrangementId;
-  span: CardSpan;
-  ratio: CardRatio;
-  overlay: CardField[];
-  cells: Record<string, CardCell>;
-};
-
-const ASPECT_LABELS: { value: CoverShape["aspect"]; label: string }[] = [
+const ORIENTATIONS: { value: CoverOrientation; label: string }[] = [
   { value: "landscape", label: "Ngang" },
   { value: "portrait", label: "Dọc" },
   { value: "square", label: "Vuông" },
@@ -57,7 +56,7 @@ export function CardLayoutEditor({
   galleryId,
   properties,
   initialShape,
-  initial,
+  initialLayout,
   previewTitle,
   previewValues,
   previewCoverUrl,
@@ -65,70 +64,124 @@ export function CardLayoutEditor({
   galleryId: string;
   properties: EditableCardProperty[];
   initialShape: CoverShape;
-  initial: Draft;
+  initialLayout: CardLayout;
   previewTitle: string;
   previewValues: Record<string, string>;
   previewCoverUrl: string | null;
 }) {
-  const [draft, setDraft] = useState<Draft>(initial);
+  const [layout, setLayout] = useState<CardLayout>(initialLayout);
   const [shape, setShape] = useState<CoverShape>(initialShape);
+  const [configs, setConfigs] = useState<Record<string, DisplayConfig>>({});
+  const [selected, setSelected] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [recordPreview, setRecordPreview] = useState(true);
 
   const action = saveCardLayout.bind(null, galleryId);
   const [state, formAction, pending] = useActionState<SaveCardLayoutState, FormData>(action, { error: null });
-
   const sensors = useSensors(
-    // A small threshold keeps a click on the label checkbox from starting a drag.
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor),
   );
 
-  const spec = ARRANGEMENTS[draft.arrangement];
+  const spec = ARRANGEMENTS[layout.arrangement];
   const coverRatio = shape.ratio.replace(":", " / ");
-  const byId = new Map(properties.map((p) => [p.notionPropertyId, p]));
+  const byId = useMemo(() => new Map(properties.map((p) => [p.notionPropertyId, p])), [properties]);
 
-  const placed = new Set(
-    [draft.overlay, ...Object.values(draft.cells).map((c) => c.fields)].flat().map((f) => f.id),
-  );
-  const tray = properties.filter((p) => !placed.has(p.notionPropertyId));
+  const placed = useMemo(() => {
+    const ids = new Set<string>(layout.overlay.map((f) => f.id));
+    const walk = (grid: Grid) => {
+      for (const box of grid.boxes) {
+        box.fields.forEach((f) => ids.add(f.id));
+        if (box.grid) walk(box.grid);
+      }
+    };
+    Object.values(layout.regions).forEach(walk);
+    return ids;
+  }, [layout]);
 
-  function fieldsIn(zone: string): CardField[] {
-    return zone === "overlay" ? draft.overlay : (draft.cells[zone]?.fields ?? []);
+  const unplaced = [
+    ...(placed.has(TITLE_FIELD_ID) ? [] : [{ id: TITLE_FIELD_ID, name: "Tiêu đề", type: "title" }]),
+    ...properties
+      .filter((p) => !placed.has(p.notionPropertyId))
+      .map((p) => ({ id: p.notionPropertyId, name: p.notionPropertyName, type: p.notionPropertyType })),
+  ].filter((entry) => entry.name.toLowerCase().includes(search.trim().toLowerCase()));
+
+  /* ── mutations ─────────────────────────────────────────────────────────── */
+
+  const mapGrids = (transform: (grid: Grid) => Grid) =>
+    setLayout((current) => ({
+      ...current,
+      regions: Object.fromEntries(Object.entries(current.regions).map(([id, grid]) => [id, transform(grid)])),
+    }));
+
+  function removeEverywhere(current: CardLayout, id: string): CardLayout {
+    const strip = (grid: Grid): Grid => ({
+      ...grid,
+      boxes: grid.boxes.map((box) => ({
+        ...box,
+        fields: box.fields.filter((f) => f.id !== id),
+        ...(box.grid ? { grid: strip(box.grid) } : {}),
+      })),
+    });
+    return {
+      ...current,
+      overlay: current.overlay.filter((f) => f.id !== id),
+      regions: Object.fromEntries(Object.entries(current.regions).map(([key, grid]) => [key, strip(grid)])),
+    };
   }
 
-  /** Moves a field into a zone, before a given neighbour when one is named. */
+  function findField(current: CardLayout, id: string): CardField {
+    const search = (grid: Grid): CardField | undefined => {
+      for (const box of grid.boxes) {
+        const hit = box.fields.find((f) => f.id === id);
+        if (hit) return hit;
+        if (box.grid) {
+          const nested = search(box.grid);
+          if (nested) return nested;
+        }
+      }
+      return undefined;
+    };
+    return (
+      current.overlay.find((f) => f.id === id) ??
+      Object.values(current.regions).map(search).find(Boolean) ?? { id, showLabel: id !== TITLE_FIELD_ID }
+    );
+  }
+
+  /** Drops a field into a box, or into the overlay, undoing a merge if it landed on one. */
   function place(id: string, target: string, beforeId?: string) {
-    setDraft((current) => {
-      const existing =
-        [current.overlay, ...Object.values(current.cells).map((c) => c.fields)]
-          .flat()
-          .find((f) => f.id === id) ?? { id, showLabel: true };
+    setLayout((current) => {
+      const field = findField(current, id);
+      const next = removeEverywhere(current, id);
 
-      // Lift out of wherever it was, so a move within one box reorders cleanly.
-      const next: Draft = {
-        ...current,
-        overlay: current.overlay.filter((f) => f.id !== id),
-        cells: Object.fromEntries(
-          Object.entries(current.cells).map(([key, cell]) => [
-            key,
-            { ...cell, fields: cell.fields.filter((f) => f.id !== id) },
-          ]),
-        ),
-      };
       if (target === "tray") return next;
-
       if (target === "overlay") {
         if (next.overlay.length >= MAX_OVERLAY_FIELDS) return current;
         const fields = [...next.overlay];
-        insert(fields, existing, beforeId);
+        insert(fields, field, beforeId);
         return { ...next, overlay: fields };
       }
 
-      const cell = next.cells[target];
-      if (!cell) return current;
-      const fields = [...cell.fields];
-      insert(fields, existing, beforeId);
-      return { ...next, cells: { ...next.cells, [target]: { ...cell, fields } } };
+      const drop = (grid: Grid): Grid => ({
+        ...grid,
+        boxes: grid.boxes.map((box) => {
+          if (box.id === target && !box.grid) {
+            const fields = [...box.fields];
+            insert(fields, field, beforeId);
+            // Dropping into a folded box is the clearest way to say "give it back".
+            const rest = { ...box, fields };
+            delete rest.mergedInto;
+            return rest;
+          }
+          return box.grid ? { ...box, grid: drop(box.grid) } : box;
+        }),
+      });
+
+      return {
+        ...next,
+        regions: Object.fromEntries(Object.entries(next.regions).map(([key, grid]) => [key, drop(grid)])),
+      };
     });
   }
 
@@ -137,72 +190,99 @@ export function CardLayoutEditor({
     if (!over) return;
     const id = String(active.id).replace("field:", "");
     const target = String(over.id);
-
-    if (target.startsWith("zone:")) place(id, target.slice(5));
-    else if (target.startsWith("before:")) {
-      const beforeId = target.slice(7);
-      if (beforeId === id) return;
-      const zone =
-        draft.overlay.some((f) => f.id === beforeId)
-          ? "overlay"
-          : Object.entries(draft.cells).find(([, cell]) => cell.fields.some((f) => f.id === beforeId))?.[0];
-      if (zone) place(id, zone, beforeId);
-    }
+    if (target.startsWith("box:")) place(id, target.slice(4));
+    else if (target === "zone:overlay") place(id, "overlay");
+    else if (target === "zone:tray") place(id, "tray");
+    else if (target.startsWith("before:")) place(id, findBoxOf(layout, target.slice(7)) ?? "tray", target.slice(7));
   }
 
-  const toggleLabel = (id: string) =>
-    setDraft((current) => {
-      const flip = (fields: CardField[]) =>
-        fields.map((f) => (f.id === id ? { ...f, showLabel: !f.showLabel } : f));
+  const setShowLabel = (id: string, showLabel: boolean) =>
+    setLayout((current) => {
+      const flip = (fields: CardField[]) => fields.map((f) => (f.id === id ? { ...f, showLabel } : f));
+      const walk = (grid: Grid): Grid => ({
+        ...grid,
+        boxes: grid.boxes.map((box) => ({
+          ...box,
+          fields: flip(box.fields),
+          ...(box.grid ? { grid: walk(box.grid) } : {}),
+        })),
+      });
       return {
         ...current,
         overlay: flip(current.overlay),
-        cells: Object.fromEntries(
-          Object.entries(current.cells).map(([key, cell]) => [key, { ...cell, fields: flip(cell.fields) }]),
-        ),
+        regions: Object.fromEntries(Object.entries(current.regions).map(([k, g]) => [k, walk(g)])),
       };
     });
 
-  /** Switching arrangement keeps the fields: extra boxes merge into the last surviving one. */
+  /**
+   * A landscape cover cannot sit beside its text, so switching shape has to pull the
+   * arrangement back to one that shape actually offers.
+   */
+  const changeShape = (next: CoverShape) => {
+    setShape(next);
+    const allowed = arrangementsFor(next.aspect);
+    if (!allowed.includes(layout.arrangement)) setArrangement(allowed[0]);
+  };
+
   const setArrangement = (arrangement: ArrangementId) =>
-    setDraft((current) => {
-      const nextIds = ARRANGEMENTS[arrangement].cells;
-      const carried = Object.values(current.cells).map((cell) => cell.fields);
-      const cells: Record<string, CardCell> = {};
-
-      nextIds.forEach((id, index) => {
-        const previous = Object.values(current.cells)[index];
-        const overflow = index === nextIds.length - 1 ? carried.slice(nextIds.length).flat() : [];
-        cells[id] = {
-          display: previous?.display ?? "rows",
-          fields: [...(carried[index] ?? []), ...overflow],
-        };
+    setLayout((current) => {
+      const nextRegions = ARRANGEMENTS[arrangement].regions;
+      const carried = Object.values(current.regions);
+      const regions: Record<string, Grid> = {};
+      nextRegions.forEach((id, index) => {
+        regions[id] = carried[index] ?? makeGrid(1, 1);
       });
-
-      const loseCover = ARRANGEMENTS[arrangement].cover === "none";
-      return {
-        ...current,
-        arrangement,
-        overlay: loseCover ? [] : current.overlay,
-        span: ARRANGEMENTS[arrangement].cover === "left" || arrangement === "cover-right" ? 2 : current.span,
-        cells,
-      };
+      // Frames that disappear hand their fields to the last surviving one.
+      if (carried.length > nextRegions.length && nextRegions.length > 0) {
+        const last = nextRegions[nextRegions.length - 1];
+        const extra = carried.slice(nextRegions.length).flatMap((grid) => grid.boxes.flatMap((b) => b.fields));
+        const boxes = [...regions[last].boxes];
+        boxes[boxes.length - 1] = {
+          ...boxes[boxes.length - 1],
+          fields: [...boxes[boxes.length - 1].fields, ...extra],
+        };
+        regions[last] = { ...regions[last], boxes };
+      }
+      return { ...current, arrangement, regions };
     });
 
-  const setCellDisplay = (cellId: string, display: CellDisplay) =>
-    setDraft((current) => ({
+  const resizeRegion = (regionId: string, cols: 1 | 2, rows: number) =>
+    setLayout((current) => ({
       ...current,
-      cells: { ...current.cells, [cellId]: { ...current.cells[cellId], display } },
+      regions: { ...current.regions, [regionId]: resizeGrid(current.regions[regionId], cols, rows) },
     }));
 
-  const activeProperty = dragging ? byId.get(dragging) : null;
-  const sideways = spec.cover === "left" || spec.cover === "right";
+  const setBoxGrid = (boxId: string, cols: 1 | 2, rows: number) =>
+    mapGrids((grid) => ({
+      ...grid,
+      boxes: grid.boxes.map((box) => {
+        if (box.id !== boxId) return box;
+        if (cols === 1 && rows === 1) {
+          // Collapsing layer 2 hands the properties back to the frame itself.
+          const { grid: nested, ...rest } = box;
+          return nested ? { ...rest, fields: nested.boxes.flatMap((b) => b.fields) } : box;
+        }
+        const carried = box.grid ? box.grid.boxes.map((b) => b.fields) : [box.fields];
+        return { ...box, fields: [], grid: makeGrid(cols, rows, carried) };
+      }),
+    }));
+
+  const applyMerge = (boxId: string, direction: MergeDirection) =>
+    mapGrids((grid) => walkGrid(grid, (g) => mergeBox(g, boxId, direction)));
+  const applyUnmerge = (boxId: string) => mapGrids((grid) => walkGrid(grid, (g) => unmergeBox(g, boxId)));
+
+  const rowCap = spec.sideBySide ? maxRowsBesideCover(shape.aspect, layout.ratio, shape.ratio) : MAX_ROWS;
+  const selectedProperty = selected && selected !== TITLE_FIELD_ID ? (byId.get(selected) ?? null) : null;
+  const selectedField = selected ? findField(layout, selected) : null;
+  const draggingLabel =
+    dragging === TITLE_FIELD_ID ? "Tiêu đề" : dragging ? byId.get(dragging)?.notionPropertyName : null;
 
   return (
-    <form action={formAction}>
-      <input type="hidden" name="layout" value={JSON.stringify({ ...draft, version: 3 })} />
+    <form action={formAction} className="flex h-[calc(100vh-11rem)] min-h-[34rem] gap-4">
+      <input type="hidden" name="layout" value={JSON.stringify(layout)} />
       <input type="hidden" name="coverAspect" value={shape.aspect} />
       <input type="hidden" name="coverRatio" value={shape.ratio} />
+      <input type="hidden" name="propertyConfigs" value={JSON.stringify(configs)} />
 
       <DndContext
         id="card-layout"
@@ -211,53 +291,84 @@ export function CardLayoutEditor({
         onDragEnd={handleDragEnd}
         onDragCancel={() => setDragging(null)}
       >
-        <div className="flex gap-6">
-          <Tray properties={tray} />
-
-          <div className="min-w-0 flex-1">
-            <ArrangementPicker value={draft.arrangement} onChange={setArrangement} />
-
-            <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-3">
-              <CoverShapeSelect shape={shape} onChange={setShape} disabled={spec.cover === "none"} />
-              {sideways && (
-                <RatioSelect
-                  label="Ảnh / chữ"
-                  value={draft.ratio}
-                  onChange={(ratio) => setDraft((c) => ({ ...c, ratio }))}
-                />
-              )}
-              <SpanSelect value={draft.span} onChange={(span) => setDraft((c) => ({ ...c, span }))} />
-            </div>
-
-            <Canvas
-              draft={draft}
-              coverRatio={coverRatio}
-              coverUrl={previewCoverUrl}
-              title={previewTitle}
-              byId={byId}
-              values={previewValues}
-              fieldsIn={fieldsIn}
-              onToggleLabel={toggleLabel}
-              onRemove={(id) => place(id, "tray")}
-              onCellDisplay={setCellDisplay}
+        {/* 1 + 2 + 3 */}
+        <div className="flex w-64 shrink-0 flex-col gap-3">
+          <div className="flex gap-3">
+            <CoverShapeButton shape={shape} onChange={changeShape} />
+            <ArrangementButton
+              value={layout.arrangement}
+              orientation={shape.aspect}
+              onChange={setArrangement}
             />
-
-            {state.error && <p className="mt-4 text-sm text-red-600">{state.error}</p>}
-
-            <button
-              type="submit"
-              disabled={pending}
-              className="mt-6 rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
-            >
-              {pending ? "Đang lưu…" : "Lưu bố cục"}
-            </button>
           </div>
+          <PropertyList
+            entries={unplaced}
+            search={search}
+            onSearch={setSearch}
+            selected={selected}
+            onSelect={setSelected}
+          />
+        </div>
+
+        {/* 4 */}
+        <div className="flex min-w-0 flex-1 flex-col gap-3">
+          <div className="flex flex-1 flex-col overflow-hidden rounded-lg border border-stone-200 bg-stone-50">
+            <div className="flex flex-1 items-center justify-center overflow-auto p-6">
+              <CardCanvas
+                layout={layout}
+                coverRatio={coverRatio}
+                coverUrl={previewCoverUrl}
+                title={previewTitle}
+                byId={byId}
+                values={recordPreview ? previewValues : {}}
+                configs={configs}
+                selected={selected}
+                onSelect={setSelected}
+                onRemove={(id) => place(id, "tray")}
+                onBoxGrid={setBoxGrid}
+                onMerge={applyMerge}
+                onUnmerge={applyUnmerge}
+                rowCap={rowCap}
+                onResizeRegion={resizeRegion}
+                onRatio={(ratio) => setLayout((c) => ({ ...c, ratio }))}
+              />
+            </div>
+            <label className="flex items-center gap-2 border-t border-stone-200 bg-white px-4 py-2 text-xs text-stone-600">
+              <input
+                type="checkbox"
+                checked={recordPreview}
+                onChange={(event) => setRecordPreview(event.target.checked)}
+              />
+              Xem bằng dữ liệu thật của item đầu tiên
+            </label>
+          </div>
+
+          {state.error && <p className="text-sm text-red-600">{state.error}</p>}
+          <button
+            type="submit"
+            disabled={pending}
+            className="self-start rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
+          >
+            {pending ? "Đang lưu…" : "Lưu bố cục"}
+          </button>
+        </div>
+
+        {/* 5 */}
+        <div className="w-72 shrink-0">
+          <PropertyPanel
+            key={selected ?? "none"}
+            property={selectedProperty}
+            isTitle={selected === TITLE_FIELD_ID}
+            showLabel={selectedField?.showLabel ?? true}
+            onToggleLabel={() => selected && setShowLabel(selected, !(selectedField?.showLabel ?? true))}
+            onChange={(propertyId, config) => setConfigs((c) => ({ ...c, [propertyId]: config }))}
+          />
         </div>
 
         <DragOverlay>
-          {activeProperty && (
+          {draggingLabel && (
             <span className="rounded-md border border-emerald-600 bg-white px-2.5 py-1 text-sm shadow-lg">
-              {activeProperty.notionPropertyName}
+              {draggingLabel}
             </span>
           )}
         </DragOverlay>
@@ -266,124 +377,82 @@ export function CardLayoutEditor({
   );
 }
 
+/* ── helpers ─────────────────────────────────────────────────────────────── */
+
 function insert(fields: CardField[], field: CardField, beforeId?: string) {
   const at = beforeId ? fields.findIndex((f) => f.id === beforeId) : -1;
   if (at === -1) fields.push(field);
   else fields.splice(at, 0, field);
 }
 
-/* ── Layer 1 ─────────────────────────────────────────────────────────────── */
-
-function ArrangementPicker({
-  value,
-  onChange,
-}: {
-  value: ArrangementId;
-  onChange: (value: ArrangementId) => void;
-}) {
-  return (
-    <fieldset className="mb-4">
-      <legend className="mb-2 text-[11px] font-medium uppercase tracking-wide text-stone-500">
-        Vị trí các ô so với ảnh
-      </legend>
-      <div className="flex flex-wrap gap-2">
-        {ARRANGEMENT_IDS.map((id) => {
-          const selected = id === value;
-          return (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={selected}
-              onClick={() => onChange(id)}
-              className={`w-28 rounded-md border p-2 text-left transition-colors ${
-                selected
-                  ? "border-emerald-700 bg-emerald-50 text-emerald-950"
-                  : "border-stone-300 bg-white text-stone-700 hover:border-stone-500 hover:bg-stone-50"
-              }`}
-            >
-              <ArrangementGlyph id={id} selected={selected} />
-              <span className="mt-2 block text-[11px] font-medium leading-tight">
-                {ARRANGEMENTS[id].label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </fieldset>
-  );
+function findBoxOf(layout: CardLayout, fieldId: string): string | null {
+  const search = (grid: Grid): string | null => {
+    for (const box of grid.boxes) {
+      if (box.fields.some((f) => f.id === fieldId)) return box.id;
+      if (box.grid) {
+        const nested = search(box.grid);
+        if (nested) return nested;
+      }
+    }
+    return null;
+  };
+  if (layout.overlay.some((f) => f.id === fieldId)) return "overlay";
+  for (const grid of Object.values(layout.regions)) {
+    const hit = search(grid);
+    if (hit) return hit;
+  }
+  return null;
 }
 
-/* ── Pickers ─────────────────────────────────────────────────────────────── */
+/** Applies a transform to whichever grid contains the box being changed. */
+function walkGrid(grid: Grid, transform: (grid: Grid) => Grid): Grid {
+  const applied = transform(grid);
+  return {
+    ...applied,
+    boxes: applied.boxes.map((box) => (box.grid ? { ...box, grid: walkGrid(box.grid, transform) } : box)),
+  };
+}
 
-function Popover({
-  label,
-  summary,
-  glyph,
-  children,
-}: {
-  label: string;
-  summary: string;
-  glyph: React.ReactNode;
-  children: (close: () => void) => React.ReactNode;
-}) {
+/* ── 1: cover shape ──────────────────────────────────────────────────────── */
+
+function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (value: CoverShape) => void }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <fieldset className="relative">
-      <legend className="mb-2 text-[11px] font-medium uppercase tracking-wide text-stone-500">{label}</legend>
+    <div className="relative">
       <button
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className={`flex min-h-10 items-center gap-2 rounded-md border bg-white px-2 text-left ${
+        className={`flex h-24 w-28 flex-col items-center justify-center gap-1 rounded-lg border bg-white p-2 ${
           open ? "border-emerald-700" : "border-stone-300 hover:border-stone-500"
         }`}
       >
-        {glyph}
-        <span className="text-xs font-medium text-stone-800">{summary}</span>
-        <span aria-hidden className="text-stone-400">⌄</span>
+        <RatioGlyph ratio={shape.ratio} selected />
+        <span className="font-mono text-[11px] text-stone-600">{shape.ratio}</span>
       </button>
+
       {open && (
         <div
           role="dialog"
-          aria-label={label}
-          className="absolute z-30 mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-stone-300 bg-white p-3 shadow-lg"
+          aria-label="Chiều ảnh"
+          className="absolute left-0 top-full z-30 mt-2 w-72 rounded-lg border border-stone-300 bg-white p-3 shadow-lg"
         >
-          {children(() => setOpen(false))}
-        </div>
-      )}
-    </fieldset>
-  );
-}
-
-function CoverShapeSelect({
-  shape,
-  onChange,
-  disabled,
-}: {
-  shape: CoverShape;
-  onChange: (value: CoverShape) => void;
-  disabled: boolean;
-}) {
-  if (disabled) return null;
-
-  return (
-    <Popover
-      label="Khung ảnh"
-      summary={shape.ratio}
-      glyph={<RatioGlyph ratio={shape.ratio} selected />}
-    >
-      {(close) => (
-        <>
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-medium uppercase tracking-wide text-stone-500">Chiều ảnh</p>
+            <button type="button" onClick={() => setOpen(false)} className="text-xs text-stone-400 hover:text-stone-700">
+              Đóng
+            </button>
+          </div>
           <div className="mb-3 flex gap-1">
-            {ASPECT_LABELS.map((option) => (
+            {ORIENTATIONS.map((option) => (
               <button
                 key={option.value}
                 type="button"
                 aria-pressed={shape.aspect === option.value}
                 onClick={() => onChange({ aspect: option.value, ratio: COVER_RATIOS[option.value][0] })}
-                className={`rounded border px-2 py-1 text-xs ${
+                className={`flex-1 rounded border px-2 py-1 text-xs ${
                   shape.aspect === option.value
                     ? "border-emerald-700 bg-emerald-50 font-medium text-emerald-800"
                     : "border-stone-300 text-stone-600 hover:border-stone-500"
@@ -403,12 +472,10 @@ function CoverShapeSelect({
                   aria-pressed={selected}
                   onClick={() => {
                     onChange({ ...shape, ratio });
-                    close();
+                    setOpen(false);
                   }}
                   className={`flex flex-col items-center gap-1 rounded-md border p-2 ${
-                    selected
-                      ? "border-emerald-700 bg-emerald-50"
-                      : "border-stone-300 hover:border-stone-500 hover:bg-stone-50"
+                    selected ? "border-emerald-700 bg-emerald-50" : "border-stone-300 hover:border-stone-500"
                   }`}
                 >
                   <RatioGlyph ratio={ratio} selected={selected} />
@@ -417,340 +484,517 @@ function CoverShapeSelect({
               );
             })}
           </div>
-        </>
-      )}
-    </Popover>
-  );
-}
-
-function RatioSelect({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: CardRatio;
-  onChange: (value: CardRatio) => void;
-}) {
-  return (
-    <Popover
-      label={label}
-      summary={`${value[0]}:${value[1]}`}
-      glyph={<SplitGlyph left={value[0]} selected />}
-    >
-      {(close) => (
-        <div className="grid grid-cols-3 gap-2">
-          {CARD_RATIOS.map((ratio) => {
-            const selected = ratio[0] === value[0];
-            return (
-              <button
-                key={ratio.join("-")}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => {
-                  onChange(ratio);
-                  close();
-                }}
-                className={`flex flex-col items-center gap-1 rounded-md border p-2 ${
-                  selected ? "border-emerald-700 bg-emerald-50" : "border-stone-300 hover:border-stone-500"
-                }`}
-              >
-                <SplitGlyph left={ratio[0]} selected={selected} />
-                <span className="font-mono text-[11px] text-stone-700">
-                  {ratio[0]}:{ratio[1]}
-                </span>
-              </button>
-            );
-          })}
         </div>
       )}
-    </Popover>
+    </div>
   );
 }
 
-function SplitGlyph({ left, selected }: { left: number; selected: boolean }) {
-  const cell = `rounded-[2px] border ${selected ? "border-emerald-400 bg-emerald-100" : "border-stone-300 bg-stone-100"}`;
+/* ── 2: layer 1 ──────────────────────────────────────────────────────────── */
+
+function ArrangementButton({
+  value,
+  orientation,
+  onChange,
+}: {
+  value: ArrangementId;
+  orientation: CoverOrientation;
+  onChange: (value: ArrangementId) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const options = arrangementsFor(orientation);
+
   return (
-    <span aria-hidden className="flex h-7 w-12 shrink-0 gap-1 rounded-sm bg-stone-200/70 p-1">
-      <span className={cell} style={{ width: `${left}%` }} />
-      <span className={`${cell} flex-1`} />
-    </span>
+    <div className="relative">
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className={`flex h-24 w-28 flex-col items-center justify-center gap-1 rounded-lg border bg-white p-2 ${
+          open ? "border-emerald-700" : "border-stone-300 hover:border-stone-500"
+        }`}
+      >
+        <ArrangementGlyph id={value} selected />
+        <span className="text-center text-[10px] leading-tight text-stone-600">
+          {ARRANGEMENTS[value].label}
+        </span>
+      </button>
+
+      {open && (
+        <div
+          role="dialog"
+          aria-label="Bố cục ảnh"
+          className="absolute left-0 top-full z-30 mt-2 w-72 rounded-lg border border-stone-300 bg-white p-3 shadow-lg"
+        >
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-medium uppercase tracking-wide text-stone-500">Ảnh nằm ở đâu</p>
+            <button type="button" onClick={() => setOpen(false)} className="text-xs text-stone-400 hover:text-stone-700">
+              Đóng
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {options.map((id) => {
+              const selected = id === value;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => {
+                    onChange(id);
+                    setOpen(false);
+                  }}
+                  className={`rounded-md border p-2 text-left ${
+                    selected ? "border-emerald-700 bg-emerald-50" : "border-stone-300 hover:border-stone-500"
+                  }`}
+                >
+                  <ArrangementGlyph id={id} selected={selected} />
+                  <span className="mt-1.5 block text-[11px] leading-tight text-stone-700">
+                    {ARRANGEMENTS[id].label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
-function SpanSelect({ value, onChange }: { value: CardSpan; onChange: (value: CardSpan) => void }) {
-  return (
-    <fieldset>
-      <legend className="mb-2 text-[11px] font-medium uppercase tracking-wide text-stone-500">
-        Rộng trong lưới
-      </legend>
-      <div className="flex gap-1">
-        {([1, 2] as CardSpan[]).map((option) => (
-          <button
-            key={option}
-            type="button"
-            aria-pressed={value === option}
-            onClick={() => onChange(option)}
-            className={`flex h-10 items-center gap-1.5 rounded-md border px-2 text-xs ${
-              value === option
-                ? "border-emerald-700 bg-emerald-50 font-medium text-emerald-800"
-                : "border-stone-300 text-stone-600 hover:border-stone-500"
-            }`}
-          >
-            <span aria-hidden className="flex h-5 w-8 gap-0.5 rounded-sm bg-stone-200/70 p-0.5">
-              <span className={`flex-1 rounded-[1px] ${value === option ? "bg-emerald-300" : "bg-stone-300"}`} />
-              {option === 1 && <span className="flex-1 rounded-[1px] bg-transparent" />}
-            </span>
-            {option} cột
-          </button>
-        ))}
-      </div>
-    </fieldset>
-  );
-}
+/* ── 3: property list ────────────────────────────────────────────────────── */
 
-/* ── Canvas ──────────────────────────────────────────────────────────────── */
-
-function Tray({ properties }: { properties: EditableCardProperty[] }) {
+function PropertyList({
+  entries,
+  search,
+  onSearch,
+  selected,
+  onSelect,
+}: {
+  entries: { id: string; name: string; type: string }[];
+  search: string;
+  onSearch: (value: string) => void;
+  selected: string | null;
+  onSelect: (id: string) => void;
+}) {
   const { setNodeRef, isOver } = useDroppable({ id: "zone:tray" });
 
   return (
-    <aside className="w-56 shrink-0">
-      <h2 className="mb-2 text-[11px] font-medium uppercase tracking-wide text-stone-500">
-        Chưa dùng · {properties.length}
-      </h2>
-      <div
-        ref={setNodeRef}
-        className={`sticky top-4 flex max-h-[70vh] flex-col gap-1.5 overflow-y-auto rounded-lg border border-dashed p-2 ${
-          isOver ? "border-emerald-500 bg-emerald-50" : "border-stone-300"
-        }`}
-      >
-        {properties.length === 0 ? (
-          <p className="px-1 py-2 text-xs text-stone-400">Mọi property đều đã được đặt.</p>
+    <div
+      ref={setNodeRef}
+      className={`flex min-h-0 flex-1 flex-col rounded-lg border bg-white p-2 ${
+        isOver ? "border-emerald-500 bg-emerald-50" : "border-stone-200"
+      }`}
+    >
+      <div className="relative mb-2">
+        <input
+          type="search"
+          value={search}
+          onChange={(event) => onSearch(event.target.value)}
+          placeholder="Tìm property"
+          className="w-full rounded-md border border-stone-300 py-1.5 pl-2 pr-7 text-xs outline-none focus:border-emerald-600"
+        />
+        <span aria-hidden className="pointer-events-none absolute right-2 top-1.5 text-stone-400">
+          ⌕
+        </span>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+        {entries.length === 0 ? (
+          <p className="px-1 py-2 text-[11px] text-stone-400">Không còn property nào.</p>
         ) : (
-          properties.map((property) => (
-            <FieldChip
-              key={property.notionPropertyId}
-              field={{ id: property.notionPropertyId, showLabel: true }}
-              property={property}
-              muted
+          entries.map((entry) => (
+            <TrayChip
+              key={entry.id}
+              id={entry.id}
+              name={entry.name}
+              type={entry.type}
+              selected={selected === entry.id}
+              onSelect={() => onSelect(entry.id)}
             />
           ))
         )}
       </div>
-    </aside>
+    </div>
   );
 }
 
-function Canvas({
-  draft,
-  coverRatio,
-  coverUrl,
-  title,
-  byId,
-  values,
-  fieldsIn,
-  onToggleLabel,
-  onRemove,
-  onCellDisplay,
+function TrayChip({
+  id,
+  name,
+  type,
+  selected,
+  onSelect,
 }: {
-  draft: Draft;
+  id: string;
+  name: string;
+  type: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `field:${id}` });
+
+  return (
+    <button
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      type="button"
+      onClick={onSelect}
+      className={`flex w-full cursor-grab items-center gap-1.5 rounded border px-1.5 py-1 text-left text-xs active:cursor-grabbing ${
+        selected ? "border-emerald-600 bg-emerald-50" : "border-stone-200 hover:border-stone-400"
+      } ${isDragging ? "opacity-40" : ""}`}
+    >
+      <span className="text-stone-400">⠿</span>
+      <span className={`min-w-0 flex-1 truncate ${id === TITLE_FIELD_ID ? "font-semibold" : ""}`}>{name}</span>
+      <span className="shrink-0 font-mono text-[10px] text-stone-400">{type}</span>
+    </button>
+  );
+}
+
+/* ── 4: canvas ───────────────────────────────────────────────────────────── */
+
+type CanvasProps = {
+  layout: CardLayout;
   coverRatio: string;
   coverUrl: string | null;
   title: string;
   byId: Map<string, EditableCardProperty>;
   values: Record<string, string>;
-  fieldsIn: (zone: string) => CardField[];
-  onToggleLabel: (id: string) => void;
+  configs: Record<string, DisplayConfig>;
+  selected: string | null;
+  onSelect: (id: string) => void;
   onRemove: (id: string) => void;
-  onCellDisplay: (cellId: string, display: CellDisplay) => void;
-}) {
-  const spec = ARRANGEMENTS[draft.arrangement];
-  const hasCover = spec.cover !== "none";
+  onBoxGrid: (boxId: string, cols: 1 | 2, rows: number) => void;
+  onMerge: (boxId: string, direction: MergeDirection) => void;
+  onUnmerge: (boxId: string) => void;
+  rowCap: number;
+  onResizeRegion: (regionId: string, cols: 1 | 2, rows: number) => void;
+  onRatio: (ratio: CardRatio) => void;
+};
 
-  const cover = hasCover && (
+function CardCanvas(props: CanvasProps) {
+  const { layout, coverRatio, coverUrl, rowCap, onResizeRegion, onRatio } = props;
+  const spec = ARRANGEMENTS[layout.arrangement];
+  const wide: boolean = spec.sideBySide;
+  const regions: string[] = [...spec.regions];
+
+  const cover = (
     <div
       className="relative shrink-0 overflow-hidden rounded bg-stone-200 bg-cover bg-center"
       style={{
         aspectRatio: coverRatio,
-        width: spec.cover === "left" || spec.cover === "right" ? `${draft.ratio[0]}%` : "100%",
+        width: wide ? `${layout.ratio[0]}%` : "100%",
         ...(coverUrl ? { backgroundImage: `url(${JSON.stringify(coverUrl)})` } : {}),
       }}
     >
-      <DropBox
-        zone="overlay"
-        label={`Đè lên ảnh · tối đa ${MAX_OVERLAY_FIELDS}`}
-        fields={fieldsIn("overlay")}
-        display="stacked"
-        byId={byId}
-        values={values}
-        onToggleLabel={onToggleLabel}
-        onRemove={onRemove}
-        dark
-        className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/45 to-transparent"
-      />
+      <OverlayZone {...props} />
     </div>
   );
 
-  const box = (cellId: string, label: string) => (
-    <DropBox
-      key={cellId}
-      zone={cellId}
-      label={label}
-      fields={fieldsIn(cellId)}
-      display={draft.cells[cellId]?.display ?? "rows"}
-      byId={byId}
-      values={values}
-      onToggleLabel={onToggleLabel}
-      onRemove={onRemove}
-      onDisplay={(value) => onCellDisplay(cellId, value)}
-    />
-  );
-
   return (
-    <div className="rounded-lg border border-stone-200 bg-stone-50 p-4">
-      <div className={`mx-auto ${draft.span === 2 ? "max-w-3xl" : "max-w-sm"}`}>
-        <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
-          {spec.cover === "left" || spec.cover === "right" ? (
-            <>
-              <div className="flex">
-                {spec.cover === "left" && cover}
-                <div className="flex min-w-0 flex-1 flex-col gap-2 p-3">
-                  <p className="truncate font-medium text-stone-900">{title}</p>
-                  {box(spec.cells[0], "Ô cạnh ảnh")}
-                </div>
-                {spec.cover === "right" && cover}
-              </div>
-              {spec.cells[1] && <div className="p-3 pt-0">{box(spec.cells[1], "Ô dưới")}</div>}
-            </>
-          ) : (
-            <div className="flex flex-col">
+    <div className="w-full" style={{ maxWidth: wide ? 620 : 380 }}>
+      <div className="overflow-hidden rounded-lg border border-stone-300 bg-white shadow-sm">
+        {wide ? (
+          <>
+            <div className="flex">
               {cover}
-              <div className="flex flex-col gap-2 p-3">
-                <p className="truncate font-medium text-stone-900">{title}</p>
-                {spec.cells.length === 2 ? (
-                  <div className="flex gap-2">
-                    <div className="min-w-0 flex-1">{box(spec.cells[0], "Ô trái")}</div>
-                    <div className="min-w-0 flex-1">{box(spec.cells[1], "Ô phải")}</div>
-                  </div>
-                ) : (
-                  spec.cells.map((id) => box(id, "Ô nội dung"))
-                )}
+              <div className="min-w-0 flex-1 p-2">
+                <RegionBlock {...props} regionId="main" />
               </div>
             </div>
-          )}
-        </div>
+            {regions.includes("below") && (
+              <div className="p-2 pt-0">
+                <RegionBlock {...props} regionId="below" />
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {cover}
+            {regions.map((regionId) => (
+              <div key={regionId} className="p-2">
+                <RegionBlock {...props} regionId={regionId} />
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
-      <p className="mt-3 text-center text-[11px] text-stone-400">
-        Kéo property từ cột trái vào ô. Thả lên một property để chèn phía trên nó. Nút ở góc mỗi ô đổi cách bày
-        property bên trong.
-      </p>
+      <div className="mt-3 flex flex-wrap items-center justify-center gap-3">
+        {regions.map((regionId) => (
+          <GridSizePicker
+            key={regionId}
+            label={regions.length > 1 ? (regionId === "main" ? "Ô cạnh ảnh" : "Ô dưới") : "Khung nội dung"}
+            grid={layout.regions[regionId]}
+            maxRows={regionId === "main" ? rowCap : MAX_ROWS}
+            onChange={(cols, rows) => onResizeRegion(regionId, cols, rows)}
+          />
+        ))}
+        {wide && <CardRatioPicker value={layout.ratio} onChange={onRatio} />}
+      </div>
+      {wide && (
+        <p className="mt-2 text-center text-[11px] text-stone-400">
+          Tối đa {rowCap} dòng cạnh ảnh để chữ không cao hơn ảnh.
+        </p>
+      )}
     </div>
   );
 }
 
-function DropBox({
-  zone,
-  label,
-  fields,
-  display,
-  byId,
-  values,
-  onToggleLabel,
-  onRemove,
-  onDisplay,
-  dark,
-  className = "",
-}: {
-  zone: string;
-  label: string;
-  fields: CardField[];
-  display: CellDisplay;
-  byId: Map<string, EditableCardProperty>;
-  values: Record<string, string>;
-  onToggleLabel: (id: string) => void;
-  onRemove: (id: string) => void;
-  onDisplay?: (value: CellDisplay) => void;
-  dark?: boolean;
-  className?: string;
+function RegionBlock({ regionId, ...props }: CanvasProps & { regionId: string }) {
+  const grid = props.layout.regions[regionId];
+  if (!grid) return null;
+  return <GridBlock {...props} grid={grid} depth={0} />;
+}
+
+function GridBlock({ grid, depth, ...props }: CanvasProps & { grid: Grid; depth: number }) {
+  return (
+    <div
+      className="grid gap-1"
+      style={{ gridTemplateColumns: `repeat(${grid.cols}, minmax(0, 1fr))` }}
+    >
+      {grid.boxes.map((box, index) => {
+        if (box.mergedInto) return null;
+        const { colSpan, rowSpan } = spanOf(grid, index);
+        return (
+          <BoxSlot
+            key={box.id}
+            {...props}
+            grid={grid}
+            box={box}
+            index={index}
+            depth={depth}
+            colSpan={colSpan}
+            rowSpan={rowSpan}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function BoxSlot({
+  grid,
+  box,
+  index,
+  depth,
+  colSpan,
+  rowSpan,
+  ...props
+}: CanvasProps & {
+  grid: Grid;
+  box: GridBox;
+  index: number;
+  depth: number;
+  colSpan: number;
+  rowSpan: number;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `zone:${zone}` });
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const { setNodeRef, isOver } = useDroppable({ id: `box:${box.id}` });
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const empty = box.fields.length === 0 && !box.grid;
+  const mergeLeft = canMerge(grid, box.id, "left");
+  const mergeUp = canMerge(grid, box.id, "up");
+  const absorbed = grid.boxes.some(
+    (other, at) =>
+      other.mergedInto &&
+      ((other.mergedInto === "left" && at === index + 1) ||
+        (other.mergedInto === "up" && at === index + grid.cols)),
+  );
 
   return (
     <div
       ref={setNodeRef}
-      className={`relative rounded border border-dashed p-1.5 ${className} ${
-        isOver ? "border-emerald-500 bg-emerald-50/90" : dark ? "border-white/30" : "border-stone-300"
+      style={{
+        gridColumn: colSpan > 1 ? `span ${colSpan}` : undefined,
+        gridRow: rowSpan > 1 ? `span ${rowSpan}` : undefined,
+      }}
+      className={`relative min-h-10 rounded border border-dashed p-1 ${
+        isOver ? "border-emerald-500 bg-emerald-50" : absorbed ? "border-stone-200 bg-stone-50/70" : "border-stone-300"
       }`}
     >
-      {onDisplay && (
-        <div className="absolute right-1 top-1 z-20">
-          <button
-            type="button"
-            aria-label="Cách bày property trong ô"
-            aria-expanded={pickerOpen}
-            onClick={() => setPickerOpen((o) => !o)}
-            className={`rounded border bg-white p-0.5 ${
-              pickerOpen ? "border-emerald-700" : "border-stone-300 hover:border-stone-500"
-            }`}
-          >
-            <CellDisplayGlyph display={display} selected={pickerOpen} />
-          </button>
-          {pickerOpen && (
-            <div className="absolute right-0 z-30 mt-1 w-56 rounded-lg border border-stone-300 bg-white p-2 shadow-lg">
-              <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-stone-500">
-                Bày property thế nào
-              </p>
-              <div className="grid grid-cols-2 gap-1.5">
-                {CELL_DISPLAY_IDS.map((option) => {
-                  const selected = option === display;
-                  return (
+      {box.grid ? (
+        <GridBlock {...props} grid={box.grid} depth={depth + 1} />
+      ) : (
+        <>
+          {box.fields.length === 0 && (
+            <span className="block px-1 py-1 text-[10px] text-stone-400">Kéo prop vào</span>
+          )}
+          <div className="flex flex-col gap-1">
+            {box.fields.map((field) => (
+              <FieldChip
+                key={field.id}
+                field={field}
+                property={props.byId.get(field.id) ?? null}
+                title={props.title}
+                value={props.values[field.id]}
+                config={props.configs[field.id]}
+                selected={props.selected === field.id}
+                onSelect={() => props.onSelect(field.id)}
+                onRemove={() => props.onRemove(field.id)}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Layer 2 and merge controls, only where they make sense. */}
+      <div className="absolute right-0.5 top-0.5 z-20 flex gap-0.5">
+        {depth === 0 && !box.mergedInto && (
+          <MiniButton label="Chia ô" onClick={() => setMenuOpen((o) => !o)}>
+            <GridGlyph cols={box.grid?.cols ?? 1} rows={box.grid?.rows ?? 1} selected={menuOpen} />
+          </MiniButton>
+        )}
+        {empty && (mergeLeft || mergeUp) && (
+          <MiniButton label="Gộp ô" onClick={() => setMenuOpen((o) => !o)}>
+            <span className="px-1 text-[10px] text-stone-500">⇱</span>
+          </MiniButton>
+        )}
+      </div>
+
+      {menuOpen && (
+        <div className="absolute right-0 top-6 z-30 w-44 rounded-lg border border-stone-300 bg-white p-2 shadow-lg">
+          {depth === 0 && (
+            <>
+              <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-stone-400">Chia ô</p>
+              <div className="mb-2 grid grid-cols-4 gap-1">
+                {([1, 2] as const).flatMap((cols) =>
+                  [1, 2].map((rows) => (
                     <button
-                      key={option}
+                      key={`${cols}x${rows}`}
                       type="button"
-                      aria-pressed={selected}
                       onClick={() => {
-                        onDisplay(option);
-                        setPickerOpen(false);
+                        props.onBoxGrid(box.id, cols, rows);
+                        setMenuOpen(false);
                       }}
-                      className={`flex flex-col items-center gap-1 rounded-md border p-1.5 ${
-                        selected ? "border-emerald-700 bg-emerald-50" : "border-stone-300 hover:border-stone-500"
-                      }`}
+                      className="flex flex-col items-center gap-0.5 rounded border border-stone-300 p-1 hover:border-emerald-600"
                     >
-                      <CellDisplayGlyph display={option} selected={selected} />
-                      <span className="text-center text-[10px] leading-tight text-stone-600">
-                        {CELL_DISPLAYS[option].label}
+                      <GridGlyph cols={cols} rows={rows} selected={false} />
+                      <span className="text-[9px] text-stone-500">
+                        {cols}×{rows}
                       </span>
                     </button>
-                  );
-                })}
+                  )),
+                )}
               </div>
-            </div>
+            </>
+          )}
+          {empty && (mergeLeft || mergeUp) && (
+            <>
+              <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-stone-400">Gộp ô</p>
+              <div className="flex gap-1">
+                {mergeLeft && (
+                  <MenuAction
+                    onClick={() => {
+                      props.onMerge(box.id, "left");
+                      setMenuOpen(false);
+                    }}
+                  >
+                    Gộp ngang
+                  </MenuAction>
+                )}
+                {mergeUp && (
+                  <MenuAction
+                    onClick={() => {
+                      props.onMerge(box.id, "up");
+                      setMenuOpen(false);
+                    }}
+                  >
+                    Gộp dọc
+                  </MenuAction>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}
 
-      {fields.length === 0 ? (
-        <span className={`block px-1 py-2 text-[11px] ${dark ? "text-white/70" : "text-stone-400"}`}>
-          {label}
-        </span>
+      {/* A folded neighbour can be handed back. */}
+      {absorbed && (
+        <button
+          type="button"
+          onClick={() => {
+            const folded = grid.boxes.find(
+              (other, at) =>
+                other.mergedInto &&
+                ((other.mergedInto === "left" && at === index + 1) ||
+                  (other.mergedInto === "up" && at === index + grid.cols)),
+            );
+            if (folded) props.onUnmerge(folded.id);
+          }}
+          className="absolute bottom-0.5 right-0.5 z-20 rounded border border-stone-300 bg-white px-1 text-[9px] text-stone-500 hover:border-stone-500"
+        >
+          bỏ gộp
+        </button>
+      )}
+    </div>
+  );
+}
+
+function MiniButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className="rounded border border-stone-300 bg-white p-0.5 hover:border-stone-500"
+    >
+      {children}
+    </button>
+  );
+}
+
+function MenuAction({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex-1 rounded border border-stone-300 px-1.5 py-1 text-[10px] text-stone-600 hover:border-emerald-600 hover:text-emerald-800"
+    >
+      {children}
+    </button>
+  );
+}
+
+function OverlayZone(props: CanvasProps) {
+  const { setNodeRef, isOver } = useDroppable({ id: "zone:overlay" });
+  const { layout } = props;
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`absolute inset-x-0 bottom-0 flex flex-col gap-0.5 bg-gradient-to-t from-black/80 via-black/45 to-transparent p-1.5 ${
+        isOver ? "ring-1 ring-emerald-400" : ""
+      }`}
+    >
+      {layout.overlay.length === 0 ? (
+        <span className="text-[10px] text-white/70">Đè lên ảnh · tối đa {MAX_OVERLAY_FIELDS}</span>
       ) : (
-        <div className={display === "two-col" ? "grid grid-cols-2 gap-1" : "flex flex-col gap-1"}>
-          {fields.map((field) => (
-            <FieldChip
-              key={field.id}
-              field={field}
-              property={byId.get(field.id)}
-              value={values[field.id]}
-              display={display}
-              dark={dark}
-              onToggleLabel={() => onToggleLabel(field.id)}
-              onRemove={() => onRemove(field.id)}
-            />
-          ))}
-        </div>
+        layout.overlay.map((field) => (
+          <FieldChip
+            key={field.id}
+            field={field}
+            property={props.byId.get(field.id) ?? null}
+            title={props.title}
+            value={props.values[field.id]}
+            config={props.configs[field.id]}
+            selected={props.selected === field.id}
+            onSelect={() => props.onSelect(field.id)}
+            onRemove={() => props.onRemove(field.id)}
+            dark
+          />
+        ))
       )}
     </div>
   );
@@ -759,72 +1003,129 @@ function DropBox({
 function FieldChip({
   field,
   property,
+  title,
   value,
-  display = "rows",
-  muted,
-  dark,
-  onToggleLabel,
+  config,
+  selected,
+  onSelect,
   onRemove,
+  dark,
 }: {
   field: CardField;
-  property: EditableCardProperty | undefined;
+  property: EditableCardProperty | null;
+  title: string;
   value?: string;
-  display?: CellDisplay;
-  muted?: boolean;
+  config?: DisplayConfig;
+  selected: boolean;
+  onSelect: () => void;
+  onRemove: () => void;
   dark?: boolean;
-  onToggleLabel?: () => void;
-  onRemove?: () => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `field:${field.id}` });
-  // Dropping onto a chip inserts above it — that is how ordering happens without a
-  // sortable library.
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: `before:${field.id}` });
-  if (!property) return null;
 
-  const stacked = display === "stacked";
+  const isTitle = field.id === TITLE_FIELD_ID;
+  if (!isTitle && !property) return null;
+
+  const name = config?.nameOverride?.trim() || property?.notionPropertyName || "";
+  const shown = isTitle ? title : value || "—";
 
   return (
     <span
       ref={setDropRef}
-      className={`flex w-full items-center gap-1.5 rounded border px-1.5 py-1 text-xs ${
-        isOver ? "border-emerald-500" : dark ? "border-white/25" : "border-stone-300"
-      } ${isDragging ? "opacity-40" : ""} ${
-        dark ? "bg-black/35 text-white" : muted ? "bg-white text-stone-500" : "bg-white text-stone-800"
-      }`}
+      className={`flex w-full items-center gap-1 rounded border px-1 py-0.5 text-[11px] ${
+        selected ? "border-emerald-600 ring-1 ring-emerald-400" : isOver ? "border-emerald-500" : dark ? "border-white/25" : "border-stone-200"
+      } ${isDragging ? "opacity-40" : ""} ${dark ? "bg-black/40 text-white" : "bg-white text-stone-800"}`}
     >
       <span
         ref={setNodeRef}
         {...listeners}
         {...attributes}
-        className={`flex min-w-0 flex-1 cursor-grab select-none gap-1.5 active:cursor-grabbing ${
-          stacked ? "flex-col items-start" : "items-baseline"
-        }`}
+        onClick={onSelect}
+        className="flex min-w-0 flex-1 cursor-grab items-baseline gap-1 active:cursor-grabbing"
       >
-        <span className={`shrink-0 ${dark ? "text-white/50" : "text-stone-400"}`}>⠿</span>
-        {field.showLabel && (
-          <span className={`shrink-0 ${dark ? "text-white/60" : "text-stone-400"}`}>
-            {property.notionPropertyName}
-          </span>
+        {!isTitle && field.showLabel && (
+          <span className={`shrink-0 truncate ${dark ? "text-white/60" : "text-stone-400"}`}>{name}</span>
         )}
-        <span className="min-w-0 flex-1 truncate">{muted ? property.notionPropertyName : value || "—"}</span>
+        <span className={`min-w-0 flex-1 truncate ${isTitle ? "font-semibold" : ""}`}>{shown}</span>
       </span>
-
-      {onToggleLabel && (
-        <label className={`flex shrink-0 items-center gap-1 ${dark ? "text-white/60" : "text-stone-400"}`}>
-          <input type="checkbox" checked={field.showLabel} onChange={onToggleLabel} />
-          tên
-        </label>
-      )}
-      {onRemove && (
-        <button
-          type="button"
-          onClick={onRemove}
-          aria-label={`Bỏ ${property.notionPropertyName}`}
-          className={`shrink-0 ${dark ? "text-white/60 hover:text-white" : "text-stone-400 hover:text-stone-700"}`}
-        >
-          ✕
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label="Bỏ khỏi card"
+        className={`shrink-0 ${dark ? "text-white/60 hover:text-white" : "text-stone-300 hover:text-stone-700"}`}
+      >
+        ✕
+      </button>
     </span>
   );
 }
+
+function GridSizePicker({
+  label,
+  grid,
+  maxRows,
+  onChange,
+}: {
+  label: string;
+  grid: Grid;
+  maxRows: number;
+  onChange: (cols: 1 | 2, rows: number) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[11px] text-stone-500">{label}</span>
+      <div className="flex gap-1">
+        {([1, 2] as const).flatMap((cols) =>
+          Array.from({ length: Math.min(MAX_ROWS, maxRows) }, (_, i) => i + 1).map((rows) => {
+            const selected = grid.cols === cols && grid.rows === rows;
+            return (
+              <button
+                key={`${cols}x${rows}`}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => onChange(cols, rows)}
+                title={`${cols} cột × ${rows} dòng`}
+                className={`rounded border p-0.5 ${
+                  selected ? "border-emerald-700 bg-emerald-50" : "border-stone-300 hover:border-stone-500"
+                }`}
+              >
+                <GridGlyph cols={cols} rows={rows} selected={selected} />
+              </button>
+            );
+          }),
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CardRatioPicker({ value, onChange }: { value: CardRatio; onChange: (value: CardRatio) => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[11px] text-stone-500">Ảnh / chữ</span>
+      <div className="flex gap-1">
+        {CARD_RATIOS.map((ratio) => {
+          const selected = ratio[0] === value[0];
+          return (
+            <button
+              key={ratio.join("-")}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onChange(ratio)}
+              className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${
+                selected
+                  ? "border-emerald-700 bg-emerald-50 text-emerald-800"
+                  : "border-stone-300 text-stone-600 hover:border-stone-500"
+              }`}
+            >
+              {ratio[0]}:{ratio[1]}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export { MAX_COLS };

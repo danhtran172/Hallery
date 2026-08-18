@@ -15,6 +15,8 @@ export type DisplayConfig = {
   prefix?: string;
   suffix?: string;
   label?: string;
+  /** Shown instead of the Notion property name. Renaming here never touches Notion. */
+  nameOverride?: string;
 };
 
 export function parseDisplayConfig(raw: string): DisplayConfig {

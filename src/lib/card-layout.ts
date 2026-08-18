@@ -1,63 +1,86 @@
 /**
- * How a gallery card is arranged, in two layers.
+ * How a gallery card is arranged, in two layers over a cover image.
  *
- *   Layer 1 — where the boxes sit relative to the cover image.
- *   Layer 2 — how the properties inside each box are laid out.
+ *   Layer 1 — where the cover sits, and how the content area is divided into frames.
+ *   Layer 2 — how each frame is divided into the boxes that hold properties.
  *
- * Both are picked from pictures rather than words, the way the Card Detail builder does
- * it. Stored in Gallery.displayConfig; property references are Notion property IDs, so a
+ * Both are grids of at most two columns, because a card is a thumbnail: past two columns
+ * the text is narrower than the words in it. Empty boxes can be merged into a neighbour,
+ * so a 2×2 that only needs three boxes does not have to look like it lost one.
+ *
+ * Stored in Gallery.displayConfig. Property references are Notion property IDs, so a
  * rename in Notion cannot break a saved arrangement.
  */
 
-export const CARD_LAYOUT_VERSION = 3;
+export const CARD_LAYOUT_VERSION = 4;
+
+/** The page title, draggable like any other property but rendered bold. */
+export const TITLE_FIELD_ID = "__title__";
 
 export type CardField = { id: string; showLabel: boolean };
 
 /* ── Layer 1 ─────────────────────────────────────────────────────────────── */
 
-export type CoverSlot = "top" | "left" | "right" | "full" | "none";
+export type CoverSlot = "top" | "left" | "none";
+export type CoverOrientation = "landscape" | "portrait" | "square";
 
 export type Arrangement = {
   label: string;
   cover: CoverSlot;
-  /** Boxes this arrangement exposes, in visual order. */
-  cells: string[];
+  /** Content frames this arrangement exposes, in visual order. */
+  regions: ("main" | "below")[];
+  /** True when the cover and a frame share a row, making their ratio meaningful. */
+  sideBySide: boolean;
 };
 
 export const ARRANGEMENTS = {
-  "cover-top": { label: "Ảnh trên", cover: "top", cells: ["a"] },
-  "cover-top-two": { label: "Ảnh trên, 2 ô", cover: "top", cells: ["a", "b"] },
-  "cover-left": { label: "Ảnh trái", cover: "left", cells: ["a"] },
-  "cover-left-below": { label: "Ảnh trái, thêm ô dưới", cover: "left", cells: ["a", "b"] },
-  "cover-right": { label: "Ảnh phải", cover: "right", cells: ["a"] },
-  "cover-only": { label: "Chỉ ảnh", cover: "full", cells: [] },
-  "no-cover": { label: "Không ảnh", cover: "none", cells: ["a"] },
+  "cover-top": { label: "Ảnh trên, content dưới", cover: "top", regions: ["main"], sideBySide: false },
+  "cover-left": { label: "Ảnh trái, content phải", cover: "left", regions: ["main"], sideBySide: true },
+  "cover-left-below": {
+    label: "Ảnh trái, content phải và dưới",
+    cover: "left",
+    regions: ["main", "below"],
+    sideBySide: true,
+  },
+  "cover-only": { label: "Chỉ ảnh", cover: "top", regions: [], sideBySide: false },
 } as const satisfies Record<string, Arrangement>;
 
 export type ArrangementId = keyof typeof ARRANGEMENTS;
-export const ARRANGEMENT_IDS = Object.keys(ARRANGEMENTS) as ArrangementId[];
+
+/**
+ * Arrangements offered for a cover shape. A landscape cover beside its text leaves a
+ * strip too short to hold anything, so only the taller shapes offer the side layouts.
+ */
+export function arrangementsFor(orientation: CoverOrientation): ArrangementId[] {
+  if (orientation === "landscape") return ["cover-top", "cover-only"];
+  return ["cover-top", "cover-left", "cover-left-below", "cover-only"];
+}
 
 export function isArrangement(value: unknown): value is ArrangementId {
   return typeof value === "string" && value in ARRANGEMENTS;
 }
 
-/* ── Layer 2 ─────────────────────────────────────────────────────────────── */
+/* ── Grids ───────────────────────────────────────────────────────────────── */
 
-export const CELL_DISPLAYS = {
-  rows: { label: "Nhãn trái, giá trị phải" },
-  stacked: { label: "Nhãn trên, giá trị dưới" },
-  "two-col": { label: "Hai cột" },
-  inline: { label: "Nối liền một hàng" },
-} as const;
+export const MAX_COLS = 2;
+export const MAX_ROWS = 4;
 
-export type CellDisplay = keyof typeof CELL_DISPLAYS;
-export const CELL_DISPLAY_IDS = Object.keys(CELL_DISPLAYS) as CellDisplay[];
+export type MergeDirection = "left" | "up";
 
-export function isCellDisplay(value: unknown): value is CellDisplay {
-  return typeof value === "string" && value in CELL_DISPLAYS;
-}
+export type GridBox = {
+  id: string;
+  fields: CardField[];
+  /** Layer 2. Only frames of the layer-1 grid carry one; boxes inside it do not. */
+  grid?: Grid;
+  /**
+   * This box has been folded into the neighbour to its left or above. Kept in the grid
+   * rather than deleted so the merge stays reversible, and so dropping a property in can
+   * simply undo it.
+   */
+  mergedInto?: MergeDirection;
+};
 
-/* ── Layout ──────────────────────────────────────────────────────────────── */
+export type Grid = { cols: 1 | 2; rows: number; boxes: GridBox[] };
 
 export type CardRatio = [30, 70] | [40, 60] | [50, 50] | [60, 40] | [70, 30];
 export const CARD_RATIOS: CardRatio[] = [
@@ -68,22 +91,126 @@ export const CARD_RATIOS: CardRatio[] = [
   [70, 30],
 ];
 
-export type CardSpan = 1 | 2;
-export type CardCell = { display: CellDisplay; fields: CardField[] };
-
 export type CardLayout = {
   version: typeof CARD_LAYOUT_VERSION;
   arrangement: ArrangementId;
-  span: CardSpan;
-  /** Cover vs text split, used when the cover sits on a side. */
+  /** Cover vs content split, used when they share a row. */
   ratio: CardRatio;
   /** Burned onto the cover. Capped — a cover buried under text stops being an image. */
   overlay: CardField[];
-  cells: Record<string, CardCell>;
+  regions: Record<string, Grid>;
 };
 
 export const MAX_OVERLAY_FIELDS = 3;
 export const DEFAULT_CARD_FIELD_COUNT = 4;
+
+/* ── Row budget ──────────────────────────────────────────────────────────── */
+
+/** Nominal card width used to reason about how many rows fit beside a cover. */
+const NOMINAL_CARD_WIDTH = 380;
+/** A labelled row of text, near enough. */
+export const MIN_ROW_HEIGHT = 30;
+
+/**
+ * How many rows fit beside the cover before the text runs taller than the image.
+ * Only meaningful when the two share a row.
+ */
+export function maxRowsBesideCover(orientation: CoverOrientation, ratio: CardRatio, ratioLabel: string): number {
+  const [w, h] = ratioLabel.split(":").map(Number);
+  if (!w || !h) return MAX_ROWS;
+  const coverWidth = (NOMINAL_CARD_WIDTH * ratio[0]) / 100;
+  const coverHeight = (coverWidth * h) / w;
+  return Math.max(1, Math.min(MAX_ROWS, Math.floor(coverHeight / MIN_ROW_HEIGHT)));
+}
+
+/* ── Construction ────────────────────────────────────────────────────────── */
+
+let boxCounter = 0;
+function makeBox(fields: CardField[] = []): GridBox {
+  boxCounter += 1;
+  return { id: `b${Date.now().toString(36)}${boxCounter}`, fields };
+}
+
+export function makeGrid(cols: 1 | 2, rows: number, carried: CardField[][] = []): Grid {
+  const count = cols * rows;
+  const boxes: GridBox[] = [];
+  for (let index = 0; index < count; index += 1) {
+    // Anything past the new box count folds into the last one rather than vanishing.
+    const overflow = index === count - 1 ? carried.slice(count).flat() : [];
+    boxes.push(makeBox([...(carried[index] ?? []), ...overflow]));
+  }
+  return { cols, rows, boxes };
+}
+
+/** Fields held anywhere in a grid, in visual order. */
+export function gridFields(grid: Grid): CardField[] {
+  return grid.boxes.flatMap((box) => (box.grid ? gridFields(box.grid) : box.fields));
+}
+
+/** Per-box field lists, used when a grid is resized and its contents must be carried. */
+function gridCarry(grid: Grid): CardField[][] {
+  return grid.boxes.map((box) => (box.grid ? gridFields(box.grid) : box.fields));
+}
+
+/** Resizes a grid, preserving as much placement as the new shape allows. */
+export function resizeGrid(grid: Grid, cols: 1 | 2, rows: number): Grid {
+  return makeGrid(cols, rows, gridCarry(grid));
+}
+
+/** Folds an empty box into its left or upper neighbour. Reversible; nothing is deleted. */
+export function mergeBox(grid: Grid, boxId: string, direction: MergeDirection): Grid {
+  if (!canMerge(grid, boxId, direction)) return grid;
+  return {
+    ...grid,
+    boxes: grid.boxes.map((box) => (box.id === boxId ? { ...box, mergedInto: direction, fields: [] } : box)),
+  };
+}
+
+export function unmergeBox(grid: Grid, boxId: string): Grid {
+  return {
+    ...grid,
+    boxes: grid.boxes.map((box) => {
+      if (box.id !== boxId) return box;
+      const rest = { ...box };
+      delete rest.mergedInto;
+      return rest;
+    }),
+  };
+}
+
+/**
+ * Whether an empty box can fold that way. A box only merges into a neighbour that is
+ * itself standing on its own, so merges never chain into shapes a grid cannot express.
+ */
+export function canMerge(grid: Grid, boxId: string, direction: MergeDirection): boolean {
+  const index = grid.boxes.findIndex((box) => box.id === boxId);
+  if (index === -1) return false;
+  const box = grid.boxes[index];
+  if (box.mergedInto || box.fields.length > 0 || box.grid) return false;
+
+  if (direction === "left") {
+    if (grid.cols === 1 || index % grid.cols === 0) return false;
+    return !grid.boxes[index - 1]?.mergedInto;
+  }
+  const above = grid.boxes[index - grid.cols];
+  return Boolean(above) && !above.mergedInto;
+}
+
+/**
+ * Grid spans, derived from which boxes were folded away. Kept out of storage so a merge
+ * is one flag rather than three fields that can disagree.
+ */
+export function spanOf(grid: Grid, index: number): { colSpan: number; rowSpan: number } {
+  const right = grid.boxes[index + 1];
+  const colSpan = right && index % grid.cols !== grid.cols - 1 && right.mergedInto === "left" ? 2 : 1;
+
+  let rowSpan = 1;
+  for (let below = index + grid.cols; below < grid.boxes.length; below += grid.cols) {
+    if (grid.boxes[below]?.mergedInto !== "up") break;
+    rowSpan += 1;
+  }
+  return { colSpan, rowSpan };
+}
 
 export type CardEligibleProperty = {
   notionPropertyId: string;
@@ -92,27 +219,29 @@ export type CardEligibleProperty = {
   isMissing: boolean;
 };
 
-/** Properties a card may show — the title is already the card's heading. */
+/** Properties a card may show. The title joins them as a draggable pseudo-property. */
 export function cardEligibleProperties<T extends CardEligibleProperty>(properties: T[]): T[] {
   return properties.filter((p) => p.notionPropertyType !== "title" && !p.isMissing);
 }
 
-const emptyCell = (): CardCell => ({ display: "rows", fields: [] });
-
 export function createDefaultCardLayout(properties: CardEligibleProperty[]): CardLayout {
-  const fields = cardEligibleProperties(properties)
-    .slice(0, DEFAULT_CARD_FIELD_COUNT)
-    .map((property) => ({ id: property.notionPropertyId, showLabel: true }));
+  const fields: CardField[] = [
+    { id: TITLE_FIELD_ID, showLabel: false },
+    ...cardEligibleProperties(properties)
+      .slice(0, DEFAULT_CARD_FIELD_COUNT)
+      .map((property) => ({ id: property.notionPropertyId, showLabel: true })),
+  ];
 
   return {
     version: CARD_LAYOUT_VERSION,
     arrangement: "cover-top",
-    span: 1,
     ratio: [40, 60],
     overlay: [],
-    cells: { a: { display: "rows", fields } },
+    regions: { main: makeGrid(1, 1, [fields]) },
   };
 }
+
+/* ── Parsing ─────────────────────────────────────────────────────────────── */
 
 function parseFields(raw: unknown): CardField[] {
   if (!Array.isArray(raw)) return [];
@@ -134,85 +263,125 @@ function parseRatio(raw: unknown): CardRatio {
   return [40, 60];
 }
 
-function parseCell(raw: unknown): CardCell {
-  if (typeof raw !== "object" || raw === null) return emptyCell();
-  const { display, fields } = raw as { display?: unknown; fields?: unknown };
-  return { display: isCellDisplay(display) ? display : "rows", fields: parseFields(fields) };
+function parseGrid(raw: unknown, depth: number): Grid | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const { cols, rows, boxes } = raw as { cols?: unknown; rows?: unknown; boxes?: unknown };
+  if (!Array.isArray(boxes)) return null;
+
+  const parsed: GridBox[] = [];
+  for (const entry of boxes) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const box = entry as Record<string, unknown>;
+    const nested = depth === 0 ? parseGrid(box.grid, depth + 1) : null;
+    const merged = box.mergedInto === "left" || box.mergedInto === "up" ? box.mergedInto : undefined;
+    parsed.push({
+      id: typeof box.id === "string" && box.id ? box.id : makeBox().id,
+      fields: nested || merged ? [] : parseFields(box.fields),
+      ...(nested ? { grid: nested } : {}),
+      ...(merged ? { mergedInto: merged } : {}),
+    });
+  }
+  if (parsed.length === 0) return null;
+
+  return {
+    cols: cols === 2 ? 2 : 1,
+    rows: typeof rows === "number" && rows > 0 ? Math.min(MAX_ROWS, rows) : 1,
+    boxes: parsed,
+  };
 }
 
-/**
- * Reads persisted JSON. Earlier shapes are lifted rather than discarded, so a gallery
- * keeps the arrangement someone already set instead of silently resetting to defaults.
- */
+/** Reads persisted JSON, lifting older shapes so a saved arrangement is never lost. */
 export function parseCardLayout(raw: unknown): CardLayout | null {
   if (typeof raw !== "object" || raw === null) return null;
   const value = raw as Record<string, unknown>;
   if (value.version !== CARD_LAYOUT_VERSION) return liftLegacyLayout(value);
 
   const arrangement = isArrangement(value.arrangement) ? value.arrangement : "cover-top";
-  const cellsRaw = (value.cells ?? {}) as Record<string, unknown>;
-  const cells: Record<string, CardCell> = {};
-  for (const id of ARRANGEMENTS[arrangement].cells) cells[id] = parseCell(cellsRaw[id]);
+  const regionsRaw = (value.regions ?? {}) as Record<string, unknown>;
+  const regions: Record<string, Grid> = {};
+  for (const id of ARRANGEMENTS[arrangement].regions) {
+    regions[id] = parseGrid(regionsRaw[id], 0) ?? makeGrid(1, 1);
+  }
 
   return {
     version: CARD_LAYOUT_VERSION,
     arrangement,
-    span: value.span === 2 ? 2 : 1,
     ratio: parseRatio(value.ratio),
     overlay: parseFields(value.overlay).slice(0, MAX_OVERLAY_FIELDS),
-    cells,
+    regions,
   };
 }
 
-/** v1: `{ preset, fields, overlayFields }`. v2: `{ cover, side, below: { cells } }`. */
+/** v1 presets, v2 side/below, v3 named cells — all collapse to one or two frames. */
 function liftLegacyLayout(value: Record<string, unknown>): CardLayout | null {
   const overlay = parseFields(value.overlay ?? value.overlayFields).slice(0, MAX_OVERLAY_FIELDS);
-  const span: CardSpan = value.span === 2 ? 2 : 1;
-  const base = { version: CARD_LAYOUT_VERSION, span, ratio: parseRatio(value.ratio), overlay } as const;
+  const ratio = parseRatio(value.ratio);
+  const base = { version: CARD_LAYOUT_VERSION, ratio, overlay } as const;
 
-  if ("below" in value) {
-    const below = (value.below ?? {}) as Record<string, unknown>;
-    const belowCells = Array.isArray(below.cells) ? below.cells : [];
-    const side = parseFields(value.side);
-    const first = parseFields(belowCells[0]);
-    const second = parseFields(belowCells[1]);
-
-    if (value.cover === "left") {
-      const rest = [...first, ...second];
-      return rest.length
-        ? { ...base, arrangement: "cover-left-below", cells: { a: { display: "rows", fields: side }, b: { display: "rows", fields: rest } } }
-        : { ...base, arrangement: "cover-left", cells: { a: { display: "rows", fields: side } } };
+  const collect = (): { main: CardField[]; below: CardField[]; cover: CoverSlot } => {
+    if (value.cells && typeof value.cells === "object") {
+      const cells = value.cells as Record<string, { fields?: unknown }>;
+      const arrangement = String(value.arrangement ?? "");
+      return {
+        main: parseFields(cells.a?.fields),
+        below: parseFields(cells.b?.fields),
+        cover: arrangement.includes("left") || arrangement.includes("right") ? "left" : arrangement === "no-cover" ? "none" : "top",
+      };
     }
-    if (value.cover === "off") {
-      return { ...base, arrangement: "no-cover", overlay: [], cells: { a: { display: "rows", fields: [...side, ...first, ...second] } } };
+    if ("below" in value) {
+      const below = (value.below ?? {}) as Record<string, unknown>;
+      const belowCells = Array.isArray(below.cells) ? below.cells : [];
+      return {
+        main: value.cover === "left" ? parseFields(value.side) : parseFields(belowCells[0]),
+        below: value.cover === "left" ? [...parseFields(belowCells[0]), ...parseFields(belowCells[1])] : parseFields(belowCells[1]),
+        cover: value.cover === "left" ? "left" : value.cover === "off" ? "none" : "top",
+      };
     }
-    return second.length
-      ? { ...base, arrangement: "cover-top-two", cells: { a: { display: "rows", fields: first }, b: { display: "rows", fields: second } } }
-      : { ...base, arrangement: "cover-top", cells: { a: { display: "rows", fields: [...side, ...first] } } };
-  }
+    if ("fields" in value || "preset" in value) {
+      return {
+        main: parseFields(value.fields),
+        below: [],
+        cover: value.preset === "beside" ? "left" : "top",
+      };
+    }
+    return { main: [], below: [], cover: "top" };
+  };
 
-  if ("preset" in value || "fields" in value) {
-    const fields = parseFields(value.fields);
-    return value.preset === "beside"
-      ? { ...base, arrangement: "cover-left", cells: { a: { display: "rows", fields } } }
-      : { ...base, arrangement: "cover-top", cells: { a: { display: "rows", fields } } };
-  }
+  const { main, below, cover } = collect();
+  if (main.length === 0 && below.length === 0 && overlay.length === 0) return null;
 
-  return null;
+  // The title was implicit before; make it a real field so it can be moved.
+  const titled = [{ id: TITLE_FIELD_ID, showLabel: false }, ...main];
+
+  if (cover === "left") {
+    return below.length
+      ? { ...base, arrangement: "cover-left-below", regions: { main: makeGrid(1, 1, [titled]), below: makeGrid(1, 1, [below]) } }
+      : { ...base, arrangement: "cover-left", regions: { main: makeGrid(1, 1, [titled]) } };
+  }
+  return { ...base, arrangement: "cover-top", regions: { main: makeGrid(1, 1, [[...titled, ...below]]) } };
 }
 
 /* ── Resolution ──────────────────────────────────────────────────────────── */
 
-export type ResolvedField<T> = { property: T; showLabel: boolean };
-export type ResolvedCell<T> = { id: string; display: CellDisplay; fields: ResolvedField<T>[] };
+export type ResolvedField<T> = { property: T | null; field: CardField; isTitle: boolean };
+export type ResolvedBox<T> = {
+  id: string;
+  colSpan: number;
+  rowSpan: number;
+  /** Folded into a neighbour: it occupies no grid track and draws nothing. */
+  merged: boolean;
+  fields: ResolvedField<T>[];
+  grid?: ResolvedGrid<T>;
+};
+export type ResolvedGrid<T> = { cols: 1 | 2; rows: number; boxes: ResolvedBox<T>[] };
 
 export type ResolvedCardLayout<T> = {
   arrangement: ArrangementId;
   cover: CoverSlot;
-  span: CardSpan;
+  sideBySide: boolean;
   ratio: CardRatio;
   overlay: ResolvedField<T>[];
-  cells: ResolvedCell<T>[];
+  regions: Record<string, ResolvedGrid<T>>;
 };
 
 /**
@@ -225,35 +394,57 @@ export function resolveCardLayout<T extends CardEligibleProperty>(
   properties: T[],
   coverAspect: string | undefined,
 ): ResolvedCardLayout<T> {
-  const eligible = cardEligibleProperties(properties);
-  const byId = new Map(eligible.map((property) => [property.notionPropertyId, property]));
+  const byId = new Map(cardEligibleProperties(properties).map((p) => [p.notionPropertyId, p]));
   const source = layout ?? createDefaultCardLayout(properties);
-
-  // A gallery with covers switched off cannot show one, whatever the arrangement says.
-  const arrangement: ArrangementId =
-    coverAspect === "none" && ARRANGEMENTS[source.arrangement].cover !== "none"
-      ? "no-cover"
-      : source.arrangement;
-  const spec = ARRANGEMENTS[arrangement];
-
   const taken = new Set<string>();
+
   const pick = (fields: CardField[], limit?: number): ResolvedField<T>[] => {
-    const resolved: ResolvedField<T>[] = [];
+    const out: ResolvedField<T>[] = [];
     for (const field of fields) {
-      if (limit !== undefined && resolved.length >= limit) break;
+      if (limit !== undefined && out.length >= limit) break;
+      if (taken.has(field.id)) continue;
+      if (field.id === TITLE_FIELD_ID) {
+        taken.add(field.id);
+        out.push({ property: null, field, isTitle: true });
+        continue;
+      }
       const property = byId.get(field.id);
-      if (!property || taken.has(field.id)) continue;
+      if (!property) continue;
       taken.add(field.id);
-      resolved.push({ property, showLabel: field.showLabel });
+      out.push({ property, field, isTitle: false });
     }
-    return resolved;
+    return out;
   };
 
-  const overlay = spec.cover === "none" ? [] : pick(source.overlay, MAX_OVERLAY_FIELDS);
-  const cells: ResolvedCell<T>[] = spec.cells.map((id) => {
-    const cell = source.cells[id] ?? emptyCell();
-    return { id, display: cell.display, fields: pick(cell.fields) };
+  const resolveGrid = (grid: Grid): ResolvedGrid<T> => ({
+    cols: grid.cols,
+    rows: grid.rows,
+    boxes: grid.boxes.map((box, index) => {
+      const { colSpan, rowSpan } = spanOf(grid, index);
+      return {
+        id: box.id,
+        colSpan,
+        rowSpan,
+        merged: Boolean(box.mergedInto),
+        fields: box.grid || box.mergedInto ? [] : pick(box.fields),
+        ...(box.grid ? { grid: resolveGrid(box.grid) } : {}),
+      };
+    }),
   });
 
-  return { arrangement, cover: spec.cover, span: source.span, ratio: source.ratio, overlay, cells };
+  const spec = ARRANGEMENTS[source.arrangement];
+  const cover: CoverSlot = coverAspect === "none" ? "none" : spec.cover;
+  const overlay = cover === "none" ? [] : pick(source.overlay, MAX_OVERLAY_FIELDS);
+
+  const regions: Record<string, ResolvedGrid<T>> = {};
+  for (const id of spec.regions) regions[id] = resolveGrid(source.regions[id] ?? makeGrid(1, 1));
+
+  return {
+    arrangement: source.arrangement,
+    cover,
+    sideBySide: spec.sideBySide && cover === "left",
+    ratio: source.ratio,
+    overlay,
+    regions,
+  };
 }

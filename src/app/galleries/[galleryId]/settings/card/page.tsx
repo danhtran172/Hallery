@@ -4,8 +4,14 @@ import { isFullPage } from "@notionhq/client";
 import { db } from "@/lib/db";
 import { getNotionClient } from "@/lib/notion";
 import { getPageTitle, getTitlePropertyName } from "@/lib/notion-schema";
-import { cardEligibleProperties, parseCardLayout, resolveCardLayout } from "@/lib/card-layout";
-import { parseGalleryConfig, resolveCoverRatio, resolveCoverUrl } from "@/lib/notion-cover";
+import {
+  arrangementsFor,
+  cardEligibleProperties,
+  createDefaultCardLayout,
+  parseCardLayout,
+  type CoverOrientation,
+} from "@/lib/card-layout";
+import { COVER_RATIOS, parseGalleryConfig, resolveCoverUrl } from "@/lib/notion-cover";
 import { plainTextValue } from "@/lib/property-text";
 import { CardLayoutEditor } from "./card-layout-editor";
 
@@ -20,35 +26,36 @@ export default async function CardLayoutSettingsPage({
   if (!gallery) notFound();
 
   const properties = cardEligibleProperties(gallery.propertyConfigs);
-  const galleryConfig = parseGalleryConfig(gallery.displayConfig);
-  const resolved = resolveCardLayout(
-    parseCardLayout(galleryConfig.card),
-    gallery.propertyConfigs,
-    galleryConfig.coverAspect,
-  );
-  const toFields = (list: { property: { notionPropertyId: string }; showLabel: boolean }[]) =>
-    list.map((field) => ({ id: field.property.notionPropertyId, showLabel: field.showLabel }));
+  const config = parseGalleryConfig(gallery.displayConfig);
+  const stored = parseCardLayout(config.card) ?? createDefaultCardLayout(gallery.propertyConfigs);
 
-  const aspect = galleryConfig.coverAspect;
-  const shapeAspect = aspect === "portrait" || aspect === "square" ? aspect : "landscape";
+  const aspect: CoverOrientation =
+    config.coverAspect === "portrait" || config.coverAspect === "square" ? config.coverAspect : "landscape";
 
-  // One real item, so the preview shows the actual data rather than filler.
+  // A stored arrangement this cover shape no longer offers would leave the picker showing
+  // nothing selected, so pull it back to one that exists.
+  const allowed = arrangementsFor(aspect);
+  const layout = allowed.includes(stored.arrangement)
+    ? stored
+    : { ...stored, arrangement: allowed[0], regions: { main: stored.regions.main ?? stored.regions.below } };
+  const ratio = config.coverRatio && COVER_RATIOS[aspect].includes(config.coverRatio)
+    ? config.coverRatio
+    : COVER_RATIOS[aspect][0];
+
   const preview = await loadPreviewItem(
     gallery.notionDataSourceId,
     gallery.workspace.accessToken,
-    galleryConfig.coverSource,
+    config.coverSource,
   );
 
   return (
-    <div className="w-full px-6 py-12">
-      <Link href={`/galleries/${galleryId}`} className="text-xs text-stone-500 hover:underline">
-        ← {gallery.name}
-      </Link>
-      <h1 className="mt-2 mb-1 text-2xl font-semibold text-stone-900">Bố cục card</h1>
-      <p className="mb-8 text-sm text-stone-600">
-        Kéo property từ cột trái vào vùng muốn hiện: đè lên ảnh, cạnh ảnh, hoặc phía dưới. Khung ảnh đổi ngay trong
-        thanh công cụ.
-      </p>
+    <div className="flex h-screen w-full flex-col px-6 py-6">
+      <div className="mb-4 shrink-0">
+        <Link href={`/galleries/${galleryId}`} className="text-xs text-stone-500 hover:underline">
+          ← {gallery.name}
+        </Link>
+        <h1 className="mt-1 text-xl font-semibold text-stone-900">Bố cục card</h1>
+      </div>
 
       {properties.length === 0 ? (
         <p className="rounded-md border border-dashed border-stone-300 px-4 py-8 text-center text-sm text-stone-500">
@@ -61,20 +68,11 @@ export default async function CardLayoutSettingsPage({
             notionPropertyId: p.notionPropertyId,
             notionPropertyName: p.notionPropertyName,
             notionPropertyType: p.notionPropertyType,
+            resolvedType: p.resolvedType,
+            displayConfig: p.displayConfig,
           }))}
-          initialShape={{
-            aspect: shapeAspect,
-            ratio: resolveCoverRatio({ ...galleryConfig, coverAspect: shapeAspect })?.replace(" / ", ":") ?? "16:9",
-          }}
-          initial={{
-            arrangement: resolved.arrangement,
-            span: resolved.span,
-            ratio: resolved.ratio,
-            overlay: toFields(resolved.overlay),
-            cells: Object.fromEntries(
-              resolved.cells.map((cell) => [cell.id, { display: cell.display, fields: toFields(cell.fields) }]),
-            ),
-          }}
+          initialShape={{ aspect, ratio }}
+          initialLayout={layout}
           previewTitle={preview.title}
           previewValues={preview.values}
           previewCoverUrl={preview.coverUrl}
@@ -85,7 +83,6 @@ export default async function CardLayoutSettingsPage({
 }
 
 type PreviewItem = { title: string; values: Record<string, string>; coverUrl: string | null };
-
 const EMPTY_PREVIEW: PreviewItem = { title: "Item mẫu", values: {}, coverUrl: null };
 
 async function loadPreviewItem(
@@ -103,19 +100,15 @@ async function loadPreviewItem(
     const page = query.results.filter(isFullPage)[0];
     if (!page) return EMPTY_PREVIEW;
 
-    const titleProperty =
-      "properties" in dataSource ? getTitlePropertyName(dataSource.properties) : null;
-
+    const titleProperty = "properties" in dataSource ? getTitlePropertyName(dataSource.properties) : null;
     const values: Record<string, string> = {};
-    for (const value of Object.values(page.properties)) {
-      values[value.id] = plainTextValue(value);
-    }
+    for (const value of Object.values(page.properties)) values[value.id] = plainTextValue(value);
 
     return {
       title: getPageTitle(page, titleProperty),
       values,
-      // Content-image covers are resolved lazily elsewhere; the preview settles for the
-      // frame rather than spending a blocks crawl here.
+      // Content-image covers resolve lazily elsewhere; the preview settles for the frame
+      // rather than spending a blocks crawl here.
       coverUrl: resolveCoverUrl(page, coverSource),
     };
   } catch {

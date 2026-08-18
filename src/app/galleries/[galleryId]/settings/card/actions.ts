@@ -4,25 +4,26 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
   ARRANGEMENTS,
-  CARD_LAYOUT_VERSION,
-  CARD_RATIOS,
   MAX_OVERLAY_FIELDS,
+  TITLE_FIELD_ID,
   cardEligibleProperties,
-  isArrangement,
-  isCellDisplay,
-  type CardCell,
+  parseCardLayout,
   type CardField,
   type CardLayout,
-  type CardRatio,
+  type Grid,
 } from "@/lib/card-layout";
+import { parseDisplayConfig, type DisplayConfig } from "@/lib/display-config";
 import { COVER_RATIOS, parseGalleryConfig, type CoverAspect } from "@/lib/notion-cover";
 
 export type SaveCardLayoutState = { error: string | null };
 
 /**
- * Stores how the gallery's cards are arranged. Only ids still present in this gallery's
- * shadow schema survive, and a property lands in exactly one box, so a stale editor tab
- * can neither resurrect a deleted property nor duplicate a live one.
+ * Saves the card arrangement, the cover shape, and any property display settings touched
+ * in the side panel — all edited on one screen, so all committed on one click.
+ *
+ * Only ids still present in this gallery's shadow schema survive, and a property lands in
+ * exactly one box, so a stale editor tab can neither resurrect a deleted property nor
+ * duplicate a live one.
  */
 export async function saveCardLayout(
   galleryId: string,
@@ -35,79 +36,95 @@ export async function saveCardLayout(
   });
   if (!gallery) return { error: "Gallery không còn tồn tại." };
 
-  let submitted: unknown;
-  try {
-    submitted = JSON.parse(String(formData.get("layout") ?? "null"));
-  } catch {
-    return { error: "Không đọc được cấu hình. Tải lại trang rồi thử lại." };
-  }
-  if (typeof submitted !== "object" || submitted === null) {
-    return { error: "Không đọc được cấu hình. Tải lại trang rồi thử lại." };
-  }
+  const parsed = parseCardLayout(readJson(formData.get("layout")));
+  if (!parsed) return { error: "Không đọc được bố cục. Tải lại trang rồi thử lại." };
 
-  const value = submitted as Record<string, unknown>;
   const allowed = new Set(cardEligibleProperties(gallery.propertyConfigs).map((p) => p.notionPropertyId));
+  allowed.add(TITLE_FIELD_ID);
   const taken = new Set<string>();
 
-  const clean = (raw: unknown, limit?: number): CardField[] => {
-    if (!Array.isArray(raw)) return [];
+  const keep = (fields: CardField[], limit?: number): CardField[] => {
     const out: CardField[] = [];
-    for (const entry of raw) {
+    for (const field of fields) {
       if (limit !== undefined && out.length >= limit) break;
-      if (typeof entry !== "object" || entry === null) continue;
-      const { id, showLabel } = entry as { id?: unknown; showLabel?: unknown };
-      if (typeof id !== "string" || !allowed.has(id) || taken.has(id)) continue;
-      taken.add(id);
-      out.push({ id, showLabel: showLabel !== false });
+      if (!allowed.has(field.id) || taken.has(field.id)) continue;
+      taken.add(field.id);
+      out.push(field);
     }
     return out;
   };
 
-  const arrangement = isArrangement(value.arrangement) ? value.arrangement : "cover-top";
-  const cellsRaw = (value.cells ?? {}) as Record<string, unknown>;
-  const cells: Record<string, CardCell> = {};
+  const prune = (grid: Grid): Grid => ({
+    ...grid,
+    boxes: grid.boxes.map((box) => ({
+      ...box,
+      fields: box.grid ? [] : keep(box.fields),
+      ...(box.grid ? { grid: prune(box.grid) } : {}),
+    })),
+  });
 
-  // Boxes are cleaned in visual order, so a contested property stays wherever it appears
-  // first on the card rather than wherever the client happened to list it.
-  const overlay = clean(value.overlay, MAX_OVERLAY_FIELDS);
-  for (const id of ARRANGEMENTS[arrangement].cells) {
-    const cell = (cellsRaw[id] ?? {}) as Record<string, unknown>;
-    cells[id] = {
-      display: isCellDisplay(cell.display) ? cell.display : "rows",
-      fields: clean(cell.fields),
-    };
+  // Overlay first: it holds the scarce slots, so it wins a contested property.
+  const overlay = keep(parsed.overlay, MAX_OVERLAY_FIELDS);
+  const regions: Record<string, Grid> = {};
+  for (const id of ARRANGEMENTS[parsed.arrangement].regions) {
+    regions[id] = prune(parsed.regions[id]);
   }
 
-  const layout: CardLayout = {
-    version: CARD_LAYOUT_VERSION,
-    arrangement,
-    span: value.span === 2 ? 2 : 1,
-    ratio:
-      (Array.isArray(value.ratio) &&
-        CARD_RATIOS.find((r) => r[0] === (value.ratio as unknown[])[0] && r[1] === (value.ratio as unknown[])[1])) ||
-      ([40, 60] as CardRatio),
-    overlay,
-    cells,
-  };
-
+  const layout: CardLayout = { ...parsed, overlay, regions };
   const config = parseGalleryConfig(gallery.displayConfig);
   config.card = layout;
 
-  // Cover shape is edited from the same screen, so it saves on the same click.
   const aspect = String(formData.get("coverAspect") ?? "");
   if (aspect === "landscape" || aspect === "portrait" || aspect === "square") {
-    const allowedRatios = COVER_RATIOS[aspect];
+    const ratios = COVER_RATIOS[aspect];
     const ratio = String(formData.get("coverRatio") ?? "");
     config.coverAspect = aspect as CoverAspect;
-    config.coverRatio = allowedRatios.includes(ratio) ? ratio : allowedRatios[0];
+    config.coverRatio = ratios.includes(ratio) ? ratio : ratios[0];
   }
 
-  await db.gallery.update({
-    where: { id: galleryId },
-    data: { displayConfig: JSON.stringify(config) },
-  });
+  const writes = [
+    db.gallery.update({ where: { id: galleryId }, data: { displayConfig: JSON.stringify(config) } }),
+    ...propertyConfigWrites(readJson(formData.get("propertyConfigs")), gallery.propertyConfigs),
+  ];
+  await db.$transaction(writes);
 
   revalidatePath(`/galleries/${galleryId}`);
+  revalidatePath(`/galleries/${galleryId}/items/[pageId]`, "page");
   revalidatePath(`/galleries/${galleryId}/settings/card`);
+  revalidatePath(`/galleries/${galleryId}/settings/display`);
   return { error: null };
+}
+
+function readJson(raw: FormDataEntryValue | null): unknown {
+  try {
+    return JSON.parse(String(raw ?? "null"));
+  } catch {
+    return null;
+  }
+}
+
+/** Merges the panel's edits into each property's existing display config. */
+function propertyConfigWrites(
+  raw: unknown,
+  existing: { id: string; notionPropertyId: string; displayConfig: string }[],
+) {
+  if (typeof raw !== "object" || raw === null) return [];
+  const byProperty = new Map(existing.map((property) => [property.notionPropertyId, property]));
+
+  return Object.entries(raw as Record<string, unknown>).flatMap(([propertyId, value]) => {
+    const property = byProperty.get(propertyId);
+    if (!property || typeof value !== "object" || value === null) return [];
+
+    const incoming = value as DisplayConfig;
+    const merged: DisplayConfig = { ...parseDisplayConfig(property.displayConfig), ...incoming };
+    // An emptied override should disappear rather than persist as "".
+    if (!merged.nameOverride?.trim()) delete merged.nameOverride;
+
+    return [
+      db.propertyConfig.update({
+        where: { id: property.id },
+        data: { displayConfig: JSON.stringify(merged) },
+      }),
+    ];
+  });
 }

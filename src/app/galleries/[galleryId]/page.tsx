@@ -3,8 +3,6 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { getNotionClient } from "@/lib/notion";
 import { getPageIcon, getPageTitle, getTitlePropertyName } from "@/lib/notion-schema";
-import { PropertyValue } from "@/components/property-value";
-import { parseDisplayConfig } from "@/lib/display-config";
 import { CardCover } from "@/components/card-cover";
 import {
   CONTENT_IMAGE,
@@ -19,10 +17,7 @@ import { CategoryBar } from "@/components/category-bar";
 import { bucketPages, filterPagesByCategory } from "@/lib/category";
 import { storedCoverUrl } from "@/lib/cover-store";
 import { parseCardLayout, resolveCardLayout } from "@/lib/card-layout";
-import { CardCellFields } from "@/components/card-cell-fields";
-
-/** Written out rather than interpolated so Tailwind keeps the class in the build. */
-const CARD_SPAN_CLASS = "sm:col-span-2";
+import { CardGrid } from "@/components/card-grid";
 
 const GALLERY_GRID_COLUMNS: Record<number, string> = {
   1: "lg:grid-cols-1",
@@ -177,35 +172,18 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
             const coverUrl = coverRatio
               ? (resolveCoverUrl(page, coverSource) ?? cachedImages.get(page.id) ?? null)
               : null;
-            const sideways = cardLayout.cover === "left" || cardLayout.cover === "right";
             const showCover = cardLayout.cover !== "none" && coverRatio;
             const valueOf = (propertyId: string) =>
               Object.values(page.properties).find((property) => property.id === propertyId);
-
-            const heading = (
-              <div className="flex items-center gap-2">
-                {icon && <span className="text-lg leading-none">{icon.length <= 4 ? icon : "📄"}</span>}
-                <span className="min-w-0 truncate font-medium text-stone-900">{title}</span>
-              </div>
-            );
-
-            const cell = (index: number) => {
-              const box = cardLayout.cells[index];
-              if (!box) return null;
-              return (
-                <CardCellFields
-                  key={box.id}
-                  display={box.display}
-                  fields={box.fields}
-                  valueOf={valueOf}
-                />
-              );
-            };
+            const region = (id: string) =>
+              cardLayout.regions[id] ? (
+                <CardGrid grid={cardLayout.regions[id]} title={title} valueOf={valueOf} />
+              ) : null;
 
             const cover = showCover && (
               <div
                 className="relative shrink-0"
-                style={sideways ? { width: `${cardLayout.ratio[0]}%` } : undefined}
+                style={cardLayout.sideBySide ? { width: `${cardLayout.ratio[0]}%` } : undefined}
               >
                 <CardCover
                   ratio={coverRatio}
@@ -219,20 +197,18 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
                 {cardLayout.overlay.length > 0 && (
                   // Above the card-wide link so overlaid links stay clickable, and on a
                   // scrim because the image underneath is unknowable.
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-0.5 bg-gradient-to-t from-black/75 via-black/40 to-transparent p-2">
-                    {cardLayout.overlay.map(({ property: cfg, showLabel }) => {
-                      const value = valueOf(cfg.notionPropertyId);
-                      if (!value) return null;
-                      return (
-                        <span
-                          key={cfg.id}
-                          className="flex items-baseline gap-1.5 truncate text-xs text-white [&_a]:pointer-events-auto"
-                        >
-                          {showLabel && <span className="shrink-0 text-white/60">{cfg.notionPropertyName}</span>}
-                          <PropertyValue value={value} displayConfig={parseDisplayConfig(cfg.displayConfig)} />
-                        </span>
-                      );
-                    })}
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/75 via-black/40 to-transparent p-2 [&_dd]:text-white [&_dt]:!text-white/60 [&_p]:!text-white">
+                    <CardGrid
+                      grid={{
+                        cols: 1,
+                        rows: 1,
+                        boxes: [
+                          { id: "overlay", colSpan: 1, rowSpan: 1, merged: false, fields: cardLayout.overlay },
+                        ],
+                      }}
+                      title={title}
+                      valueOf={valueOf}
+                    />
                   </div>
                 )}
               </div>
@@ -241,9 +217,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
             return (
               <div
                 key={page.id}
-                className={`group relative flex flex-col overflow-hidden rounded-lg border border-stone-200 hover:border-emerald-600 hover:shadow-sm ${
-                  cardLayout.span === 2 ? CARD_SPAN_CLASS : ""
-                }`}
+                className="group relative flex flex-col overflow-hidden rounded-lg border border-stone-200 hover:border-emerald-600 hover:shadow-sm"
               >
                 <Link
                   href={`/galleries/${galleryId}/items/${page.id}`}
@@ -251,34 +225,27 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
                   className="absolute inset-0 z-10"
                 />
 
-                {sideways ? (
+                {cardLayout.sideBySide ? (
                   <>
                     <div className="flex">
-                      {cardLayout.cover === "left" && cover}
-                      <div className="pointer-events-none relative flex min-w-0 flex-1 flex-col gap-2 p-4">
-                        {heading}
-                        {cell(0)}
-                      </div>
-                      {cardLayout.cover === "right" && cover}
+                      {cover}
+                      <div className="pointer-events-none relative min-w-0 flex-1 p-4">{region("main")}</div>
                     </div>
-                    {cardLayout.cells[1] && (
-                      <div className="pointer-events-none relative px-4 pb-4">{cell(1)}</div>
+                    {cardLayout.regions.below && (
+                      <div className="pointer-events-none relative px-4 pb-4">{region("below")}</div>
                     )}
                   </>
                 ) : (
                   <>
                     {cover}
-                    <div className="pointer-events-none relative flex flex-col gap-2 p-4">
-                      {heading}
-                      {cardLayout.cells.length === 2 ? (
-                        <div className="flex gap-3">
-                          <div className="min-w-0 flex-1">{cell(0)}</div>
-                          <div className="min-w-0 flex-1">{cell(1)}</div>
-                        </div>
-                      ) : (
-                        cell(0)
-                      )}
-                    </div>
+                    {Object.keys(cardLayout.regions).length > 0 && (
+                      <div className="pointer-events-none relative flex flex-col gap-2 p-4">
+                        {icon && <span className="text-lg leading-none">{icon}</span>}
+                        {Object.keys(cardLayout.regions).map((id) => (
+                          <div key={id}>{region(id)}</div>
+                        ))}
+                      </div>
+                    )}
                   </>
                 )}
               </div>
