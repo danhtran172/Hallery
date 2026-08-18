@@ -3,10 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
+  ARRANGEMENTS,
   CARD_LAYOUT_VERSION,
   CARD_RATIOS,
   MAX_OVERLAY_FIELDS,
   cardEligibleProperties,
+  isArrangement,
+  isCellDisplay,
+  type CardCell,
   type CardField,
   type CardLayout,
   type CardRatio,
@@ -17,8 +21,8 @@ export type SaveCardLayoutState = { error: string | null };
 
 /**
  * Stores how the gallery's cards are arranged. Only ids still present in this gallery's
- * shadow schema survive, and a property can land in exactly one zone, so a stale editor
- * tab can neither resurrect a deleted property nor duplicate a live one.
+ * shadow schema survive, and a property lands in exactly one box, so a stale editor tab
+ * can neither resurrect a deleted property nor duplicate a live one.
  */
 export async function saveCardLayout(
   galleryId: string,
@@ -59,30 +63,31 @@ export async function saveCardLayout(
     return out;
   };
 
-  const ratioOf = (raw: unknown): CardRatio =>
-    (Array.isArray(raw) && CARD_RATIOS.find((r) => r[0] === raw[0] && r[1] === raw[1])) || [40, 60];
+  const arrangement = isArrangement(value.arrangement) ? value.arrangement : "cover-top";
+  const cellsRaw = (value.cells ?? {}) as Record<string, unknown>;
+  const cells: Record<string, CardCell> = {};
 
-  const belowRaw = (value.below ?? {}) as Record<string, unknown>;
-  const belowKind = belowRaw.kind === "two-col" ? "two-col" : "single";
-  const cellsRaw = Array.isArray(belowRaw.cells) ? belowRaw.cells : [];
+  // Boxes are cleaned in visual order, so a contested property stays wherever it appears
+  // first on the card rather than wherever the client happened to list it.
+  const overlay = clean(value.overlay, MAX_OVERLAY_FIELDS);
+  for (const id of ARRANGEMENTS[arrangement].cells) {
+    const cell = (cellsRaw[id] ?? {}) as Record<string, unknown>;
+    cells[id] = {
+      display: isCellDisplay(cell.display) ? cell.display : "rows",
+      fields: clean(cell.fields),
+    };
+  }
 
   const layout: CardLayout = {
     version: CARD_LAYOUT_VERSION,
-    cover: value.cover === "left" ? "left" : value.cover === "off" ? "off" : "top",
+    arrangement,
     span: value.span === 2 ? 2 : 1,
-    ratio: ratioOf(value.ratio),
-    // Zones are cleaned in visual order, so a contested property stays where it appears
-    // first on the card rather than wherever the client happened to list it.
-    overlay: clean(value.overlay, MAX_OVERLAY_FIELDS),
-    side: clean(value.side),
-    below: {
-      kind: belowKind,
-      ratio: ratioOf(belowRaw.ratio),
-      cells:
-        belowKind === "two-col"
-          ? [clean(cellsRaw[0]), clean(cellsRaw[1])]
-          : [clean(cellsRaw[0])],
-    },
+    ratio:
+      (Array.isArray(value.ratio) &&
+        CARD_RATIOS.find((r) => r[0] === (value.ratio as unknown[])[0] && r[1] === (value.ratio as unknown[])[1])) ||
+      ([40, 60] as CardRatio),
+    overlay,
+    cells,
   };
 
   const config = parseGalleryConfig(gallery.displayConfig);
@@ -91,10 +96,10 @@ export async function saveCardLayout(
   // Cover shape is edited from the same screen, so it saves on the same click.
   const aspect = String(formData.get("coverAspect") ?? "");
   if (aspect === "landscape" || aspect === "portrait" || aspect === "square") {
-    const allowed = COVER_RATIOS[aspect];
+    const allowedRatios = COVER_RATIOS[aspect];
     const ratio = String(formData.get("coverRatio") ?? "");
     config.coverAspect = aspect as CoverAspect;
-    config.coverRatio = allowed.includes(ratio) ? ratio : allowed[0];
+    config.coverRatio = allowedRatios.includes(ratio) ? ratio : allowedRatios[0];
   }
 
   await db.gallery.update({

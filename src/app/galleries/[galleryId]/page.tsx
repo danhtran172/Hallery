@@ -19,6 +19,7 @@ import { CategoryBar } from "@/components/category-bar";
 import { bucketPages, filterPagesByCategory } from "@/lib/category";
 import { storedCoverUrl } from "@/lib/cover-store";
 import { parseCardLayout, resolveCardLayout } from "@/lib/card-layout";
+import { CardCellFields } from "@/components/card-cell-fields";
 
 /** Written out rather than interpolated so Tailwind keeps the class in the build. */
 const CARD_SPAN_CLASS = "sm:col-span-2";
@@ -176,31 +177,64 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
             const coverUrl = coverRatio
               ? (resolveCoverUrl(page, coverSource) ?? cachedImages.get(page.id) ?? null)
               : null;
-            const beside = cardLayout.cover === "left";
-            const showCover = cardLayout.cover !== "off" && coverRatio;
+            const sideways = cardLayout.cover === "left" || cardLayout.cover === "right";
+            const showCover = cardLayout.cover !== "none" && coverRatio;
             const valueOf = (propertyId: string) =>
               Object.values(page.properties).find((property) => property.id === propertyId);
-
-            const fieldList = (fields: typeof cardLayout.side) =>
-              fields.map(({ property: cfg, showLabel }) => {
-                const value = valueOf(cfg.notionPropertyId);
-                if (!value) return null;
-                return (
-                  <div key={cfg.id} className="flex items-baseline gap-2">
-                    {showLabel && (
-                      <dt className="w-24 shrink-0 truncate text-xs text-stone-400">{cfg.notionPropertyName}</dt>
-                    )}
-                    <dd className="min-w-0 flex-1 [&_a]:pointer-events-auto">
-                      <PropertyValue value={value} displayConfig={parseDisplayConfig(cfg.displayConfig)} />
-                    </dd>
-                  </div>
-                );
-              });
 
             const heading = (
               <div className="flex items-center gap-2">
                 {icon && <span className="text-lg leading-none">{icon.length <= 4 ? icon : "📄"}</span>}
                 <span className="min-w-0 truncate font-medium text-stone-900">{title}</span>
+              </div>
+            );
+
+            const cell = (index: number) => {
+              const box = cardLayout.cells[index];
+              if (!box) return null;
+              return (
+                <CardCellFields
+                  key={box.id}
+                  display={box.display}
+                  fields={box.fields}
+                  valueOf={valueOf}
+                />
+              );
+            };
+
+            const cover = showCover && (
+              <div
+                className="relative shrink-0"
+                style={sideways ? { width: `${cardLayout.ratio[0]}%` } : undefined}
+              >
+                <CardCover
+                  ratio={coverRatio}
+                  url={coverUrl}
+                  galleryId={galleryId}
+                  pageId={page.id}
+                  lazy={coverSource === CONTENT_IMAGE}
+                  initialX={positions.get(page.id)?.posX ?? 50}
+                  initialY={positions.get(page.id)?.posY ?? 50}
+                />
+                {cardLayout.overlay.length > 0 && (
+                  // Above the card-wide link so overlaid links stay clickable, and on a
+                  // scrim because the image underneath is unknowable.
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-0.5 bg-gradient-to-t from-black/75 via-black/40 to-transparent p-2">
+                    {cardLayout.overlay.map(({ property: cfg, showLabel }) => {
+                      const value = valueOf(cfg.notionPropertyId);
+                      if (!value) return null;
+                      return (
+                        <span
+                          key={cfg.id}
+                          className="flex items-baseline gap-1.5 truncate text-xs text-white [&_a]:pointer-events-auto"
+                        >
+                          {showLabel && <span className="shrink-0 text-white/60">{cfg.notionPropertyName}</span>}
+                          <PropertyValue value={value} displayConfig={parseDisplayConfig(cfg.displayConfig)} />
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
 
@@ -217,75 +251,36 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
                   className="absolute inset-0 z-10"
                 />
 
-                <div className={beside ? "flex" : "flex flex-col"}>
-                  {showCover && (
-                    <div
-                      className="relative shrink-0"
-                      style={beside ? { width: `${cardLayout.ratio[0]}%` } : undefined}
-                    >
-                      <CardCover
-                        ratio={coverRatio}
-                        url={coverUrl}
-                        galleryId={galleryId}
-                        pageId={page.id}
-                        lazy={coverSource === CONTENT_IMAGE}
-                        initialX={positions.get(page.id)?.posX ?? 50}
-                        initialY={positions.get(page.id)?.posY ?? 50}
-                      />
-                      {cardLayout.overlay.length > 0 && (
-                        // Above the card-wide link so overlaid links stay clickable, and on a
-                        // scrim because the image underneath is unknowable.
-                        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-0.5 bg-gradient-to-t from-black/75 via-black/40 to-transparent p-2">
-                          {cardLayout.overlay.map(({ property: cfg, showLabel }) => {
-                            const value = valueOf(cfg.notionPropertyId);
-                            if (!value) return null;
-                            return (
-                              <span
-                                key={cfg.id}
-                                className="flex items-baseline gap-1.5 truncate text-xs text-white [&_a]:pointer-events-auto"
-                              >
-                                {showLabel && (
-                                  <span className="shrink-0 text-white/60">{cfg.notionPropertyName}</span>
-                                )}
-                                <PropertyValue value={value} displayConfig={parseDisplayConfig(cfg.displayConfig)} />
-                              </span>
-                            );
-                          })}
+                {sideways ? (
+                  <>
+                    <div className="flex">
+                      {cardLayout.cover === "left" && cover}
+                      <div className="pointer-events-none relative flex min-w-0 flex-1 flex-col gap-2 p-4">
+                        {heading}
+                        {cell(0)}
+                      </div>
+                      {cardLayout.cover === "right" && cover}
+                    </div>
+                    {cardLayout.cells[1] && (
+                      <div className="pointer-events-none relative px-4 pb-4">{cell(1)}</div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {cover}
+                    <div className="pointer-events-none relative flex flex-col gap-2 p-4">
+                      {heading}
+                      {cardLayout.cells.length === 2 ? (
+                        <div className="flex gap-3">
+                          <div className="min-w-0 flex-1">{cell(0)}</div>
+                          <div className="min-w-0 flex-1">{cell(1)}</div>
                         </div>
+                      ) : (
+                        cell(0)
                       )}
                     </div>
-                  )}
-
-                  {beside && (
-                    <div className="pointer-events-none relative flex min-w-0 flex-1 flex-col gap-2 p-4">
-                      {heading}
-                      <dl className="flex flex-col gap-1 text-sm text-stone-600">
-                        {fieldList(cardLayout.side)}
-                      </dl>
-                    </div>
-                  )}
-                </div>
-
-                <div className="pointer-events-none relative flex flex-col gap-2 p-4">
-                  {!beside && heading}
-                  {cardLayout.below.kind === "two-col" ? (
-                    <div className="flex gap-3">
-                      <dl
-                        className="flex min-w-0 flex-col gap-1 text-sm text-stone-600"
-                        style={{ width: `${cardLayout.below.ratio[0]}%` }}
-                      >
-                        {fieldList(cardLayout.below.cells[0] ?? [])}
-                      </dl>
-                      <dl className="flex min-w-0 flex-1 flex-col gap-1 text-sm text-stone-600">
-                        {fieldList(cardLayout.below.cells[1] ?? [])}
-                      </dl>
-                    </div>
-                  ) : (
-                    <dl className="flex flex-col gap-1 text-sm text-stone-600">
-                      {fieldList(cardLayout.below.cells[0] ?? [])}
-                    </dl>
-                  )}
-                </div>
+                  </>
+                )}
               </div>
             );
           })}

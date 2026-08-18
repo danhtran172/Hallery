@@ -1,26 +1,63 @@
 /**
- * How a gallery card is arranged.
+ * How a gallery card is arranged, in two layers.
  *
- * Mirrors the Card Detail builder's shape — regions holding ordered properties, a split
- * with a ratio — but stops well short of its depth. A card is a thumbnail: the useful
- * choices are where the cover sits, what sits next to it, what runs underneath, and what
- * is burned onto the image itself.
+ *   Layer 1 — where the boxes sit relative to the cover image.
+ *   Layer 2 — how the properties inside each box are laid out.
  *
- * Stored in Gallery.displayConfig. Property references are Notion property IDs, so a
+ * Both are picked from pictures rather than words, the way the Card Detail builder does
+ * it. Stored in Gallery.displayConfig; property references are Notion property IDs, so a
  * rename in Notion cannot break a saved arrangement.
  */
 
-export const CARD_LAYOUT_VERSION = 2;
+export const CARD_LAYOUT_VERSION = 3;
 
 export type CardField = { id: string; showLabel: boolean };
 
-/** Where the cover sits relative to the text. */
-export const COVER_PLACEMENTS = ["top", "left", "off"] as const;
-export type CoverPlacement = (typeof COVER_PLACEMENTS)[number];
+/* ── Layer 1 ─────────────────────────────────────────────────────────────── */
 
-/** How the region under the cover row is divided. */
-export const BELOW_KINDS = ["single", "two-col"] as const;
-export type BelowKind = (typeof BELOW_KINDS)[number];
+export type CoverSlot = "top" | "left" | "right" | "full" | "none";
+
+export type Arrangement = {
+  label: string;
+  cover: CoverSlot;
+  /** Boxes this arrangement exposes, in visual order. */
+  cells: string[];
+};
+
+export const ARRANGEMENTS = {
+  "cover-top": { label: "Ảnh trên", cover: "top", cells: ["a"] },
+  "cover-top-two": { label: "Ảnh trên, 2 ô", cover: "top", cells: ["a", "b"] },
+  "cover-left": { label: "Ảnh trái", cover: "left", cells: ["a"] },
+  "cover-left-below": { label: "Ảnh trái, thêm ô dưới", cover: "left", cells: ["a", "b"] },
+  "cover-right": { label: "Ảnh phải", cover: "right", cells: ["a"] },
+  "cover-only": { label: "Chỉ ảnh", cover: "full", cells: [] },
+  "no-cover": { label: "Không ảnh", cover: "none", cells: ["a"] },
+} as const satisfies Record<string, Arrangement>;
+
+export type ArrangementId = keyof typeof ARRANGEMENTS;
+export const ARRANGEMENT_IDS = Object.keys(ARRANGEMENTS) as ArrangementId[];
+
+export function isArrangement(value: unknown): value is ArrangementId {
+  return typeof value === "string" && value in ARRANGEMENTS;
+}
+
+/* ── Layer 2 ─────────────────────────────────────────────────────────────── */
+
+export const CELL_DISPLAYS = {
+  rows: { label: "Nhãn trái, giá trị phải" },
+  stacked: { label: "Nhãn trên, giá trị dưới" },
+  "two-col": { label: "Hai cột" },
+  inline: { label: "Nối liền một hàng" },
+} as const;
+
+export type CellDisplay = keyof typeof CELL_DISPLAYS;
+export const CELL_DISPLAY_IDS = Object.keys(CELL_DISPLAYS) as CellDisplay[];
+
+export function isCellDisplay(value: unknown): value is CellDisplay {
+  return typeof value === "string" && value in CELL_DISPLAYS;
+}
+
+/* ── Layout ──────────────────────────────────────────────────────────────── */
 
 export type CardRatio = [30, 70] | [40, 60] | [50, 50] | [60, 40] | [70, 30];
 export const CARD_RATIOS: CardRatio[] = [
@@ -32,41 +69,21 @@ export const CARD_RATIOS: CardRatio[] = [
 ];
 
 export type CardSpan = 1 | 2;
-
-export type CardBelow = {
-  kind: BelowKind;
-  ratio: CardRatio;
-  /** One list for "single", two for "two-col". */
-  cells: CardField[][];
-};
+export type CardCell = { display: CellDisplay; fields: CardField[] };
 
 export type CardLayout = {
   version: typeof CARD_LAYOUT_VERSION;
-  cover: CoverPlacement;
+  arrangement: ArrangementId;
   span: CardSpan;
-  /** Cover vs side split, used only when the cover is on the left. */
+  /** Cover vs text split, used when the cover sits on a side. */
   ratio: CardRatio;
   /** Burned onto the cover. Capped — a cover buried under text stops being an image. */
   overlay: CardField[];
-  /** Beside the cover. Only reachable when the cover is on the left. */
-  side: CardField[];
-  below: CardBelow;
+  cells: Record<string, CardCell>;
 };
 
 export const MAX_OVERLAY_FIELDS = 3;
 export const DEFAULT_CARD_FIELD_COUNT = 4;
-
-export type CardZone = "overlay" | "side" | "below-0" | "below-1" | "tray";
-
-/** Zones a given arrangement actually exposes, in visual order. */
-export function activeZones(layout: { cover: CoverPlacement; below: { kind: BelowKind } }): CardZone[] {
-  const zones: CardZone[] = [];
-  if (layout.cover !== "off") zones.push("overlay");
-  if (layout.cover === "left") zones.push("side");
-  zones.push("below-0");
-  if (layout.below.kind === "two-col") zones.push("below-1");
-  return zones;
-}
 
 export type CardEligibleProperty = {
   notionPropertyId: string;
@@ -80,6 +97,8 @@ export function cardEligibleProperties<T extends CardEligibleProperty>(propertie
   return properties.filter((p) => p.notionPropertyType !== "title" && !p.isMissing);
 }
 
+const emptyCell = (): CardCell => ({ display: "rows", fields: [] });
+
 export function createDefaultCardLayout(properties: CardEligibleProperty[]): CardLayout {
   const fields = cardEligibleProperties(properties)
     .slice(0, DEFAULT_CARD_FIELD_COUNT)
@@ -87,12 +106,11 @@ export function createDefaultCardLayout(properties: CardEligibleProperty[]): Car
 
   return {
     version: CARD_LAYOUT_VERSION,
-    cover: "top",
+    arrangement: "cover-top",
     span: 1,
     ratio: [40, 60],
     overlay: [],
-    side: [],
-    below: { kind: "single", ratio: [50, 50], cells: [fields] },
+    cells: { a: { display: "rows", fields } },
   };
 }
 
@@ -116,69 +134,91 @@ function parseRatio(raw: unknown): CardRatio {
   return [40, 60];
 }
 
+function parseCell(raw: unknown): CardCell {
+  if (typeof raw !== "object" || raw === null) return emptyCell();
+  const { display, fields } = raw as { display?: unknown; fields?: unknown };
+  return { display: isCellDisplay(display) ? display : "rows", fields: parseFields(fields) };
+}
+
 /**
- * Reads persisted JSON. Version 1 stored a flat preset plus one field list; it is lifted
- * into the region shape rather than discarded, so an existing gallery keeps its
- * arrangement instead of silently resetting.
+ * Reads persisted JSON. Earlier shapes are lifted rather than discarded, so a gallery
+ * keeps the arrangement someone already set instead of silently resetting to defaults.
  */
 export function parseCardLayout(raw: unknown): CardLayout | null {
   if (typeof raw !== "object" || raw === null) return null;
   const value = raw as Record<string, unknown>;
-
   if (value.version !== CARD_LAYOUT_VERSION) return liftLegacyLayout(value);
 
-  const belowRaw = (value.below ?? {}) as Record<string, unknown>;
-  const kind: BelowKind = belowRaw.kind === "two-col" ? "two-col" : "single";
-  const cellsRaw = Array.isArray(belowRaw.cells) ? belowRaw.cells : [];
-  const cells = kind === "two-col"
-    ? [parseFields(cellsRaw[0]), parseFields(cellsRaw[1])]
-    : [parseFields(cellsRaw[0])];
+  const arrangement = isArrangement(value.arrangement) ? value.arrangement : "cover-top";
+  const cellsRaw = (value.cells ?? {}) as Record<string, unknown>;
+  const cells: Record<string, CardCell> = {};
+  for (const id of ARRANGEMENTS[arrangement].cells) cells[id] = parseCell(cellsRaw[id]);
 
   return {
     version: CARD_LAYOUT_VERSION,
-    cover: COVER_PLACEMENTS.includes(value.cover as CoverPlacement) ? (value.cover as CoverPlacement) : "top",
+    arrangement,
     span: value.span === 2 ? 2 : 1,
     ratio: parseRatio(value.ratio),
     overlay: parseFields(value.overlay).slice(0, MAX_OVERLAY_FIELDS),
-    side: parseFields(value.side),
-    below: { kind, ratio: parseRatio(belowRaw.ratio), cells },
+    cells,
   };
 }
 
-/** Version 1: `{ preset: "stack" | "beside", span, fields, overlayFields }`. */
+/** v1: `{ preset, fields, overlayFields }`. v2: `{ cover, side, below: { cells } }`. */
 function liftLegacyLayout(value: Record<string, unknown>): CardLayout | null {
-  if (!("preset" in value) && !("fields" in value)) return null;
-  const beside = value.preset === "beside";
-  const fields = parseFields(value.fields);
+  const overlay = parseFields(value.overlay ?? value.overlayFields).slice(0, MAX_OVERLAY_FIELDS);
+  const span: CardSpan = value.span === 2 ? 2 : 1;
+  const base = { version: CARD_LAYOUT_VERSION, span, ratio: parseRatio(value.ratio), overlay } as const;
 
-  return {
-    version: CARD_LAYOUT_VERSION,
-    cover: beside ? "left" : "top",
-    span: value.span === 2 ? 2 : 1,
-    ratio: [40, 60],
-    overlay: parseFields(value.overlayFields).slice(0, MAX_OVERLAY_FIELDS),
-    // Beside used to put every field next to the cover; keep them there.
-    side: beside ? fields : [],
-    below: { kind: "single", ratio: [50, 50], cells: [beside ? [] : fields] },
-  };
+  if ("below" in value) {
+    const below = (value.below ?? {}) as Record<string, unknown>;
+    const belowCells = Array.isArray(below.cells) ? below.cells : [];
+    const side = parseFields(value.side);
+    const first = parseFields(belowCells[0]);
+    const second = parseFields(belowCells[1]);
+
+    if (value.cover === "left") {
+      const rest = [...first, ...second];
+      return rest.length
+        ? { ...base, arrangement: "cover-left-below", cells: { a: { display: "rows", fields: side }, b: { display: "rows", fields: rest } } }
+        : { ...base, arrangement: "cover-left", cells: { a: { display: "rows", fields: side } } };
+    }
+    if (value.cover === "off") {
+      return { ...base, arrangement: "no-cover", overlay: [], cells: { a: { display: "rows", fields: [...side, ...first, ...second] } } };
+    }
+    return second.length
+      ? { ...base, arrangement: "cover-top-two", cells: { a: { display: "rows", fields: first }, b: { display: "rows", fields: second } } }
+      : { ...base, arrangement: "cover-top", cells: { a: { display: "rows", fields: [...side, ...first] } } };
+  }
+
+  if ("preset" in value || "fields" in value) {
+    const fields = parseFields(value.fields);
+    return value.preset === "beside"
+      ? { ...base, arrangement: "cover-left", cells: { a: { display: "rows", fields } } }
+      : { ...base, arrangement: "cover-top", cells: { a: { display: "rows", fields } } };
+  }
+
+  return null;
 }
+
+/* ── Resolution ──────────────────────────────────────────────────────────── */
 
 export type ResolvedField<T> = { property: T; showLabel: boolean };
+export type ResolvedCell<T> = { id: string; display: CellDisplay; fields: ResolvedField<T>[] };
 
 export type ResolvedCardLayout<T> = {
-  cover: CoverPlacement;
+  arrangement: ArrangementId;
+  cover: CoverSlot;
   span: CardSpan;
   ratio: CardRatio;
   overlay: ResolvedField<T>[];
-  side: ResolvedField<T>[];
-  below: { kind: BelowKind; ratio: CardRatio; cells: ResolvedField<T>[][] };
+  cells: ResolvedCell<T>[];
 };
 
 /**
  * The arrangement to render, reconciled against the properties that exist now. Ids whose
  * property has vanished from Notion are dropped rather than rendered blank, and a
- * property claimed by two zones is kept only in the first — zones are read in visual
- * order so the winner is the one nearest the top of the card.
+ * property claimed twice is kept only where it appears first.
  */
 export function resolveCardLayout<T extends CardEligibleProperty>(
   layout: CardLayout | null,
@@ -189,8 +229,12 @@ export function resolveCardLayout<T extends CardEligibleProperty>(
   const byId = new Map(eligible.map((property) => [property.notionPropertyId, property]));
   const source = layout ?? createDefaultCardLayout(properties);
 
-  // A gallery with covers switched off cannot show anything on or beside one.
-  const cover: CoverPlacement = coverAspect === "none" ? "off" : source.cover === "off" ? "top" : source.cover;
+  // A gallery with covers switched off cannot show one, whatever the arrangement says.
+  const arrangement: ArrangementId =
+    coverAspect === "none" && ARRANGEMENTS[source.arrangement].cover !== "none"
+      ? "no-cover"
+      : source.arrangement;
+  const spec = ARRANGEMENTS[arrangement];
 
   const taken = new Set<string>();
   const pick = (fields: CardField[], limit?: number): ResolvedField<T>[] => {
@@ -205,16 +249,11 @@ export function resolveCardLayout<T extends CardEligibleProperty>(
     return resolved;
   };
 
-  const overlay = cover === "off" ? [] : pick(source.overlay, MAX_OVERLAY_FIELDS);
-  const side = cover === "left" ? pick(source.side) : [];
-  const cells = source.below.cells.map((cell) => pick(cell));
+  const overlay = spec.cover === "none" ? [] : pick(source.overlay, MAX_OVERLAY_FIELDS);
+  const cells: ResolvedCell<T>[] = spec.cells.map((id) => {
+    const cell = source.cells[id] ?? emptyCell();
+    return { id, display: cell.display, fields: pick(cell.fields) };
+  });
 
-  return {
-    cover,
-    span: source.span,
-    ratio: source.ratio,
-    overlay,
-    side,
-    below: { kind: source.below.kind, ratio: source.below.ratio, cells },
-  };
+  return { arrangement, cover: spec.cover, span: source.span, ratio: source.ratio, overlay, cells };
 }

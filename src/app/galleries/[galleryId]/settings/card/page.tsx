@@ -67,16 +67,13 @@ export default async function CardLayoutSettingsPage({
             ratio: resolveCoverRatio({ ...galleryConfig, coverAspect: shapeAspect })?.replace(" / ", ":") ?? "16:9",
           }}
           initial={{
-            cover: resolved.cover,
+            arrangement: resolved.arrangement,
             span: resolved.span,
             ratio: resolved.ratio,
             overlay: toFields(resolved.overlay),
-            side: toFields(resolved.side),
-            below: {
-              kind: resolved.below.kind,
-              ratio: resolved.below.ratio,
-              cells: resolved.below.cells.map(toFields),
-            },
+            cells: Object.fromEntries(
+              resolved.cells.map((cell) => [cell.id, { display: cell.display, fields: toFields(cell.fields) }]),
+            ),
           }}
           previewTitle={preview.title}
           previewValues={preview.values}
