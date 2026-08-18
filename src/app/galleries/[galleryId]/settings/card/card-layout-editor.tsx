@@ -4,8 +4,8 @@ import { useActionState, useState } from "react";
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
   KeyboardSensor,
+  PointerSensor,
   useDraggable,
   useDroppable,
   useSensor,
@@ -14,14 +14,23 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import {
+  CARD_RATIOS,
   MAX_OVERLAY_FIELDS,
-  presetsFor,
   type CardField,
-  type CardPreset,
+  type CardRatio,
   type CardSpan,
-  type PresetOption,
+  type CoverPlacement,
 } from "@/lib/card-layout";
+import { COVER_RATIOS, type CoverAspect } from "@/lib/notion-cover";
 import { saveCardLayout, type SaveCardLayoutState } from "./actions";
+
+type CoverShape = { aspect: Exclude<CoverAspect, "none">; ratio: string };
+
+const ASPECT_LABELS: { value: CoverShape["aspect"]; label: string }[] = [
+  { value: "landscape", label: "Ngang" },
+  { value: "portrait", label: "Dọc" },
+  { value: "square", label: "Vuông" },
+];
 
 export type EditableCardProperty = {
   notionPropertyId: string;
@@ -29,13 +38,21 @@ export type EditableCardProperty = {
   notionPropertyType: string;
 };
 
-type Zone = "overlay" | "body" | "tray";
+type Zone = "overlay" | "side" | "below-0" | "below-1";
+
+type Draft = {
+  cover: CoverPlacement;
+  span: CardSpan;
+  ratio: CardRatio;
+  overlay: CardField[];
+  side: CardField[];
+  below: { kind: "single" | "two-col"; ratio: CardRatio; cells: CardField[][] };
+};
 
 export function CardLayoutEditor({
   galleryId,
   properties,
-  coverAspect,
-  coverRatio,
+  initialShape,
   initial,
   previewTitle,
   previewValues,
@@ -43,19 +60,17 @@ export function CardLayoutEditor({
 }: {
   galleryId: string;
   properties: EditableCardProperty[];
-  coverAspect: string | undefined;
-  coverRatio: string | null;
-  initial: { preset: CardPreset; span: CardSpan; fields: CardField[]; overlayFields: CardField[] };
+  initialShape: CoverShape;
+  initial: Draft;
   previewTitle: string;
   previewValues: Record<string, string>;
   previewCoverUrl: string | null;
 }) {
-  const presetOptions = presetsFor(coverAspect);
-  const [preset, setPreset] = useState<CardPreset>(initial.preset);
-  const [span, setSpan] = useState<CardSpan>(initial.span);
-  const [body, setBody] = useState<CardField[]>(initial.fields);
-  const [overlay, setOverlay] = useState<CardField[]>(initial.overlayFields);
+  const [draft, setDraft] = useState<Draft>(initial);
+  const [shape, setShape] = useState<CoverShape>(initialShape);
+  const [shapeOpen, setShapeOpen] = useState(false);
   const [dragging, setDragging] = useState<string | null>(null);
+  const coverRatio = shape.ratio.replace(":", " / ");
 
   const action = saveCardLayout.bind(null, galleryId);
   const [state, formAction, pending] = useActionState<SaveCardLayoutState, FormData>(action, { error: null });
@@ -67,38 +82,56 @@ export function CardLayoutEditor({
   );
 
   const byId = new Map(properties.map((p) => [p.notionPropertyId, p]));
-  const placed = new Set([...body, ...overlay].map((f) => f.id));
-  const tray = properties.filter((p) => !placed.has(p.notionPropertyId));
-  const overlayAllowed = coverAspect !== "none";
-  const overlayFull = overlay.length >= MAX_OVERLAY_FIELDS;
+  const zoneFields = (zone: Zone): CardField[] =>
+    zone === "overlay" ? draft.overlay
+    : zone === "side" ? draft.side
+    : draft.below.cells[zone === "below-0" ? 0 : 1] ?? [];
 
-  function zoneOf(id: string): Zone {
-    if (overlay.some((f) => f.id === id)) return "overlay";
-    if (body.some((f) => f.id === id)) return "body";
-    return "tray";
+  const placed = new Set(
+    [draft.overlay, draft.side, ...draft.below.cells].flat().map((f) => f.id),
+  );
+  const tray = properties.filter((p) => !placed.has(p.notionPropertyId));
+
+  function withZone(current: Draft, zone: Zone, next: CardField[]): Draft {
+    if (zone === "overlay") return { ...current, overlay: next };
+    if (zone === "side") return { ...current, side: next };
+    const index = zone === "below-0" ? 0 : 1;
+    const cells = [...current.below.cells];
+    cells[index] = next;
+    return { ...current, below: { ...current.below, cells } };
   }
 
-  /** Moves a field into a zone, optionally in front of a specific neighbour. */
-  function place(id: string, target: Zone, beforeId?: string) {
-    const field: CardField = [...overlay, ...body].find((f) => f.id === id) ?? { id, showLabel: true };
-    const nextOverlay = overlay.filter((f) => f.id !== id);
-    const nextBody = body.filter((f) => f.id !== id);
+  function zoneOf(current: Draft, id: string): Zone | null {
+    if (current.overlay.some((f) => f.id === id)) return "overlay";
+    if (current.side.some((f) => f.id === id)) return "side";
+    if (current.below.cells[0]?.some((f) => f.id === id)) return "below-0";
+    if (current.below.cells[1]?.some((f) => f.id === id)) return "below-1";
+    return null;
+  }
 
-    const insert = (list: CardField[]) => {
-      const at = beforeId ? list.findIndex((f) => f.id === beforeId) : -1;
-      if (at === -1) list.push(field);
-      else list.splice(at, 0, field);
-    };
+  /** Moves a field into a zone, before a given neighbour when one is named. */
+  function place(id: string, target: Zone | "tray", beforeId?: string) {
+    setDraft((current) => {
+      const existing =
+        [current.overlay, current.side, ...current.below.cells].flat().find((f) => f.id === id) ??
+        { id, showLabel: true };
 
-    if (target === "overlay") {
-      if (!overlayAllowed || nextOverlay.length >= MAX_OVERLAY_FIELDS) return;
-      insert(nextOverlay);
-    } else if (target === "body") {
-      insert(nextBody);
-    }
+      // Lift out of wherever it was first, so a move within one zone reorders cleanly.
+      let next: Draft = { ...current };
+      for (const zone of ["overlay", "side", "below-0", "below-1"] as Zone[]) {
+        const fields = zoneFieldsOf(next, zone);
+        if (fields.some((f) => f.id === id)) next = withZone(next, zone, fields.filter((f) => f.id !== id));
+      }
+      if (target === "tray") return next;
 
-    setOverlay(nextOverlay);
-    setBody(nextBody);
+      if (target === "overlay" && next.overlay.length >= MAX_OVERLAY_FIELDS) return current;
+
+      const fields = [...zoneFieldsOf(next, target)];
+      const at = beforeId ? fields.findIndex((f) => f.id === beforeId) : -1;
+      if (at === -1) fields.push(existing);
+      else fields.splice(at, 0, existing);
+      return withZone(next, target, fields);
+    });
   }
 
   function handleDragEnd({ active, over }: DragEndEvent) {
@@ -107,40 +140,59 @@ export function CardLayoutEditor({
     const id = String(active.id).replace("field:", "");
     const target = String(over.id);
 
-    if (target.startsWith("zone:")) place(id, target.slice(5) as Zone);
+    if (target.startsWith("zone:")) place(id, target.slice(5) as Zone | "tray");
     else if (target.startsWith("before:")) {
       const beforeId = target.slice(7);
-      if (beforeId !== id) place(id, zoneOf(beforeId), beforeId);
+      if (beforeId === id) return;
+      const zone = zoneOf(draft, beforeId);
+      if (zone) place(id, zone, beforeId);
     }
   }
 
-  const toggleLabel = (id: string) => {
-    const flip = (fields: CardField[]) =>
-      fields.map((f) => (f.id === id ? { ...f, showLabel: !f.showLabel } : f));
-    setOverlay(flip);
-    setBody(flip);
-  };
+  const toggleLabel = (id: string) =>
+    setDraft((current) => {
+      const flip = (fields: CardField[]) =>
+        fields.map((f) => (f.id === id ? { ...f, showLabel: !f.showLabel } : f));
+      return {
+        ...current,
+        overlay: flip(current.overlay),
+        side: flip(current.side),
+        below: { ...current.below, cells: current.below.cells.map(flip) },
+      };
+    });
+
+  const setCover = (cover: CoverPlacement) =>
+    setDraft((current) => ({
+      ...current,
+      cover,
+      // Nothing can sit beside a cover that is no longer on the side.
+      side: cover === "left" ? current.side : [],
+      overlay: cover === "off" ? [] : current.overlay,
+      span: cover === "left" ? 2 : current.span,
+    }));
+
+  const setBelowKind = (kind: "single" | "two-col") =>
+    setDraft((current) => ({
+      ...current,
+      below: {
+        ...current.below,
+        kind,
+        cells:
+          kind === "two-col"
+            ? [current.below.cells[0] ?? [], current.below.cells[1] ?? []]
+            : // Collapsing merges rather than discards — losing fields to a layout tweak
+              // would be the worst possible surprise here.
+              [[...(current.below.cells[0] ?? []), ...(current.below.cells[1] ?? [])]],
+      },
+    }));
 
   const activeProperty = dragging ? byId.get(dragging) : null;
 
   return (
-    <form action={formAction} className="flex flex-col gap-8">
-      <input
-        type="hidden"
-        name="layout"
-        value={JSON.stringify({ preset, span, fields: body, overlayFields: overlay })}
-      />
-
-      <PresetPicker
-        options={presetOptions}
-        preset={preset}
-        span={span}
-        onPreset={(next, defaultSpan) => {
-          setPreset(next);
-          setSpan(defaultSpan);
-        }}
-        onSpan={setSpan}
-      />
+    <form action={formAction}>
+      <input type="hidden" name="layout" value={JSON.stringify({ ...draft, version: 2 })} />
+      <input type="hidden" name="coverAspect" value={shape.aspect} />
+      <input type="hidden" name="coverRatio" value={shape.ratio} />
 
       <DndContext
         id="card-layout"
@@ -149,77 +201,45 @@ export function CardLayoutEditor({
         onDragEnd={handleDragEnd}
         onDragCancel={() => setDragging(null)}
       >
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-          <div className="min-w-0 flex-1 flex flex-col gap-6">
-            {overlayAllowed && (
-              <DropZone
-                id="overlay"
-                title="Đè lên ảnh bìa"
-                note={`Tối đa ${MAX_OVERLAY_FIELDS} prop${overlayFull ? " — đã đầy" : ""}`}
-                empty="Kéo prop vào đây để hiện đè lên ảnh."
-              >
-                {overlay.map((field) => (
-                  <FieldChip
-                    key={field.id}
-                    field={field}
-                    property={byId.get(field.id)}
-                    onToggleLabel={() => toggleLabel(field.id)}
-                    onRemove={() => setOverlay((c) => c.filter((f) => f.id !== field.id))}
-                  />
-                ))}
-              </DropZone>
-            )}
+        <div className="flex gap-6">
+          <Tray properties={tray} />
 
-            <DropZone
-              id="body"
-              title="Trong thân card"
-              note={preset === "beside" ? "Nằm cạnh ảnh" : "Nằm dưới ảnh"}
-              empty="Kéo prop vào đây."
-            >
-              {body.map((field) => (
-                <FieldChip
-                  key={field.id}
-                  field={field}
-                  property={byId.get(field.id)}
-                  onToggleLabel={() => toggleLabel(field.id)}
-                  onRemove={() => setBody((c) => c.filter((f) => f.id !== field.id))}
-                />
-              ))}
-            </DropZone>
+          <div className="min-w-0 flex-1">
+            <Toolbar
+              draft={draft}
+              shape={shape}
+              shapeOpen={shapeOpen}
+              onToggleShape={() => setShapeOpen((open) => !open)}
+              onShape={setShape}
+              onCover={setCover}
+              onSpan={(span) => setDraft((c) => ({ ...c, span }))}
+              onRatio={(ratio) => setDraft((c) => ({ ...c, ratio }))}
+              onBelowKind={setBelowKind}
+              onBelowRatio={(ratio) => setDraft((c) => ({ ...c, below: { ...c.below, ratio } }))}
+            />
 
-            <DropZone id="tray" title="Chưa dùng" note={`${tray.length} prop`} empty="Mọi prop đều đã được đặt.">
-              {tray.map((property) => (
-                <FieldChip
-                  key={property.notionPropertyId}
-                  field={{ id: property.notionPropertyId, showLabel: true }}
-                  property={property}
-                  muted
-                />
-              ))}
-            </DropZone>
+            <Canvas
+              draft={draft}
+              coverRatio={coverRatio}
+              coverUrl={previewCoverUrl}
+              title={previewTitle}
+              byId={byId}
+              values={previewValues}
+              zoneFields={zoneFields}
+              onToggleLabel={toggleLabel}
+              onRemove={(id) => place(id, "tray")}
+            />
 
-            {state.error && <p className="text-sm text-red-600">{state.error}</p>}
+            {state.error && <p className="mt-4 text-sm text-red-600">{state.error}</p>}
 
             <button
               type="submit"
               disabled={pending}
-              className="self-start rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
+              className="mt-6 rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
             >
-              {pending ? "Đang lưu…" : "Lưu"}
+              {pending ? "Đang lưu…" : "Lưu bố cục"}
             </button>
           </div>
-
-          <CardPreview
-            preset={preset}
-            span={span}
-            coverRatio={coverRatio}
-            coverUrl={previewCoverUrl}
-            title={previewTitle}
-            body={body}
-            overlay={overlay}
-            byId={byId}
-            values={previewValues}
-          />
         </div>
 
         <DragOverlay>
@@ -234,141 +254,435 @@ export function CardLayoutEditor({
   );
 }
 
-function PresetPicker({
-  options,
-  preset,
-  span,
-  onPreset,
-  onSpan,
-}: {
-  options: PresetOption[];
-  preset: CardPreset;
-  span: CardSpan;
-  onPreset: (value: CardPreset, defaultSpan: CardSpan) => void;
-  onSpan: (value: CardSpan) => void;
-}) {
-  const active = options.find((option) => option.value === preset) ?? options[0];
-
-  return (
-    <section>
-      <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-400">Kiểu bố cục</h2>
-      <div className="flex flex-wrap gap-3">
-        {options.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => onPreset(option.value, option.defaultSpan)}
-            aria-pressed={option.value === preset}
-            className={`flex w-44 flex-col gap-2 rounded-lg border p-3 text-left ${
-              option.value === preset
-                ? "border-emerald-600 bg-emerald-50"
-                : "border-stone-300 hover:border-stone-400"
-            }`}
-          >
-            <PresetGlyph preset={option.value} />
-            <span className="text-sm font-medium text-stone-800">{option.label}</span>
-            <span className="text-[11px] leading-snug text-stone-500">{option.hint}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-4 flex items-center gap-3">
-        <span className="text-xs text-stone-500">Độ rộng card</span>
-        {([1, 2] as CardSpan[]).map((value) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => onSpan(value)}
-            aria-pressed={span === value}
-            className={`rounded-md border px-3 py-1.5 text-xs ${
-              span === value
-                ? "border-emerald-600 bg-emerald-50 font-medium text-emerald-800"
-                : "border-stone-300 text-stone-600 hover:border-stone-400"
-            }`}
-          >
-            {value === 1 ? "1 cột" : "2 cột"}
-          </button>
-        ))}
-        {active?.defaultSpan === 2 && span === 1 && (
-          <span className="text-[11px] text-amber-700">Bố cục này thường cần 2 cột mới đủ chỗ.</span>
-        )}
-      </div>
-    </section>
-  );
+function zoneFieldsOf(draft: Draft, zone: Zone): CardField[] {
+  if (zone === "overlay") return draft.overlay;
+  if (zone === "side") return draft.side;
+  return draft.below.cells[zone === "below-0" ? 0 : 1] ?? [];
 }
 
-/** Tiny diagram of where the cover sits, so the choice reads at a glance. */
-function PresetGlyph({ preset }: { preset: CardPreset }) {
-  if (preset === "beside") {
-    return (
-      <span className="flex h-12 w-full gap-1 rounded border border-stone-200 bg-white p-1">
-        <span className="h-full w-1/3 rounded-sm bg-stone-300" />
-        <span className="flex flex-1 flex-col gap-1 pt-1">
-          <span className="h-1.5 w-3/4 rounded-sm bg-stone-200" />
-          <span className="h-1 w-full rounded-sm bg-stone-100" />
-          <span className="h-1 w-2/3 rounded-sm bg-stone-100" />
-        </span>
-      </span>
-    );
-  }
-  return (
-    <span className="flex h-12 w-full flex-col gap-1 rounded border border-stone-200 bg-white p-1">
-      <span className="h-1/2 w-full rounded-sm bg-stone-300" />
-      <span className="h-1.5 w-3/4 rounded-sm bg-stone-200" />
-      <span className="h-1 w-full rounded-sm bg-stone-100" />
-    </span>
-  );
-}
-
-function DropZone({
-  id,
-  title,
-  note,
-  empty,
-  children,
-}: {
-  id: Zone;
-  title: string;
-  note: string;
-  empty: string;
-  children: React.ReactNode;
-}) {
-  const { setNodeRef, isOver } = useDroppable({ id: `zone:${id}` });
-  const items = Array.isArray(children) ? children.filter(Boolean) : children ? [children] : [];
+/** Vertical rail of properties not yet placed, mirroring the detail builder. */
+function Tray({ properties }: { properties: EditableCardProperty[] }) {
+  const { setNodeRef, isOver } = useDroppable({ id: "zone:tray" });
 
   return (
-    <section>
-      <div className="mb-2 flex items-baseline justify-between">
-        <h2 className="text-xs font-medium uppercase tracking-wide text-stone-400">{title}</h2>
-        <span className="text-[11px] text-stone-400">{note}</span>
-      </div>
+    <aside className="w-56 shrink-0">
+      <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-400">
+        Chưa dùng · {properties.length}
+      </h2>
       <div
         ref={setNodeRef}
-        className={`flex min-h-16 flex-wrap items-start gap-2 rounded-lg border border-dashed p-3 ${
+        className={`sticky top-4 flex max-h-[70vh] flex-col gap-1.5 overflow-y-auto rounded-lg border border-dashed p-2 ${
           isOver ? "border-emerald-500 bg-emerald-50" : "border-stone-300"
         }`}
       >
-        {items.length === 0 ? <span className="text-xs text-stone-400">{empty}</span> : items}
+        {properties.length === 0 ? (
+          <p className="px-1 py-2 text-xs text-stone-400">Mọi property đều đã được đặt.</p>
+        ) : (
+          properties.map((property) => (
+            <FieldChip
+              key={property.notionPropertyId}
+              field={{ id: property.notionPropertyId, showLabel: true }}
+              property={property}
+              muted
+            />
+          ))
+        )}
       </div>
-    </section>
+    </aside>
+  );
+}
+
+function Toolbar({
+  draft,
+  shape,
+  shapeOpen,
+  onToggleShape,
+  onShape,
+  onCover,
+  onSpan,
+  onRatio,
+  onBelowKind,
+  onBelowRatio,
+}: {
+  draft: Draft;
+  shape: CoverShape;
+  shapeOpen: boolean;
+  onToggleShape: () => void;
+  onShape: (value: CoverShape) => void;
+  onCover: (value: CoverPlacement) => void;
+  onSpan: (value: CardSpan) => void;
+  onRatio: (value: CardRatio) => void;
+  onBelowKind: (value: "single" | "two-col") => void;
+  onBelowRatio: (value: CardRatio) => void;
+}) {
+  return (
+    <div className="relative mb-4 flex flex-wrap items-center gap-x-6 gap-y-3 rounded-lg border border-stone-200 px-4 py-3">
+      <Group label="Ảnh bìa">
+        <Choice active={draft.cover === "top"} onClick={() => onCover("top")}>
+          Trên
+        </Choice>
+        <Choice active={draft.cover === "left"} onClick={() => onCover("left")}>
+          Bên trái
+        </Choice>
+        <Choice active={draft.cover === "off"} onClick={() => onCover("off")}>
+          Ẩn
+        </Choice>
+        {draft.cover !== "off" && (
+          <button
+            type="button"
+            onClick={onToggleShape}
+            aria-expanded={shapeOpen}
+            className={`rounded border px-2 py-1 font-mono text-xs ${
+              shapeOpen
+                ? "border-emerald-600 bg-emerald-50 text-emerald-800"
+                : "border-stone-300 text-stone-600 hover:border-stone-400"
+            }`}
+          >
+            {shape.ratio} ▾
+          </button>
+        )}
+      </Group>
+
+      {shapeOpen && draft.cover !== "off" && (
+        <CoverShapePopover shape={shape} onShape={onShape} onClose={onToggleShape} />
+      )}
+
+      {draft.cover === "left" && (
+        <Group label="Ảnh / chữ">
+          {CARD_RATIOS.map((ratio) => (
+            <Choice
+              key={ratio.join("-")}
+              active={draft.ratio[0] === ratio[0]}
+              onClick={() => onRatio(ratio)}
+              mono
+            >
+              {ratio[0]}:{ratio[1]}
+            </Choice>
+          ))}
+        </Group>
+      )}
+
+      <Group label="Vùng dưới">
+        <Choice active={draft.below.kind === "single"} onClick={() => onBelowKind("single")}>
+          1 cột
+        </Choice>
+        <Choice active={draft.below.kind === "two-col"} onClick={() => onBelowKind("two-col")}>
+          2 cột
+        </Choice>
+      </Group>
+
+      {draft.below.kind === "two-col" && (
+        <Group label="Tỉ lệ dưới">
+          {CARD_RATIOS.map((ratio) => (
+            <Choice
+              key={ratio.join("-")}
+              active={draft.below.ratio[0] === ratio[0]}
+              onClick={() => onBelowRatio(ratio)}
+              mono
+            >
+              {ratio[0]}:{ratio[1]}
+            </Choice>
+          ))}
+        </Group>
+      )}
+
+      <Group label="Rộng">
+        <Choice active={draft.span === 1} onClick={() => onSpan(1)}>
+          1 cột
+        </Choice>
+        <Choice active={draft.span === 2} onClick={() => onSpan(2)}>
+          2 cột
+        </Choice>
+      </Group>
+    </div>
+  );
+}
+
+/** Cover orientation and ratio, inline so arranging a card never means leaving the page. */
+function CoverShapePopover({
+  shape,
+  onShape,
+  onClose,
+}: {
+  shape: CoverShape;
+  onShape: (value: CoverShape) => void;
+  onClose: () => void;
+}) {
+  const ratios = COVER_RATIOS[shape.aspect];
+
+  return (
+    <div className="absolute left-4 top-full z-30 mt-2 w-80 rounded-lg border border-stone-200 bg-white p-4 shadow-lg">
+      <div className="mb-3 flex items-baseline justify-between">
+        <span className="text-xs font-medium uppercase tracking-wide text-stone-400">Khung ảnh</span>
+        <button type="button" onClick={onClose} className="text-xs text-stone-400 hover:text-stone-700">
+          Đóng
+        </button>
+      </div>
+
+      <div className="mb-3 flex gap-1">
+        {ASPECT_LABELS.map((option) => (
+          <Choice
+            key={option.value}
+            active={shape.aspect === option.value}
+            onClick={() => onShape({ aspect: option.value, ratio: COVER_RATIOS[option.value][0] })}
+          >
+            {option.label}
+          </Choice>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1">
+        {ratios.map((ratio) => (
+          <Choice key={ratio} mono active={shape.ratio === ratio} onClick={() => onShape({ ...shape, ratio })}>
+            {ratio}
+          </Choice>
+        ))}
+        <span
+          className="ml-2 rounded border border-dashed border-stone-300 bg-stone-100"
+          style={{ aspectRatio: shape.ratio.replace(":", " / "), height: 34 }}
+        />
+      </div>
+
+      <p className="mt-3 text-[11px] text-stone-400">
+        Áp dụng khi bấm Lưu bố cục. Nguồn ảnh chọn ở trang Ảnh bìa.
+      </p>
+    </div>
+  );
+}
+
+function Group({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[11px] uppercase tracking-wide text-stone-400">{label}</span>
+      <div className="flex gap-1">{children}</div>
+    </div>
+  );
+}
+
+function Choice({
+  active,
+  disabled,
+  mono,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  mono?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+      className={`rounded border px-2 py-1 text-xs disabled:opacity-40 ${mono ? "font-mono" : ""} ${
+        active
+          ? "border-emerald-600 bg-emerald-50 font-medium text-emerald-800"
+          : "border-stone-300 text-stone-600 hover:border-stone-400"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** The card itself, at card proportions, with every region a drop target. */
+function Canvas({
+  draft,
+  coverRatio,
+  coverUrl,
+  title,
+  byId,
+  values,
+  zoneFields,
+  onToggleLabel,
+  onRemove,
+}: {
+  draft: Draft;
+  coverRatio: string | null;
+  coverUrl: string | null;
+  title: string;
+  byId: Map<string, EditableCardProperty>;
+  values: Record<string, string>;
+  zoneFields: (zone: Zone) => CardField[];
+  onToggleLabel: (id: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  const showCover = draft.cover !== "off" && coverRatio;
+
+  const cover = showCover && (
+    <div
+      className="relative shrink-0 overflow-hidden rounded bg-stone-200 bg-cover bg-center"
+      style={{
+        aspectRatio: coverRatio,
+        ...(draft.cover === "left" ? { width: `${draft.ratio[0]}%` } : { width: "100%" }),
+        ...(coverUrl ? { backgroundImage: `url(${JSON.stringify(coverUrl)})` } : {}),
+      }}
+    >
+      <DropRegion
+        zone="overlay"
+        label={`Đè lên ảnh · tối đa ${MAX_OVERLAY_FIELDS}`}
+        fields={zoneFields("overlay")}
+        byId={byId}
+        values={values}
+        onToggleLabel={onToggleLabel}
+        onRemove={onRemove}
+        tone="dark"
+        className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/45 to-transparent"
+      />
+    </div>
+  );
+
+  const side = draft.cover === "left" && (
+    <div className="flex min-w-0 flex-1 flex-col gap-2 p-3">
+      <p className="truncate font-medium text-stone-900">{title}</p>
+      <DropRegion
+        zone="side"
+        label="Cạnh ảnh"
+        fields={zoneFields("side")}
+        byId={byId}
+        values={values}
+        onToggleLabel={onToggleLabel}
+        onRemove={onRemove}
+      />
+    </div>
+  );
+
+  return (
+    <div className="rounded-lg border border-stone-200 bg-white p-4">
+      <div className={`mx-auto ${draft.span === 2 ? "max-w-3xl" : "max-w-sm"}`}>
+        <div className="overflow-hidden rounded-lg border border-stone-200">
+          <div className={draft.cover === "left" ? "flex" : "flex flex-col"}>
+            {cover}
+            {side}
+          </div>
+
+          <div className="flex flex-col gap-2 p-3">
+            {draft.cover !== "left" && <p className="truncate font-medium text-stone-900">{title}</p>}
+
+            {draft.below.kind === "single" ? (
+              <DropRegion
+                zone="below-0"
+                label="Dưới card"
+                fields={zoneFields("below-0")}
+                byId={byId}
+                values={values}
+                onToggleLabel={onToggleLabel}
+                onRemove={onRemove}
+              />
+            ) : (
+              <div className="flex gap-2">
+                <div style={{ width: `${draft.below.ratio[0]}%` }} className="min-w-0">
+                  <DropRegion
+                    zone="below-0"
+                    label="Dưới · trái"
+                    fields={zoneFields("below-0")}
+                    byId={byId}
+                    values={values}
+                    onToggleLabel={onToggleLabel}
+                    onRemove={onRemove}
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <DropRegion
+                    zone="below-1"
+                    label="Dưới · phải"
+                    fields={zoneFields("below-1")}
+                    byId={byId}
+                    values={values}
+                    onToggleLabel={onToggleLabel}
+                    onRemove={onRemove}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <p className="mt-3 text-center text-[11px] text-stone-400">
+        Kéo property từ cột trái vào vùng muốn hiện. Thả lên một property để chèn phía trên nó.
+      </p>
+    </div>
+  );
+}
+
+function DropRegion({
+  zone,
+  label,
+  fields,
+  byId,
+  values,
+  onToggleLabel,
+  onRemove,
+  tone = "light",
+  className = "",
+}: {
+  zone: Zone;
+  label: string;
+  fields: CardField[];
+  byId: Map<string, EditableCardProperty>;
+  values: Record<string, string>;
+  onToggleLabel: (id: string) => void;
+  onRemove: (id: string) => void;
+  tone?: "light" | "dark";
+  className?: string;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: `zone:${zone}` });
+  const dark = tone === "dark";
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`flex min-h-12 flex-col gap-1 rounded border border-dashed p-1.5 ${className} ${
+        isOver
+          ? "border-emerald-500 bg-emerald-50/90"
+          : dark
+            ? "border-white/30"
+            : "border-stone-300"
+      }`}
+    >
+      {fields.length === 0 ? (
+        <span className={`px-1 text-[11px] ${dark ? "text-white/70" : "text-stone-400"}`}>{label}</span>
+      ) : (
+        fields.map((field) => (
+          <FieldChip
+            key={field.id}
+            field={field}
+            property={byId.get(field.id)}
+            value={values[field.id]}
+            dark={dark}
+            onToggleLabel={() => onToggleLabel(field.id)}
+            onRemove={() => onRemove(field.id)}
+          />
+        ))
+      )}
+    </div>
   );
 }
 
 function FieldChip({
   field,
   property,
+  value,
   muted,
+  dark,
   onToggleLabel,
   onRemove,
 }: {
   field: CardField;
   property: EditableCardProperty | undefined;
+  value?: string;
   muted?: boolean;
+  dark?: boolean;
   onToggleLabel?: () => void;
   onRemove?: () => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `field:${field.id}` });
-  // Dropping onto a chip inserts before it, which is how ordering happens without a
+  // Dropping onto a chip inserts above it — that is how ordering happens without a
   // sortable library.
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: `before:${field.id}` });
   if (!property) return null;
@@ -376,21 +690,31 @@ function FieldChip({
   return (
     <span
       ref={setDropRef}
-      className={`flex items-center gap-2 rounded-md border bg-white px-2 py-1 text-sm ${
-        isOver ? "border-emerald-500" : "border-stone-300"
-      } ${isDragging ? "opacity-40" : ""} ${muted ? "text-stone-500" : "text-stone-800"}`}
+      className={`flex w-full items-center gap-1.5 rounded border px-1.5 py-1 text-xs ${
+        isOver ? "border-emerald-500" : dark ? "border-white/25" : "border-stone-300"
+      } ${isDragging ? "opacity-40" : ""} ${
+        dark ? "bg-black/35 text-white" : muted ? "bg-white text-stone-500" : "bg-white text-stone-800"
+      }`}
     >
       <span
         ref={setNodeRef}
         {...listeners}
         {...attributes}
-        className="cursor-grab select-none active:cursor-grabbing"
+        className="flex min-w-0 flex-1 cursor-grab select-none items-baseline gap-1.5 active:cursor-grabbing"
       >
-        ⠿ {property.notionPropertyName}
+        <span className={dark ? "text-white/50" : "text-stone-400"}>⠿</span>
+        {field.showLabel && (
+          <span className={`shrink-0 ${dark ? "text-white/60" : "text-stone-400"}`}>
+            {property.notionPropertyName}
+          </span>
+        )}
+        <span className="min-w-0 flex-1 truncate">
+          {muted ? property.notionPropertyName : value || "—"}
+        </span>
       </span>
 
       {onToggleLabel && (
-        <label className="flex items-center gap-1 text-[11px] text-stone-500">
+        <label className={`flex shrink-0 items-center gap-1 ${dark ? "text-white/60" : "text-stone-400"}`}>
           <input type="checkbox" checked={field.showLabel} onChange={onToggleLabel} />
           tên
         </label>
@@ -400,90 +724,11 @@ function FieldChip({
           type="button"
           onClick={onRemove}
           aria-label={`Bỏ ${property.notionPropertyName}`}
-          className="text-xs text-stone-400 hover:text-stone-700"
+          className={`shrink-0 ${dark ? "text-white/60 hover:text-white" : "text-stone-400 hover:text-stone-700"}`}
         >
           ✕
         </button>
       )}
     </span>
-  );
-}
-
-function CardPreview({
-  preset,
-  span,
-  coverRatio,
-  coverUrl,
-  title,
-  body,
-  overlay,
-  byId,
-  values,
-}: {
-  preset: CardPreset;
-  span: CardSpan;
-  coverRatio: string | null;
-  coverUrl: string | null;
-  title: string;
-  body: CardField[];
-  overlay: CardField[];
-  byId: Map<string, EditableCardProperty>;
-  values: Record<string, string>;
-}) {
-  const cover = coverRatio && (
-    <div
-      className="relative shrink-0 overflow-hidden bg-stone-200 bg-cover bg-center"
-      style={{
-        aspectRatio: coverRatio,
-        ...(preset === "beside" ? { width: "40%" } : { width: "100%" }),
-        ...(coverUrl ? { backgroundImage: `url(${JSON.stringify(coverUrl)})` } : {}),
-      }}
-    >
-      {overlay.length > 0 && (
-        <div className="absolute inset-x-0 bottom-0 flex flex-col gap-0.5 bg-gradient-to-t from-black/75 to-transparent p-2">
-          {overlay.map((field) => (
-            <span key={field.id} className="truncate text-[11px] text-white">
-              {field.showLabel && (
-                <span className="text-white/60">{byId.get(field.id)?.notionPropertyName}: </span>
-              )}
-              {values[field.id] || "—"}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-
-  const text = (
-    <div className="flex min-w-0 flex-1 flex-col gap-1 p-3">
-      <p className="truncate font-medium text-stone-900">{title}</p>
-      {body.map((field) => (
-        <span key={field.id} className="flex items-baseline gap-2 text-xs text-stone-600">
-          {field.showLabel && (
-            <span className="w-20 shrink-0 truncate text-stone-400">
-              {byId.get(field.id)?.notionPropertyName}
-            </span>
-          )}
-          <span className="min-w-0 flex-1 truncate">{values[field.id] || "—"}</span>
-        </span>
-      ))}
-    </div>
-  );
-
-  return (
-    <div className="w-full shrink-0 lg:w-80">
-      <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-400">Xem trước</h2>
-      <div
-        className={`overflow-hidden rounded-lg border border-stone-200 bg-white ${
-          preset === "beside" ? "flex" : "flex flex-col"
-        }`}
-      >
-        {cover}
-        {text}
-      </div>
-      <p className="mt-2 text-[11px] text-stone-400">
-        Card chiếm {span === 2 ? "2 cột" : "1 cột"} trong lưới Gallery. Khung ảnh chỉnh ở trang Ảnh bìa.
-      </p>
-    </div>
   );
 }

@@ -3,20 +3,22 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
+  CARD_LAYOUT_VERSION,
+  CARD_RATIOS,
   MAX_OVERLAY_FIELDS,
   cardEligibleProperties,
-  isPreset,
   type CardField,
   type CardLayout,
+  type CardRatio,
 } from "@/lib/card-layout";
-import { parseGalleryConfig } from "@/lib/notion-cover";
+import { COVER_RATIOS, parseGalleryConfig, type CoverAspect } from "@/lib/notion-cover";
 
 export type SaveCardLayoutState = { error: string | null };
 
 /**
  * Stores how the gallery's cards are arranged. Only ids still present in this gallery's
- * shadow schema survive, so a stale editor tab can't reintroduce a property Notion has
- * since dropped, and a property can only land in one zone.
+ * shadow schema survive, and a property can land in exactly one zone, so a stale editor
+ * tab can neither resurrect a deleted property nor duplicate a live one.
  */
 export async function saveCardLayout(
   galleryId: string,
@@ -39,7 +41,7 @@ export async function saveCardLayout(
     return { error: "Không đọc được cấu hình. Tải lại trang rồi thử lại." };
   }
 
-  const { preset, span, fields, overlayFields } = submitted as Record<string, unknown>;
+  const value = submitted as Record<string, unknown>;
   const allowed = new Set(cardEligibleProperties(gallery.propertyConfigs).map((p) => p.notionPropertyId));
   const taken = new Set<string>();
 
@@ -57,16 +59,43 @@ export async function saveCardLayout(
     return out;
   };
 
+  const ratioOf = (raw: unknown): CardRatio =>
+    (Array.isArray(raw) && CARD_RATIOS.find((r) => r[0] === raw[0] && r[1] === raw[1])) || [40, 60];
+
+  const belowRaw = (value.below ?? {}) as Record<string, unknown>;
+  const belowKind = belowRaw.kind === "two-col" ? "two-col" : "single";
+  const cellsRaw = Array.isArray(belowRaw.cells) ? belowRaw.cells : [];
+
   const layout: CardLayout = {
-    preset: isPreset(preset) ? preset : "stack",
-    span: span === 2 ? 2 : 1,
-    // Overlay first: it holds the scarce slots, so it should win a contested property.
-    overlayFields: clean(overlayFields, MAX_OVERLAY_FIELDS),
-    fields: clean(fields),
+    version: CARD_LAYOUT_VERSION,
+    cover: value.cover === "left" ? "left" : value.cover === "off" ? "off" : "top",
+    span: value.span === 2 ? 2 : 1,
+    ratio: ratioOf(value.ratio),
+    // Zones are cleaned in visual order, so a contested property stays where it appears
+    // first on the card rather than wherever the client happened to list it.
+    overlay: clean(value.overlay, MAX_OVERLAY_FIELDS),
+    side: clean(value.side),
+    below: {
+      kind: belowKind,
+      ratio: ratioOf(belowRaw.ratio),
+      cells:
+        belowKind === "two-col"
+          ? [clean(cellsRaw[0]), clean(cellsRaw[1])]
+          : [clean(cellsRaw[0])],
+    },
   };
 
   const config = parseGalleryConfig(gallery.displayConfig);
   config.card = layout;
+
+  // Cover shape is edited from the same screen, so it saves on the same click.
+  const aspect = String(formData.get("coverAspect") ?? "");
+  if (aspect === "landscape" || aspect === "portrait" || aspect === "square") {
+    const allowed = COVER_RATIOS[aspect];
+    const ratio = String(formData.get("coverRatio") ?? "");
+    config.coverAspect = aspect as CoverAspect;
+    config.coverRatio = allowed.includes(ratio) ? ratio : allowed[0];
+  }
 
   await db.gallery.update({
     where: { id: galleryId },

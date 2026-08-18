@@ -26,8 +26,11 @@ export default async function CardLayoutSettingsPage({
     gallery.propertyConfigs,
     galleryConfig.coverAspect,
   );
-  const toFields = (list: typeof resolved.fields) =>
+  const toFields = (list: { property: { notionPropertyId: string }; showLabel: boolean }[]) =>
     list.map((field) => ({ id: field.property.notionPropertyId, showLabel: field.showLabel }));
+
+  const aspect = galleryConfig.coverAspect;
+  const shapeAspect = aspect === "portrait" || aspect === "square" ? aspect : "landscape";
 
   // One real item, so the preview shows the actual data rather than filler.
   const preview = await loadPreviewItem(
@@ -37,14 +40,14 @@ export default async function CardLayoutSettingsPage({
   );
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-12">
+    <div className="w-full px-6 py-12">
       <Link href={`/galleries/${galleryId}`} className="text-xs text-stone-500 hover:underline">
         ← {gallery.name}
       </Link>
       <h1 className="mt-2 mb-1 text-2xl font-semibold text-stone-900">Bố cục card</h1>
       <p className="mb-8 text-sm text-stone-600">
-        Chọn kiểu sắp xếp ảnh và chữ, độ rộng card, rồi kéo property vào chỗ muốn hiện. Kiểu bố cục có sẵn tuỳ theo
-        khung ảnh bìa đang dùng.
+        Kéo property từ cột trái vào vùng muốn hiện: đè lên ảnh, cạnh ảnh, hoặc phía dưới. Khung ảnh đổi ngay trong
+        thanh công cụ.
       </p>
 
       {properties.length === 0 ? (
@@ -59,13 +62,21 @@ export default async function CardLayoutSettingsPage({
             notionPropertyName: p.notionPropertyName,
             notionPropertyType: p.notionPropertyType,
           }))}
-          coverAspect={galleryConfig.coverAspect}
-          coverRatio={resolveCoverRatio(galleryConfig)}
+          initialShape={{
+            aspect: shapeAspect,
+            ratio: resolveCoverRatio({ ...galleryConfig, coverAspect: shapeAspect })?.replace(" / ", ":") ?? "16:9",
+          }}
           initial={{
-            preset: resolved.preset,
+            cover: resolved.cover,
             span: resolved.span,
-            fields: toFields(resolved.fields),
-            overlayFields: toFields(resolved.overlayFields),
+            ratio: resolved.ratio,
+            overlay: toFields(resolved.overlay),
+            side: toFields(resolved.side),
+            below: {
+              kind: resolved.below.kind,
+              ratio: resolved.below.ratio,
+              cells: resolved.below.cells.map(toFields),
+            },
           }}
           previewTitle={preview.title}
           previewValues={preview.values}
