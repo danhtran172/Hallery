@@ -45,6 +45,11 @@ model Gallery {
   /// Picking one by hand later clears the flag and promotes it to a normal gallery.
   autoAdded          Boolean   @default(false)
 
+  /// In Hallery's trash since this moment, and out of the sidebar. Restorable, and the
+  /// Notion database behind it is untouched either way — "xoá" here has only ever meant
+  /// Hallery stops managing it.
+  deletedAt          DateTime?
+
   parentGalleryId    String?
   parentGallery      Gallery?  @relation("SubGalleries", fields: [parentGalleryId], references: [id])
   subGalleries       Gallery[] @relation("SubGalleries")

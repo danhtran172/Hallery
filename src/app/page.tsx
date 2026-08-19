@@ -7,7 +7,7 @@ export default async function Home() {
     // them rather than listed here — otherwise one database drags a dozen along with it.
     include: {
       galleries: {
-        where: { parentGalleryId: null, autoAdded: false },
+        where: { parentGalleryId: null, autoAdded: false, deletedAt: null },
         orderBy: { sortOrder: "asc" },
       },
     },
