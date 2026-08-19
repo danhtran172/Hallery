@@ -80,11 +80,20 @@ export function GridGlyph({ cols, rows, selected }: { cols: number; rows: number
 }
 
 /** Cover frame at its true proportion. */
-export function RatioGlyph({ ratio, selected }: { ratio: string; selected: boolean }) {
+export function RatioGlyph({
+  ratio,
+  selected,
+  round,
+}: {
+  ratio: string;
+  selected: boolean;
+  /** Draw the frame's fill as a circle, for the round member of the symmetric family. */
+  round?: boolean;
+}) {
   return (
     <span aria-hidden className={`flex h-10 w-14 items-center justify-center ${FRAME}`}>
       <span
-        className={`max-h-full max-w-full ${cover(selected)}`}
+        className={`max-h-full max-w-full ${cover(selected)} ${round ? "!rounded-full" : ""}`}
         style={{ aspectRatio: ratio.replace(":", " / "), height: "100%" }}
       />
     </span>

@@ -69,8 +69,21 @@ const ORIENTATIONS: { value: CoverOrientation; label: string }[] = [
   { value: "landscape", label: "Ngang" },
   { value: "portrait", label: "Dọc" },
   { value: "square", label: "Đối xứng" },
-  { value: "circle", label: "Hình tròn" },
 ];
+
+/**
+ * The symmetric family. Both are the same 1:1 frame, so they belong under one orientation
+ * rather than competing with Ngang and Dọc — the choice between them is how it is drawn.
+ */
+const SYMMETRIC_SHAPES: { value: CoverOrientation; label: string }[] = [
+  { value: "square", label: "Vuông" },
+  { value: "circle", label: "Tròn" },
+];
+
+/** True for either member of that family, so the one button covers both. */
+function isSymmetric(aspect: CoverOrientation): boolean {
+  return aspect === "square" || aspect === "circle";
+}
 
 export function CardLayoutEditor({
   galleryId,
@@ -725,8 +738,10 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
           open ? "border-emerald-700" : "border-stone-300 hover:border-stone-500"
         }`}
       >
-        <RatioGlyph ratio={shape.ratio} selected />
-        <span className="font-mono text-[11px] text-stone-600">{shape.ratio}</span>
+        <RatioGlyph ratio={shape.ratio} selected round={shape.aspect === "circle"} />
+        <span className="font-mono text-[11px] text-stone-600">
+          {shape.aspect === "circle" ? "Tròn" : shape.ratio}
+        </span>
       </button>
 
       {open && (
@@ -741,10 +756,19 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
               <button
                 key={option.value}
                 type="button"
-                aria-pressed={draft.aspect === option.value}
-                onClick={() => setDraft({ aspect: option.value, ratio: COVER_RATIOS[option.value][0] })}
+                aria-pressed={
+                  option.value === "square" ? isSymmetric(draft.aspect) : draft.aspect === option.value
+                }
+                onClick={() =>
+                  setDraft({
+                    // Staying within the symmetric family keeps whichever shape is already
+                    // chosen; arriving from elsewhere starts on the square.
+                    aspect: option.value === "square" && isSymmetric(draft.aspect) ? draft.aspect : option.value,
+                    ratio: COVER_RATIOS[option.value][0],
+                  })
+                }
                 className={`flex-1 rounded border px-2 py-1 text-xs ${
-                  draft.aspect === option.value
+                  (option.value === "square" ? isSymmetric(draft.aspect) : draft.aspect === option.value)
                     ? "border-emerald-700 bg-emerald-50 font-medium text-emerald-800"
                     : "border-stone-300 text-stone-600 hover:border-stone-500"
                 }`}
@@ -753,6 +777,27 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
               </button>
             ))}
           </div>
+          {isSymmetric(draft.aspect) ? (
+            <div className="grid grid-cols-2 gap-2">
+              {SYMMETRIC_SHAPES.map((option) => {
+                const selected = draft.aspect === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setDraft({ aspect: option.value, ratio: "1:1" })}
+                    className={`flex flex-col items-center gap-1 rounded-md border p-2 ${
+                      selected ? "border-emerald-700 bg-emerald-50" : "border-stone-300 hover:border-stone-500"
+                    }`}
+                  >
+                    <RatioGlyph ratio="1:1" selected={selected} round={option.value === "circle"} />
+                    <span className="text-[11px] text-stone-700">{option.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
           <div className="grid grid-cols-3 gap-2">
             {COVER_RATIOS[draft.aspect].map((ratio) => {
               const selected = draft.ratio === ratio;
@@ -772,6 +817,7 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
               );
             })}
           </div>
+          )}
 
           <div className="mt-3 flex justify-end gap-2 border-t border-stone-200 pt-3">
             <button
