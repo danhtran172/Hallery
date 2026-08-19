@@ -9,6 +9,21 @@ import { getNotionClient } from "@/lib/notion";
  */
 const CACHE_TTL_MS = 60 * 1000;
 
+/** Notion's maximum, and the fewest round trips per row. */
+const PAGE_SIZE = 100;
+
+/**
+ * Ceiling on how many pages one crawl will walk. At Notion's ~3 req/s a database large
+ * enough to hit this would keep the first visitor waiting well over ten seconds; stopping
+ * leaves `has_more` set, which every counter already reads as "there are more than this".
+ */
+const MAX_PAGES = 50;
+
+/** Notion allows roughly three requests a second, and a cursor walk is the one place we can outrun it. */
+const MIN_REQUEST_GAP_MS = 340;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export type GalleryNotionSnapshot = {
   dataSourceRes: GetDataSourceResponse;
   queryRes: QueryDataSourceResponse;
@@ -48,7 +63,7 @@ export async function getGalleryNotionSnapshot({
   const notion = getNotionClient(accessToken);
   const [dataSourceRes, queryRes] = await Promise.all([
     notion.dataSources.retrieve({ data_source_id: dataSourceId }),
-    notion.dataSources.query({ data_source_id: dataSourceId, page_size: 100 }),
+    queryAllPages(notion, dataSourceId),
   ]);
   const snapshot = { dataSourceRes, queryRes };
 
@@ -68,6 +83,39 @@ export async function getGalleryNotionSnapshot({
   });
 
   return snapshot;
+}
+
+/**
+ * Walks the cursor to the end of the data source, returning one response holding every row.
+ *
+ * Notion answers 100 rows at a time, and until now a Gallery only ever saw the first page —
+ * so anything past the hundredth item was invisible and every count was a lower bound. The
+ * merged result keeps the response shape its callers already expect, with `has_more` left
+ * true only when MAX_PAGES cut the walk short, which is exactly when a count is still
+ * partial.
+ */
+async function queryAllPages(
+  notion: ReturnType<typeof getNotionClient>,
+  dataSourceId: string,
+): Promise<QueryDataSourceResponse> {
+  let response = await notion.dataSources.query({ data_source_id: dataSourceId, page_size: PAGE_SIZE });
+  const results = [...response.results];
+  let pages = 1;
+
+  while (response.has_more && response.next_cursor && pages < MAX_PAGES) {
+    // The walk is serial, so this is the one throttle that matters: without it a fast link
+    // fires cursors back to back and trips Notion's rate limit.
+    await wait(MIN_REQUEST_GAP_MS);
+    response = await notion.dataSources.query({
+      data_source_id: dataSourceId,
+      page_size: PAGE_SIZE,
+      start_cursor: response.next_cursor,
+    });
+    results.push(...response.results);
+    pages += 1;
+  }
+
+  return { ...response, results, has_more: Boolean(response.has_more), next_cursor: null };
 }
 
 /** Clears stale page data after Hallery writes a page back to Notion. */

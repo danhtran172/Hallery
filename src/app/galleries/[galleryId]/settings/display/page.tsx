@@ -9,7 +9,7 @@ import {
   resolveCardsPerRow,
 } from "@/lib/notion-cover";
 import { describePropertyType } from "@/lib/property-kind";
-import { saveGalleryGridSettings } from "./actions";
+import { saveGalleryGridSettings, updatePropertyPlacement } from "./actions";
 
 export default async function DisplaySettingsPage({
   params,
@@ -22,7 +22,8 @@ export default async function DisplaySettingsPage({
   if (!gallery) notFound();
 
   const properties = gallery.propertyConfigs.filter((p) => p.notionPropertyType !== "title");
-  const cardsPerRow = resolveCardsPerRow(parseGalleryConfig(gallery.displayConfig));
+  const galleryConfig = parseGalleryConfig(gallery.displayConfig);
+  const cardsPerRow = resolveCardsPerRow(galleryConfig);
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-12">
@@ -35,18 +36,36 @@ export default async function DisplaySettingsPage({
         Hallery đọc và trình bày lại giá trị.
       </p>
 
-      <GalleryGridSettings galleryId={galleryId} cardsPerRow={cardsPerRow} />
+      <GalleryGridSettings
+        galleryId={galleryId}
+        cardsPerRow={cardsPerRow}
+        randomPick={galleryConfig.randomPick !== false}
+      />
 
       <div className="flex flex-col gap-4">
-        {properties.map((p) => (
-          <PropertyConfigCard key={p.id} galleryId={galleryId} property={p} />
+        {properties.map((p, index) => (
+          <PropertyConfigCard
+            key={p.id}
+            galleryId={galleryId}
+            property={p}
+            isFirst={index === 0}
+            isLast={index === properties.length - 1}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function GalleryGridSettings({ galleryId, cardsPerRow }: { galleryId: string; cardsPerRow: number }) {
+function GalleryGridSettings({
+  galleryId,
+  cardsPerRow,
+  randomPick,
+}: {
+  galleryId: string;
+  cardsPerRow: number;
+  randomPick: boolean;
+}) {
   return (
     <form action={saveGalleryGridSettings.bind(null, galleryId)} className="mb-6 rounded-lg border border-stone-200 p-4">
       <label htmlFor="cardsPerRow" className="block text-sm font-medium text-stone-900">
@@ -73,6 +92,16 @@ function GalleryGridSettings({ galleryId, cardsPerRow }: { galleryId: string; ca
           Lưu
         </button>
       </div>
+
+      <label className="mt-4 flex items-start gap-2 border-t border-stone-100 pt-4 text-sm text-stone-700">
+        <input type="checkbox" name="randomPick" defaultChecked={randomPick} className="mt-0.5" />
+        <span>
+          Hiện nút chọn ngẫu nhiên
+          <span className="mt-0.5 block text-xs text-stone-500">
+            Bốc một item bất kỳ trong số đang hiện, nên nó tôn trọng bộ lọc và ô tìm kiếm.
+          </span>
+        </span>
+      </label>
     </form>
   );
 }
@@ -80,6 +109,8 @@ function GalleryGridSettings({ galleryId, cardsPerRow }: { galleryId: string; ca
 function PropertyConfigCard({
   galleryId,
   property,
+  isFirst,
+  isLast,
 }: {
   galleryId: string;
   property: {
@@ -88,18 +119,71 @@ function PropertyConfigCard({
     notionPropertyType: string;
     resolvedType: string | null;
     displayConfig: string;
+    hidden: boolean;
   };
+  isFirst: boolean;
+  isLast: boolean;
 }) {
+  const place = updatePropertyPlacement.bind(null, galleryId, property.id);
+
   return (
-    <div className="rounded-lg border border-stone-200 p-4">
+    <div className={`rounded-lg border p-4 ${property.hidden ? "border-dashed border-stone-300 bg-stone-50" : "border-stone-200"}`}>
       <div className="mb-3 flex items-baseline justify-between gap-3">
-        <span className="font-medium text-stone-900">{property.notionPropertyName}</span>
-        <span className="font-mono text-xs text-stone-400">
-          {describePropertyType(property.notionPropertyType, property.resolvedType)}
+        <span className={`font-medium ${property.hidden ? "text-stone-400" : "text-stone-900"}`}>
+          {property.notionPropertyName}
         </span>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs text-stone-400">
+            {describePropertyType(property.notionPropertyType, property.resolvedType)}
+          </span>
+          <PlacementButton action={place.bind(null, "up")} label="Lên" disabled={isFirst}>
+            ↑
+          </PlacementButton>
+          <PlacementButton action={place.bind(null, "down")} label="Xuống" disabled={isLast}>
+            ↓
+          </PlacementButton>
+          <PlacementButton
+            action={place.bind(null, property.hidden ? "show" : "hide")}
+            label={property.hidden ? "Hiện lại" : "Ẩn"}
+          >
+            {property.hidden ? "Hiện" : "Ẩn"}
+          </PlacementButton>
+        </div>
       </div>
 
-      <PropertyDisplayConfigForm galleryId={galleryId} property={property} />
+      {property.hidden ? (
+        <p className="text-xs text-stone-500">
+          Đang ẩn khỏi card, Card Detail và bộ lọc. Property trong Notion không hề bị đụng tới.
+        </p>
+      ) : (
+        <PropertyDisplayConfigForm galleryId={galleryId} property={property} />
+      )}
     </div>
+  );
+}
+
+function PlacementButton({
+  action,
+  label,
+  disabled,
+  children,
+}: {
+  action: () => void;
+  label: string;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <form action={action}>
+      <button
+        type="submit"
+        aria-label={label}
+        title={label}
+        disabled={disabled}
+        className="rounded border border-stone-300 px-1.5 py-0.5 text-xs text-stone-600 hover:border-stone-500 disabled:opacity-30"
+      >
+        {children}
+      </button>
+    </form>
   );
 }

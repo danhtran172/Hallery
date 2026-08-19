@@ -70,6 +70,8 @@ export async function saveGalleryGridSettings(galleryId: string, formData: FormD
       ? cardsPerRow
       : DEFAULT_CARDS_PER_ROW;
 
+  config.randomPick = formData.get("randomPick") !== null;
+
   await db.gallery.update({
     where: { id: galleryId },
     data: { displayConfig: JSON.stringify(config) },
@@ -77,4 +79,48 @@ export async function saveGalleryGridSettings(galleryId: string, formData: FormD
 
   revalidatePath(`/galleries/${galleryId}`);
   revalidatePath(`/galleries/${galleryId}/settings/display`);
+}
+
+/**
+ * Hides a property, or moves it up or down the order.
+ *
+ * Hiding is Hallery-only: the property stays in Notion untouched, it simply stops being
+ * offered on cards, in the detail, and in the toolbar's filters. The order is the one the
+ * settings list and the property tray read.
+ */
+export async function updatePropertyPlacement(
+  galleryId: string,
+  propertyConfigId: string,
+  action: "hide" | "show" | "up" | "down",
+) {
+  const configs = await db.propertyConfig.findMany({
+    where: { galleryId },
+    orderBy: { sortOrder: "asc" },
+  });
+  const index = configs.findIndex((config) => config.id === propertyConfigId);
+  if (index === -1) return;
+
+  if (action === "hide" || action === "show") {
+    await db.propertyConfig.update({
+      where: { id: propertyConfigId },
+      data: { hidden: action === "hide" },
+    });
+  } else {
+    const target = action === "up" ? index - 1 : index + 1;
+    if (target < 0 || target >= configs.length) return;
+    // Stored order can arrive with ties or gaps, so rewrite the whole list from its new
+    // positions rather than swapping two values that may not differ.
+    const reordered = [...configs];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    await db.$transaction(
+      reordered.map((config, position) =>
+        db.propertyConfig.update({ where: { id: config.id }, data: { sortOrder: position } }),
+      ),
+    );
+  }
+
+  revalidatePath(`/galleries/${galleryId}`);
+  revalidatePath(`/galleries/${galleryId}/items/[pageId]`, "page");
+  revalidatePath(`/galleries/${galleryId}/settings/display`);
+  revalidatePath(`/galleries/${galleryId}/settings/card`);
 }

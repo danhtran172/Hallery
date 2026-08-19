@@ -42,6 +42,8 @@ export type GalleryConfig = {
    */
   detailCoverAspect?: CoverAspect;
   detailCoverRatio?: string;
+  /** Whether the toolbar offers a random pick. Absent means on. */
+  randomPick?: boolean;
 };
 
 /** Cover shape for a view, falling back to the gallery card's while the detail has none. */

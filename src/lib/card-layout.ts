@@ -252,11 +252,19 @@ export type CardEligibleProperty = {
   notionPropertyName: string;
   notionPropertyType: string;
   isMissing: boolean;
+  /** Hidden in Hallery only; the property is untouched in Notion. */
+  hidden: boolean;
 };
 
-/** Properties a card may show. The title joins them as a draggable pseudo-property. */
+/**
+ * Properties a card may show. The title joins them as a draggable pseudo-property.
+ *
+ * A hidden property drops out here rather than at each render site, so hiding one takes it
+ * off the card, out of the Card Detail, and out of the editor's tray in one move — a
+ * saved arrangement that mentions it simply stops resolving until it is shown again.
+ */
 export function cardEligibleProperties<T extends CardEligibleProperty>(properties: T[]): T[] {
-  return properties.filter((p) => p.notionPropertyType !== "title" && !p.isMissing);
+  return properties.filter((p) => p.notionPropertyType !== "title" && !p.isMissing && !p.hidden);
 }
 
 export function createDefaultCardLayout(properties: CardEligibleProperty[]): CardLayout {

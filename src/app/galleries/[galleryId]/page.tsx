@@ -9,12 +9,15 @@ import {
   resolveCardsPerRow,
   resolveCoverRatio,
 } from "@/lib/notion-cover";
-import { isFullDataSource, isFullPage } from "@notionhq/client";
+import { isFullDataSource, isFullPage, type PageObjectResponse } from "@notionhq/client";
 import { syncPropertyConfigs, syncResolvedTypes } from "@/lib/property-config-sync";
 import { CategoryBar } from "@/components/category-bar";
 import { bucketPages, filterPagesByCategory } from "@/lib/category";
 import { CARD_WIDTH_FACTOR, cardKindOf, parseCardLayout, resolveCardLayout } from "@/lib/card-layout";
 import { CardGrid } from "@/components/card-grid";
+import { GalleryToolbar, type ToolbarProperty } from "@/components/gallery-toolbar";
+import { applyGalleryQuery, groupPages, parseGalleryQuery } from "@/lib/gallery-query";
+import { configTypeOf } from "@/lib/property-kind";
 import { RelationGalleryMenu } from "@/components/relation-gallery-menu";
 import { listRelationGalleries } from "@/lib/relation-galleries";
 
@@ -23,7 +26,8 @@ const CARD_GAP_REM = 1;
 
 export default async function GalleryPage({ params, searchParams }: PageProps<"/galleries/[galleryId]">) {
   const { galleryId } = await params;
-  const { axis: axisParam, value: valueParam } = await searchParams;
+  const search = await searchParams;
+  const { axis: axisParam, value: valueParam } = search;
   const gallery = await db.gallery.findUnique({
     where: { id: galleryId },
     include: {
@@ -63,8 +67,14 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
   const activeValue = typeof valueParam === "string" && valueParam !== "" ? valueParam : null;
 
   const buckets = activeAxis ? bucketPages(allPages, activeAxis) : [];
-  const pages =
+  const categoryPages =
     activeAxis && activeValue ? filterPagesByCategory(allPages, activeAxis, activeValue) : allPages;
+
+  // The toolbar narrows whatever the category axis left, so the two compose rather than
+  // fight: pick a category, then search or filter inside it.
+  const query = parseGalleryQuery(search);
+  const pages = applyGalleryQuery(categoryPages, query);
+  const groups = query.groupBy ? groupPages(pages, query.groupBy) : null;
 
   const galleryConfig = parseGalleryConfig(gallery.displayConfig);
   const cardKindOrientation =
@@ -83,6 +93,125 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
 
   const positions = new Map(
     (await db.coverPosition.findMany({ where: { galleryId } })).map((p) => [p.notionPageId, p]),
+  );
+
+  // Hidden properties stay out of the toolbar: a filter on a field the gallery does not
+  // show would leave the reader with a result they cannot account for.
+  const toolbarProperties: ToolbarProperty[] = gallery.propertyConfigs
+    .filter((config) => !config.hidden && !config.isMissing)
+    .map((config) => {
+      const schema = dataSource?.properties[config.notionPropertyName];
+      const options =
+        schema?.type === "select"
+          ? schema.select.options.map((option) => option.name)
+          : schema?.type === "status"
+            ? schema.status.options.map((option) => option.name)
+            : schema?.type === "multi_select"
+              ? schema.multi_select.options.map((option) => option.name)
+              : undefined;
+      return {
+        notionPropertyId: config.notionPropertyId,
+        name: config.notionPropertyName,
+        configType: configTypeOf(config.notionPropertyType, config.resolvedType),
+        options,
+      };
+    });
+
+  // Cards are a fixed width per kind rather than stretching, so a gallery of mixed
+  // layouts still lines up. "Cards per row" now sets what one normal card is wide.
+  // Extracted so a grouped gallery can draw the same grid once per section.
+  const renderGrid = (list: PageObjectResponse[]) => (
+          <div
+            className="flex flex-wrap gap-4"
+            style={
+              {
+                "--card-base": `calc((100% - ${(cardsPerRow - 1) * CARD_GAP_REM}rem) / ${cardsPerRow})`,
+              } as React.CSSProperties
+            }
+          >
+            {list.map((page) => {
+              const title = getPageTitle(page, titlePropertyName);
+              const icon = getPageIcon(page);
+              const showCover = cardLayout.cover !== "none" && coverRatio;
+              const valueOf = (propertyId: string) =>
+                Object.values(page.properties).find((property) => property.id === propertyId);
+              const region = (id: string) =>
+                cardLayout.regions[id] ? (
+                  <CardGrid grid={cardLayout.regions[id]} title={title} valueOf={valueOf} />
+                ) : null;
+
+              const cover = showCover && (
+                <div
+                  className="relative shrink-0"
+                  style={cardLayout.sideBySide ? { width: `${cardLayout.ratio[0]}%` } : undefined}
+                >
+                  <CardCover
+                    ratio={coverRatio}
+                    galleryId={galleryId}
+                    pageId={page.id}
+                    initialX={positions.get(page.id)?.posX ?? 50}
+                    initialY={positions.get(page.id)?.posY ?? 50}
+                  />
+                  {cardLayout.overlay.length > 0 && (
+                    // Above the card-wide link so overlaid links stay clickable, and on a
+                    // scrim because the image underneath is unknowable.
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/75 via-black/40 to-transparent p-2 [&_dd]:text-white [&_dt]:!text-white/60 [&_p]:!text-white">
+                      <CardGrid
+                        grid={{
+                          cols: 1,
+                          rows: 1,
+                          boxes: [
+                            { id: "overlay", colSpan: 1, rowSpan: 1, merged: false, fields: cardLayout.overlay },
+                          ],
+                        }}
+                        title={title}
+                        valueOf={valueOf}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+
+              return (
+                <div
+                  key={page.id}
+                  className="group relative flex shrink-0 flex-col overflow-hidden rounded-lg border border-stone-200 hover:border-emerald-600 hover:shadow-sm"
+                  style={{ width: `calc(var(--card-base) * ${CARD_WIDTH_FACTOR[cardKind]})` }}
+                >
+                  <Link
+                    href={`/galleries/${galleryId}/items/${page.id}`}
+                    aria-label={title}
+                    className="absolute inset-0 z-10"
+                  />
+
+                  {cardLayout.sideBySide ? (
+                    <>
+                      <div className="flex">
+                        {cardLayout.cover === "left" && cover}
+                        <div className="pointer-events-none relative min-w-0 flex-1 p-4">{region("main")}</div>
+                        {cardLayout.cover === "right" && cover}
+                      </div>
+                      {cardLayout.regions.below && (
+                        <div className="pointer-events-none relative px-4 pb-4">{region("below")}</div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {cover}
+                      {Object.keys(cardLayout.regions).length > 0 && (
+                        <div className="pointer-events-none relative flex flex-col gap-2 p-4">
+                          {icon && <span className="text-lg leading-none">{icon}</span>}
+                          {Object.keys(cardLayout.regions).map((id) => (
+                            <div key={id}>{region(id)}</div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
   );
 
   return (
@@ -132,6 +261,15 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
         />
       )}
 
+      <GalleryToolbar
+        properties={toolbarProperties}
+        query={query}
+        matchCount={pages.length}
+        totalCount={categoryPages.length}
+        pickTargets={pages.map((page) => page.id)}
+        randomPickEnabled={galleryConfig.randomPick !== false}
+      />
+
       {pages.length === 0 ? (
         <p className="rounded-md border border-dashed border-stone-300 px-4 py-10 text-center text-sm text-stone-500">
           {activeValue
@@ -139,99 +277,21 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
             : "Database này chưa có item nào."}
         </p>
       ) : (
-        // Cards are a fixed width per kind rather than stretching, so a gallery of mixed
-        // layouts still lines up. "Cards per row" now sets what one normal card is wide.
-        <div
-          className="flex flex-wrap gap-4"
-          style={
-            {
-              "--card-base": `calc((100% - ${(cardsPerRow - 1) * CARD_GAP_REM}rem) / ${cardsPerRow})`,
-            } as React.CSSProperties
-          }
-        >
-          {pages.map((page) => {
-            const title = getPageTitle(page, titlePropertyName);
-            const icon = getPageIcon(page);
-            const showCover = cardLayout.cover !== "none" && coverRatio;
-            const valueOf = (propertyId: string) =>
-              Object.values(page.properties).find((property) => property.id === propertyId);
-            const region = (id: string) =>
-              cardLayout.regions[id] ? (
-                <CardGrid grid={cardLayout.regions[id]} title={title} valueOf={valueOf} />
-              ) : null;
-
-            const cover = showCover && (
-              <div
-                className="relative shrink-0"
-                style={cardLayout.sideBySide ? { width: `${cardLayout.ratio[0]}%` } : undefined}
-              >
-                <CardCover
-                  ratio={coverRatio}
-                  galleryId={galleryId}
-                  pageId={page.id}
-                  initialX={positions.get(page.id)?.posX ?? 50}
-                  initialY={positions.get(page.id)?.posY ?? 50}
-                />
-                {cardLayout.overlay.length > 0 && (
-                  // Above the card-wide link so overlaid links stay clickable, and on a
-                  // scrim because the image underneath is unknowable.
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/75 via-black/40 to-transparent p-2 [&_dd]:text-white [&_dt]:!text-white/60 [&_p]:!text-white">
-                    <CardGrid
-                      grid={{
-                        cols: 1,
-                        rows: 1,
-                        boxes: [
-                          { id: "overlay", colSpan: 1, rowSpan: 1, merged: false, fields: cardLayout.overlay },
-                        ],
-                      }}
-                      title={title}
-                      valueOf={valueOf}
-                    />
-                  </div>
-                )}
-              </div>
-            );
-
-            return (
-              <div
-                key={page.id}
-                className="group relative flex shrink-0 flex-col overflow-hidden rounded-lg border border-stone-200 hover:border-emerald-600 hover:shadow-sm"
-                style={{ width: `calc(var(--card-base) * ${CARD_WIDTH_FACTOR[cardKind]})` }}
-              >
-                <Link
-                  href={`/galleries/${galleryId}/items/${page.id}`}
-                  aria-label={title}
-                  className="absolute inset-0 z-10"
-                />
-
-                {cardLayout.sideBySide ? (
-                  <>
-                    <div className="flex">
-                      {cardLayout.cover === "left" && cover}
-                      <div className="pointer-events-none relative min-w-0 flex-1 p-4">{region("main")}</div>
-                      {cardLayout.cover === "right" && cover}
-                    </div>
-                    {cardLayout.regions.below && (
-                      <div className="pointer-events-none relative px-4 pb-4">{region("below")}</div>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    {cover}
-                    {Object.keys(cardLayout.regions).length > 0 && (
-                      <div className="pointer-events-none relative flex flex-col gap-2 p-4">
-                        {icon && <span className="text-lg leading-none">{icon}</span>}
-                        {Object.keys(cardLayout.regions).map((id) => (
-                          <div key={id}>{region(id)}</div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
+        groups ? (
+          <div className="flex flex-col gap-8">
+            {groups.map((group) => (
+              <section key={group.key}>
+                <h2 className="mb-3 flex items-baseline gap-2 text-sm font-semibold text-stone-700">
+                  {group.label}
+                  <span className="text-xs font-normal text-stone-400">{group.pages.length}</span>
+                </h2>
+                {renderGrid(group.pages)}
+              </section>
+            ))}
+          </div>
+        ) : (
+          renderGrid(pages)
+        )
       )}
     </div>
   );

@@ -1,0 +1,391 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  OPERATOR_LABELS,
+  operatorsFor,
+  serializeFilters,
+  serializeSorts,
+  type Filter,
+  type FilterOperator,
+  type GalleryQuery,
+  type SortKey,
+} from "@/lib/gallery-query";
+
+export type ToolbarProperty = {
+  notionPropertyId: string;
+  name: string;
+  /** The type whose operators apply — a formula's resolved type, not "formula". */
+  configType: string;
+  /** Choices for select-like properties, so a filter value is picked rather than typed. */
+  options?: string[];
+};
+
+/** Operators that take no value, so the input is hidden for them. */
+const VALUELESS = new Set<FilterOperator>(["empty", "not_empty", "is_checked", "is_unchecked"]);
+
+/**
+ * Search, filter, sort, group and random pick for a gallery.
+ *
+ * Every control writes to the URL rather than to local state, so a view can be shared, the
+ * back button steps through it, and the server does the filtering against the full snapshot
+ * instead of the browser guessing from what it can see.
+ */
+export function GalleryToolbar({
+  properties,
+  query,
+  matchCount,
+  totalCount,
+  pickTargets,
+  randomPickEnabled,
+}: {
+  properties: ToolbarProperty[];
+  query: GalleryQuery;
+  matchCount: number;
+  totalCount: number;
+  pickTargets: string[];
+  randomPickEnabled: boolean;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const [open, setOpen] = useState<"filter" | "sort" | null>(null);
+  const [draft, setDraft] = useState(query.search);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  // Adjust the box when the URL changes underneath it — "Xoá hết", or the back button.
+  // Done during render rather than in an effect so no keystroke renders a stale value.
+  const [lastSearch, setLastSearch] = useState(query.search);
+  if (lastSearch !== query.search) {
+    setLastSearch(query.search);
+    setDraft(query.search);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(event: MouseEvent) {
+      if (!wrapRef.current?.contains(event.target as Node)) setOpen(null);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  /** Rewrites one parameter, keeping the rest — including the category axis — intact. */
+  function commit(changes: Record<string, string | null>) {
+    const next = new URLSearchParams(params.toString());
+    for (const [key, value] of Object.entries(changes)) {
+      if (value === null || value === "") next.delete(key);
+      else next.set(key, value);
+    }
+    const search = next.toString();
+    router.push(search ? `${pathname}?${search}` : pathname);
+  }
+
+  // Debounced so the grid does not re-render on every keystroke.
+  useEffect(() => {
+    if (draft === query.search) return;
+    const timer = setTimeout(() => commit({ q: draft || null }), 250);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft]);
+
+  const nameOf = (propertyId: string) =>
+    properties.find((property) => property.notionPropertyId === propertyId)?.name ?? "?";
+
+  const setFilters = (filters: Filter[]) => commit({ filter: serializeFilters(filters) || null });
+  const setSorts = (sorts: SortKey[]) => commit({ sort: serializeSorts(sorts) || null });
+
+  function pickRandom() {
+    if (pickTargets.length === 0) return;
+    const target = pickTargets[Math.floor(Math.random() * pickTargets.length)];
+    router.push(`${pathname}/items/${target}`);
+  }
+
+  const filtered = matchCount !== totalCount;
+
+  return (
+    <div ref={wrapRef} className="mb-5 flex flex-wrap items-center gap-2">
+      <input
+        type="search"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        placeholder="Tìm trong gallery"
+        className="w-56 rounded-md border border-stone-300 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-600"
+      />
+
+      <div className="relative">
+        <ToolbarButton active={query.filters.length > 0} onClick={() => setOpen(open === "filter" ? null : "filter")}>
+          Lọc{query.filters.length > 0 ? ` (${query.filters.length})` : ""}
+        </ToolbarButton>
+        {open === "filter" && (
+          <Popover>
+            <FilterEditor
+              properties={properties}
+              filters={query.filters}
+              nameOf={nameOf}
+              onChange={setFilters}
+            />
+          </Popover>
+        )}
+      </div>
+
+      <div className="relative">
+        <ToolbarButton active={query.sorts.length > 0} onClick={() => setOpen(open === "sort" ? null : "sort")}>
+          Sắp xếp{query.sorts.length > 0 ? ` (${query.sorts.length})` : ""}
+        </ToolbarButton>
+        {open === "sort" && (
+          <Popover>
+            <SortEditor properties={properties} sorts={query.sorts} nameOf={nameOf} onChange={setSorts} />
+          </Popover>
+        )}
+      </div>
+
+      <label className="flex items-center gap-1.5 text-xs text-stone-500">
+        Nhóm
+        <select
+          value={query.groupBy ?? ""}
+          onChange={(event) => commit({ group: event.target.value || null })}
+          className="rounded-md border border-stone-300 px-1.5 py-1 text-xs outline-none focus:border-emerald-600"
+        >
+          <option value="">Không</option>
+          {properties.map((property) => (
+            <option key={property.notionPropertyId} value={property.notionPropertyId}>
+              {property.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {randomPickEnabled && (
+        <ToolbarButton onClick={pickRandom} disabled={pickTargets.length === 0}>
+          🎲 Ngẫu nhiên
+        </ToolbarButton>
+      )}
+
+      <span className="ml-auto text-xs text-stone-500">
+        {filtered ? `${matchCount} / ${totalCount} item` : `${totalCount} item`}
+      </span>
+
+      {(filtered || query.groupBy) && (
+        <button
+          type="button"
+          onClick={() => commit({ q: null, filter: null, sort: null, group: null })}
+          className="text-xs text-stone-500 underline hover:text-stone-800"
+        >
+          Xoá hết
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ToolbarButton({
+  children,
+  active,
+  disabled,
+  onClick,
+}: {
+  children: React.ReactNode;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`rounded-md border px-2.5 py-1.5 text-xs font-medium disabled:opacity-40 ${
+        active
+          ? "border-emerald-600 bg-emerald-50 text-emerald-800"
+          : "border-stone-300 text-stone-700 hover:border-stone-500"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Popover({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="absolute left-0 z-30 mt-1 w-[26rem] rounded-lg border border-stone-200 bg-white p-3 shadow-lg">
+      {children}
+    </div>
+  );
+}
+
+function FilterEditor({
+  properties,
+  filters,
+  nameOf,
+  onChange,
+}: {
+  properties: ToolbarProperty[];
+  filters: Filter[];
+  nameOf: (propertyId: string) => string;
+  onChange: (filters: Filter[]) => void;
+}) {
+  const first = properties[0];
+
+  return (
+    <div className="flex flex-col gap-2">
+      {filters.length === 0 && <p className="text-xs text-stone-400">Chưa có điều kiện nào.</p>}
+
+      {filters.map((filter, index) => {
+        const property = properties.find((p) => p.notionPropertyId === filter.propertyId);
+        const operators = operatorsFor(property?.configType ?? "rich_text");
+        const replace = (next: Partial<Filter>) =>
+          onChange(filters.map((entry, i) => (i === index ? { ...entry, ...next } : entry)));
+
+        return (
+          <div key={index} className="flex items-center gap-1.5">
+            <select
+              value={filter.propertyId}
+              onChange={(event) => {
+                const nextProperty = properties.find((p) => p.notionPropertyId === event.target.value);
+                replace({
+                  propertyId: event.target.value,
+                  operator: operatorsFor(nextProperty?.configType ?? "rich_text")[0],
+                  value: "",
+                });
+              }}
+              className="min-w-0 flex-1 rounded border border-stone-300 px-1 py-1 text-xs"
+            >
+              {properties.map((p) => (
+                <option key={p.notionPropertyId} value={p.notionPropertyId}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={filter.operator}
+              onChange={(event) => replace({ operator: event.target.value as FilterOperator })}
+              className="shrink-0 rounded border border-stone-300 px-1 py-1 text-xs"
+            >
+              {operators.map((operator) => (
+                <option key={operator} value={operator}>
+                  {OPERATOR_LABELS[operator]}
+                </option>
+              ))}
+            </select>
+
+            {!VALUELESS.has(filter.operator) &&
+              (property?.options?.length ? (
+                <select
+                  value={filter.value ?? ""}
+                  onChange={(event) => replace({ value: event.target.value })}
+                  className="w-28 shrink-0 rounded border border-stone-300 px-1 py-1 text-xs"
+                >
+                  <option value="">—</option>
+                  {property.options.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type={property?.configType === "date" ? "date" : "text"}
+                  value={filter.value ?? ""}
+                  onChange={(event) => replace({ value: event.target.value })}
+                  className="w-28 shrink-0 rounded border border-stone-300 px-1 py-1 text-xs"
+                />
+              ))}
+
+            <button
+              type="button"
+              aria-label={`Bỏ điều kiện ${nameOf(filter.propertyId)}`}
+              onClick={() => onChange(filters.filter((_, i) => i !== index))}
+              className="shrink-0 px-1 text-stone-400 hover:text-red-600"
+            >
+              ✕
+            </button>
+          </div>
+        );
+      })}
+
+      {first && (
+        <button
+          type="button"
+          onClick={() =>
+            onChange([
+              ...filters,
+              { propertyId: first.notionPropertyId, operator: operatorsFor(first.configType)[0], value: "" },
+            ])
+          }
+          className="self-start text-xs text-emerald-700 hover:underline"
+        >
+          + Thêm điều kiện
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SortEditor({
+  properties,
+  sorts,
+  nameOf,
+  onChange,
+}: {
+  properties: ToolbarProperty[];
+  sorts: SortKey[];
+  nameOf: (propertyId: string) => string;
+  onChange: (sorts: SortKey[]) => void;
+}) {
+  const unused = properties.filter((p) => !sorts.some((s) => s.propertyId === p.notionPropertyId));
+
+  return (
+    <div className="flex flex-col gap-2">
+      {sorts.length === 0 && <p className="text-xs text-stone-400">Chưa sắp xếp theo gì.</p>}
+
+      {sorts.map((sort, index) => (
+        <div key={sort.propertyId} className="flex items-center gap-1.5">
+          <span className="w-4 shrink-0 text-center text-[10px] text-stone-400">{index + 1}</span>
+          <span className="min-w-0 flex-1 truncate text-xs text-stone-700">{nameOf(sort.propertyId)}</span>
+          <select
+            value={sort.direction}
+            onChange={(event) =>
+              onChange(
+                sorts.map((entry, i) =>
+                  i === index ? { ...entry, direction: event.target.value as "asc" | "desc" } : entry,
+                ),
+              )
+            }
+            className="shrink-0 rounded border border-stone-300 px-1 py-1 text-xs"
+          >
+            <option value="asc">Tăng dần</option>
+            <option value="desc">Giảm dần</option>
+          </select>
+          <button
+            type="button"
+            aria-label={`Bỏ sắp xếp theo ${nameOf(sort.propertyId)}`}
+            onClick={() => onChange(sorts.filter((_, i) => i !== index))}
+            className="shrink-0 px-1 text-stone-400 hover:text-red-600"
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+
+      {unused.length > 0 && (
+        <select
+          value=""
+          onChange={(event) =>
+            event.target.value && onChange([...sorts, { propertyId: event.target.value, direction: "asc" }])
+          }
+          className="self-start rounded border border-stone-300 px-1.5 py-1 text-xs"
+        >
+          <option value="">+ Thêm mức sắp xếp</option>
+          {unused.map((property) => (
+            <option key={property.notionPropertyId} value={property.notionPropertyId}>
+              {property.name}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+  );
+}
