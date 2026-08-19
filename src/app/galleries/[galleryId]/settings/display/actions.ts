@@ -57,7 +57,7 @@ export async function saveDisplayConfig(
   revalidatePath(`/galleries/${galleryId}`);
   revalidatePath(`/galleries/${galleryId}/items/[pageId]`, "page");
   revalidatePath(`/galleries/${galleryId}/settings/display`);
-  revalidatePath(`/galleries/${galleryId}/settings/layout`);
+  revalidatePath(`/galleries/${galleryId}/settings/card`);
 }
 
 export async function saveGalleryGridSettings(galleryId: string, formData: FormData) {
@@ -82,43 +82,49 @@ export async function saveGalleryGridSettings(galleryId: string, formData: FormD
 }
 
 /**
- * Hides a property, or moves it up or down the order.
+ * Stops Hallery managing a property, or takes it back.
  *
- * Hiding is Hallery-only: the property stays in Notion untouched, it simply stops being
- * offered on cards, in the detail, and in the toolbar's filters. The order is the one the
- * settings list and the property tray read.
+ * Notion keeps the property either way — this only decides whether Hallery treats it as
+ * existing at all. Switched off, it leaves cards, the Card Detail, sort, filter and search
+ * in one move, and any saved card arrangement mentioning it simply stops resolving until
+ * it is switched back on.
  */
+export async function setPropertyDisabled(galleryId: string, propertyConfigId: string, disabled: boolean) {
+  await db.propertyConfig.update({ where: { id: propertyConfigId }, data: { disabled } });
+  revalidateProperty(galleryId);
+}
+
+/** Moves a property up or down the order the settings list and the property tray read. */
 export async function updatePropertyPlacement(
   galleryId: string,
   propertyConfigId: string,
-  action: "hide" | "show" | "up" | "down",
+  action: "up" | "down",
 ) {
-  const configs = await db.propertyConfig.findMany({
-    where: { galleryId },
-    orderBy: { sortOrder: "asc" },
-  });
+  // Only managed properties take part: a disabled one has no place in the order, and
+  // stepping over it would make one press look like it did nothing.
+  const configs = (
+    await db.propertyConfig.findMany({ where: { galleryId }, orderBy: { sortOrder: "asc" } })
+  ).filter((config) => !config.disabled);
+
   const index = configs.findIndex((config) => config.id === propertyConfigId);
   if (index === -1) return;
+  const target = action === "up" ? index - 1 : index + 1;
+  if (target < 0 || target >= configs.length) return;
 
-  if (action === "hide" || action === "show") {
-    await db.propertyConfig.update({
-      where: { id: propertyConfigId },
-      data: { hidden: action === "hide" },
-    });
-  } else {
-    const target = action === "up" ? index - 1 : index + 1;
-    if (target < 0 || target >= configs.length) return;
-    // Stored order can arrive with ties or gaps, so rewrite the whole list from its new
-    // positions rather than swapping two values that may not differ.
-    const reordered = [...configs];
-    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
-    await db.$transaction(
-      reordered.map((config, position) =>
-        db.propertyConfig.update({ where: { id: config.id }, data: { sortOrder: position } }),
-      ),
-    );
-  }
+  // Stored order can arrive with ties or gaps, so rewrite the whole list from its new
+  // positions rather than swapping two values that may not differ.
+  const reordered = [...configs];
+  [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+  await db.$transaction(
+    reordered.map((config, position) =>
+      db.propertyConfig.update({ where: { id: config.id }, data: { sortOrder: position } }),
+    ),
+  );
 
+  revalidateProperty(galleryId);
+}
+
+function revalidateProperty(galleryId: string) {
   revalidatePath(`/galleries/${galleryId}`);
   revalidatePath(`/galleries/${galleryId}/items/[pageId]`, "page");
   revalidatePath(`/galleries/${galleryId}/settings/display`);

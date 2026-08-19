@@ -87,7 +87,7 @@ export default async function ItemDetailPage({
       notionPropertyName: p.notionPropertyName,
       notionPropertyType: p.notionPropertyType,
       isMissing: p.isMissing,
-      hidden: p.hidden,
+      disabled: p.disabled,
     })),
     coverShape.aspect,
   );

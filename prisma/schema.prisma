@@ -139,7 +139,10 @@ model PropertyConfig {
   /// the editor's sync button fills this in by copying it across.
   detailDisplayConfig String  @default("")
   sortOrder          Int      @default(0)
-  hidden             Boolean  @default(false)
+  /// Hallery has stopped managing this property: Notion still owns it, and Hallery treats
+  /// it as absent — off cards and the detail, out of sort, filter and search. Reversible,
+  /// and it never touches the property in Notion.
+  disabled           Boolean  @default(false)
   isMissing          Boolean  @default(false)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt

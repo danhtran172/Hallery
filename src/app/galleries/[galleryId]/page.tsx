@@ -70,10 +70,15 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
   const categoryPages =
     activeAxis && activeValue ? filterPagesByCategory(allPages, activeAxis, activeValue) : allPages;
 
+  // A property Hallery no longer manages is absent as far as the toolbar is concerned —
+  // not shown, not filtered on, and not searched.
+  const managed = gallery.propertyConfigs.filter((config) => !config.disabled && !config.isMissing);
+  const searchable = new Set(managed.map((config) => config.notionPropertyId));
+
   // The toolbar narrows whatever the category axis left, so the two compose rather than
   // fight: pick a category, then search or filter inside it.
   const query = parseGalleryQuery(search);
-  const pages = applyGalleryQuery(categoryPages, query);
+  const pages = applyGalleryQuery(categoryPages, query, searchable);
   const groups = query.groupBy ? groupPages(pages, query.groupBy) : null;
 
   const galleryConfig = parseGalleryConfig(gallery.displayConfig);
@@ -95,11 +100,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
     (await db.coverPosition.findMany({ where: { galleryId } })).map((p) => [p.notionPageId, p]),
   );
 
-  // Hidden properties stay out of the toolbar: a filter on a field the gallery does not
-  // show would leave the reader with a result they cannot account for.
-  const toolbarProperties: ToolbarProperty[] = gallery.propertyConfigs
-    .filter((config) => !config.hidden && !config.isMissing)
-    .map((config) => {
+  const toolbarProperties: ToolbarProperty[] = managed.map((config) => {
       const schema = dataSource?.properties[config.notionPropertyName];
       const options =
         schema?.type === "select"

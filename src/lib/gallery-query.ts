@@ -175,13 +175,23 @@ export function matchesFilter(page: PageObjectResponse, filter: Filter): boolean
 /* ── Search ──────────────────────────────────────────────────────────────── */
 
 /**
- * Substring match across every property's text form, so a search finds an item by its
- * genre or its studio and not only by its title.
+ * Substring match across a property's text form, so a search finds an item by its genre or
+ * its studio and not only by its title.
+ *
+ * `searchable` limits which properties count. A disabled property is meant to read as
+ * absent, and a hit on one would surface an item for a reason the reader cannot see
+ * anywhere on screen.
  */
-export function matchesSearch(page: PageObjectResponse, query: string): boolean {
+export function matchesSearch(
+  page: PageObjectResponse,
+  query: string,
+  searchable?: ReadonlySet<string>,
+): boolean {
   const needle = fold(query);
   if (needle === "") return true;
-  return Object.values(page.properties).some((value) => fold(plainTextValue(value)).includes(needle));
+  return Object.values(page.properties).some(
+    (value) => (!searchable || searchable.has(value.id)) && fold(plainTextValue(value)).includes(needle),
+  );
 }
 
 /* ── Sort ────────────────────────────────────────────────────────────────── */
@@ -348,9 +358,13 @@ export function serializeSorts(sorts: SortKey[]): string {
 }
 
 /** Everything the toolbar does, in one pass, in the order a reader expects. */
-export function applyGalleryQuery(pages: PageObjectResponse[], query: GalleryQuery): PageObjectResponse[] {
+export function applyGalleryQuery(
+  pages: PageObjectResponse[],
+  query: GalleryQuery,
+  searchable?: ReadonlySet<string>,
+): PageObjectResponse[] {
   let result = pages;
-  if (query.search.trim() !== "") result = result.filter((page) => matchesSearch(page, query.search));
+  if (query.search.trim() !== "") result = result.filter((page) => matchesSearch(page, query.search, searchable));
   for (const filter of query.filters) result = result.filter((page) => matchesFilter(page, filter));
   return sortPages(result, query.sorts);
 }
