@@ -170,7 +170,17 @@ export function GallerySidebar({
         className="w-full rounded-md border border-stone-300 px-2 py-1 text-xs outline-none focus:border-emerald-600"
       />
 
-      <DndContext sensors={sensors} onDragOver={handleDragOver} onDragEnd={handleDragEnd} onDragCancel={clearHold}>
+      {/* The id must be given, not generated: dnd-kit numbers contexts from a counter that
+          starts fresh on the server and is already advanced on the client, so the
+          aria-describedby it writes would differ and break hydration for the whole tree —
+          this context lives in the root layout, so that means every page. */}
+      <DndContext
+        id="gallery-sidebar"
+        sensors={sensors}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+        onDragCancel={clearHold}
+      >
         <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
           {tree.length === 0 && (
             <p className="px-1 py-2 text-[11px] text-stone-400">
