@@ -140,7 +140,9 @@ function DetailLayoutRenderer({
   const cover =
     layout.cover === "none" ? null : (
       <div
-        className={`shrink-0 overflow-hidden bg-stone-200 bg-cover bg-center ${
+        // self-start matters: a flex child stretches to the row by default, and that
+        // definite height overrides aspect-ratio, squashing the crop out of shape.
+        className={`shrink-0 self-start overflow-hidden bg-stone-200 bg-cover bg-center ${
           coverRound ? "rounded-full" : "rounded-lg"
         }`}
         style={{

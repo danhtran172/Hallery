@@ -232,7 +232,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
 
               const cover = showCover && (
                 <div
-                  className="relative shrink-0"
+                  className="relative shrink-0 self-start"
                   style={cardLayout.sideBySide ? { width: `${cardLayout.ratio[0]}%` } : undefined}
                 >
                   <CardCover

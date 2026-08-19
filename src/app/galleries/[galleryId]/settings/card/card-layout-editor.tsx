@@ -1090,7 +1090,9 @@ function CardCanvas(props: CanvasProps) {
 
   const cover = spec.cover === "none" ? null : (
     <div
-      className={`relative shrink-0 overflow-hidden bg-stone-200 bg-cover bg-center ${
+      // See the Card Detail: without self-start the row stretches this and the
+      // aspect-ratio stops holding.
+      className={`relative shrink-0 self-start overflow-hidden bg-stone-200 bg-cover bg-center ${
         shapeIsRound ? "rounded-full" : "rounded"
       }`}
       style={{
