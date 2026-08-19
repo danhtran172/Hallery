@@ -41,7 +41,9 @@ export default async function CardLayoutSettingsPage({
   const stored = parseCardLayout(config.card) ?? createDefaultCardLayout(gallery.propertyConfigs);
 
   const aspect: CoverOrientation =
-    config.coverAspect === "portrait" || config.coverAspect === "square" ? config.coverAspect : "landscape";
+    config.coverAspect === "portrait" || config.coverAspect === "square" || config.coverAspect === "circle"
+      ? config.coverAspect
+      : "landscape";
 
   // A stored arrangement this cover shape no longer offers would leave the picker showing
   // nothing selected, so pull it back to one that exists.

@@ -22,6 +22,7 @@ import {
   CARD_WIDTH_FACTOR,
   TITLE_FIELD_ID,
   cardKindOf,
+  isRoundCover,
   parseCardLayout,
   resolveCardLayout,
 } from "@/lib/card-layout";
@@ -107,7 +108,9 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
 
   const galleryConfig = parseGalleryConfig(gallery.displayConfig);
   const cardKindOrientation =
-    galleryConfig.coverAspect === "portrait" || galleryConfig.coverAspect === "square"
+    galleryConfig.coverAspect === "portrait" ||
+    galleryConfig.coverAspect === "square" ||
+    galleryConfig.coverAspect === "circle"
       ? galleryConfig.coverAspect
       : "landscape";
   const cardLayout = resolveCardLayout(
@@ -173,6 +176,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
     formLayout && ARRANGEMENTS[formLayout.arrangement].cover !== "none"
       ? {
           ratio: formCoverShape.ratio.replace(":", " / "),
+          round: isRoundCover(formCoverShape.aspect),
           targetLabel: formCoverTarget.startsWith(PROPERTY_PREFIX)
             ? `prop "${formCoverTarget.slice(PROPERTY_PREFIX.length)}"`
             : formCoverTarget === CONTENT_IMAGE
@@ -233,6 +237,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
                 >
                   <CardCover
                     ratio={coverRatio}
+                    round={isRoundCover(galleryConfig.coverAspect)}
                     galleryId={galleryId}
                     pageId={page.id}
                     initialX={positions.get(page.id)?.posX ?? 50}

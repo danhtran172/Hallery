@@ -29,6 +29,7 @@ export function ItemDetail({
   layout,
   coverUrl,
   coverRatio,
+  coverRound,
   notionUrl,
 }: {
   galleryId: string;
@@ -37,6 +38,7 @@ export function ItemDetail({
   layout: DetailLayout;
   coverUrl: string | null;
   coverRatio: string;
+  coverRound: boolean;
   notionUrl: string;
 }) {
   const [editing, setEditing] = useState(false);
@@ -73,6 +75,7 @@ export function ItemDetail({
             layout={layout}
             coverUrl={coverUrl}
             coverRatio={coverRatio}
+            coverRound={coverRound}
             editing
           />
           {state.error && <p className="text-sm text-red-600">{state.error}</p>}
@@ -92,6 +95,7 @@ export function ItemDetail({
           layout={layout}
           coverUrl={coverUrl}
           coverRatio={coverRatio}
+          coverRound={coverRound}
           editing={false}
         />
       )}
@@ -110,12 +114,14 @@ function DetailLayoutRenderer({
   layout,
   coverUrl,
   coverRatio,
+  coverRound,
   editing,
 }: {
   fields: FieldData[];
   layout: DetailLayout;
   coverUrl: string | null;
   coverRatio: string;
+  coverRound: boolean;
   editing: boolean;
 }) {
   const fieldsById = new Map(fields.map((field) => [field.propertyId, field]));
@@ -134,7 +140,9 @@ function DetailLayoutRenderer({
   const cover =
     layout.cover === "none" ? null : (
       <div
-        className="shrink-0 overflow-hidden rounded-lg bg-stone-200 bg-cover bg-center"
+        className={`shrink-0 overflow-hidden bg-stone-200 bg-cover bg-center ${
+          coverRound ? "rounded-full" : "rounded-lg"
+        }`}
         style={{
           aspectRatio: coverRatio,
           width: layout.sideBySide ? `${layout.ratio[0]}%` : "100%",

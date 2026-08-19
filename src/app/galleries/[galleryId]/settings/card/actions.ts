@@ -99,7 +99,7 @@ export async function saveCardLayout(
   }
 
   const aspect = String(formData.get("coverAspect") ?? "");
-  if (aspect === "landscape" || aspect === "portrait" || aspect === "square") {
+  if (aspect === "landscape" || aspect === "portrait" || aspect === "square" || aspect === "circle") {
     const ratios = COVER_RATIOS[aspect];
     const ratio = String(formData.get("coverRatio") ?? "");
     config.coverAspect = aspect as CoverAspect;
@@ -117,7 +117,7 @@ export async function saveCardLayout(
   }
 
   const formAspect = String(formData.get("formCoverAspect") ?? "");
-  if (formAspect === "landscape" || formAspect === "portrait" || formAspect === "square") {
+  if (formAspect === "landscape" || formAspect === "portrait" || formAspect === "square" || formAspect === "circle") {
     const ratios = COVER_RATIOS[formAspect];
     const formRatio = String(formData.get("formCoverRatio") ?? "");
     config.formCoverAspect = formAspect as CoverAspect;
@@ -125,7 +125,7 @@ export async function saveCardLayout(
   }
 
   const detailAspect = String(formData.get("detailCoverAspect") ?? "");
-  if (detailAspect === "landscape" || detailAspect === "portrait" || detailAspect === "square") {
+  if (detailAspect === "landscape" || detailAspect === "portrait" || detailAspect === "square" || detailAspect === "circle") {
     const ratios = COVER_RATIOS[detailAspect];
     const detailRatio = String(formData.get("detailCoverRatio") ?? "");
     config.detailCoverAspect = detailAspect as CoverAspect;

@@ -7,6 +7,7 @@ import { EDITABLE_PROPERTY_TYPES, READONLY_PROPERTY_TYPES } from "@/lib/notion-w
 import { parseDisplayConfig } from "@/lib/display-config";
 import {
   createDefaultCardLayout,
+  isRoundCover,
   parseCardLayout,
   resolveCardLayout,
 } from "@/lib/card-layout";
@@ -131,6 +132,7 @@ export default async function ItemDetailPage({
         layout={layout}
         coverUrl={coverUrl}
         coverRatio={coverShape.ratio.replace(":", " / ")}
+        coverRound={isRoundCover(coverShape.aspect)}
         notionUrl={pageRes.url}
       />
     </div>

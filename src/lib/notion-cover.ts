@@ -12,7 +12,7 @@ export const MIN_CARDS_PER_ROW = 1;
 export const MAX_CARDS_PER_ROW = 6;
 export const DEFAULT_CARDS_PER_ROW = 4;
 
-export type CoverAspect = "landscape" | "portrait" | "square" | "none";
+export type CoverAspect = "landscape" | "portrait" | "square" | "circle" | "none";
 
 /** Gallery-level display settings, stored as JSON in Gallery.displayConfig. */
 export type GalleryConfig = {
@@ -115,6 +115,8 @@ export const COVER_RATIOS: Record<Exclude<CoverAspect, "none">, string[]> = {
   landscape: ["16:9", "3:2", "4:3", "2:1", "21:9"],
   portrait: ["2:3", "3:4", "4:5", "9:16", "1:2"],
   square: ["1:1"],
+  // Round or not, the frame it crops to is still a square one.
+  circle: ["1:1"],
 };
 
 /**

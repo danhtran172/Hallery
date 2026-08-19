@@ -18,11 +18,14 @@ export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 export function ImageDropZone({
   name,
   ratio,
+  round,
   active,
 }: {
   name: string;
   /** CSS aspect-ratio, so the frame crops the way the card will. */
   ratio: string;
+  /** Crop the frame to a circle, matching a circular cover. */
+  round?: boolean;
   /** Only listen for pastes while the form is actually open. */
   active: boolean;
 }) {
@@ -110,9 +113,9 @@ export function ImageDropZone({
           }
         }}
         aria-label="Thêm ảnh: kéo thả, dán, hoặc bấm để chọn file"
-        className={`relative flex cursor-pointer items-center justify-center overflow-hidden rounded border border-dashed bg-cover bg-center text-center ${
-          over ? "border-emerald-600 bg-emerald-50" : "border-stone-300 hover:border-stone-500"
-        }`}
+        className={`relative flex cursor-pointer items-center justify-center overflow-hidden border border-dashed bg-cover bg-center text-center ${
+          round ? "rounded-full" : "rounded"
+        } ${over ? "border-emerald-600 bg-emerald-50" : "border-stone-300 hover:border-stone-500"}`}
         style={{
           aspectRatio: ratio,
           ...(preview ? { backgroundImage: `url(${JSON.stringify(preview)})` } : {}),

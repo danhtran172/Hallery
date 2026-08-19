@@ -24,6 +24,7 @@ import {
   canExtend,
   canMerge,
   cardKindOf,
+  isRoundCover,
   makeGrid,
   maxRowsBesideCover,
   mergeBox,
@@ -67,7 +68,8 @@ const FORM_PREVIEW_WIDTH = 420;
 const ORIENTATIONS: { value: CoverOrientation; label: string }[] = [
   { value: "landscape", label: "Ngang" },
   { value: "portrait", label: "Dọc" },
-  { value: "square", label: "Vuông" },
+  { value: "square", label: "Đối xứng" },
+  { value: "circle", label: "Hình tròn" },
 ];
 
 export function CardLayoutEditor({
@@ -468,6 +470,7 @@ export function CardLayoutEditor({
                 widthOverride={detailMode ? detailWidth : formMode ? FORM_PREVIEW_WIDTH : undefined}
                 // The form previews as inputs, since that is what it will actually be.
                 asInputs={formMode}
+                shapeIsRound={isRoundCover(shape.aspect)}
               />
             </div>
             <label className="flex items-center gap-2 border-t border-stone-200 bg-white px-4 py-2 text-xs text-stone-600">
@@ -1029,17 +1032,21 @@ type CanvasProps = {
   widthOverride?: number;
   /** Draw fields as the inputs the form will render, not as values. */
   asInputs?: boolean;
+  /** The active cover shape is a circle. */
+  shapeIsRound?: boolean;
 };
 
 function CardCanvas(props: CanvasProps) {
-  const { layout, coverRatio, coverUrl, cardKind, widthOverride } = props;
+  const { layout, coverRatio, coverUrl, cardKind, widthOverride, shapeIsRound } = props;
   const spec = ARRANGEMENTS[layout.arrangement];
   const wide: boolean = spec.sideBySide;
   const regions: string[] = [...spec.regions];
 
   const cover = spec.cover === "none" ? null : (
     <div
-      className="relative shrink-0 overflow-hidden rounded bg-stone-200 bg-cover bg-center"
+      className={`relative shrink-0 overflow-hidden bg-stone-200 bg-cover bg-center ${
+        shapeIsRound ? "rounded-full" : "rounded"
+      }`}
       style={{
         aspectRatio: coverRatio,
         width: wide ? `${layout.ratio[0]}%` : "100%",

@@ -22,12 +22,15 @@ import { saveCoverPosition } from "@/app/galleries/[galleryId]/cover-position-ac
  */
 export function CardCover({
   ratio,
+  round,
   galleryId,
   pageId,
   initialX,
   initialY,
 }: {
   ratio: string;
+  /** Crop the frame to a circle. Only ever paired with a 1:1 ratio. */
+  round?: boolean;
   galleryId: string;
   pageId: string;
   initialX: number;
@@ -144,7 +147,7 @@ export function CardCover({
     <div
       ref={ref}
       onPointerDown={onPointerDown}
-      className={`relative w-full shrink-0 overflow-hidden bg-stone-100 ${
+      className={`relative w-full shrink-0 overflow-hidden bg-stone-100 ${round ? "rounded-full" : ""} ${
         armed ? `z-20 ${dragging ? "cursor-grabbing" : "cursor-grab"} ring-2 ring-emerald-500` : "pointer-events-none"
       }`}
       style={{

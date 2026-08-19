@@ -33,7 +33,7 @@ export function CreateItemPopup({
   fields: CreateFormField[];
   columns: 1 | 2;
   /** Present when the form's layout includes a cover; null when it does not. */
-  cover: { ratio: string; targetLabel: string } | null;
+  cover: { ratio: string; round: boolean; targetLabel: string } | null;
 }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
@@ -81,7 +81,7 @@ export function CreateItemPopup({
             <form action={formAction} className="flex flex-col gap-3">
               {cover && (
                 <div>
-                  <ImageDropZone name="coverImage" ratio={cover.ratio} active={open} />
+                  <ImageDropZone name="coverImage" ratio={cover.ratio} round={cover.round} active={open} />
                   <p className="mt-1 text-[11px] text-stone-400">Lưu vào: {cover.targetLabel}</p>
                 </div>
               )}

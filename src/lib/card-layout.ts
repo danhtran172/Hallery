@@ -22,7 +22,7 @@ export type CardField = { id: string; showLabel: boolean };
 /* ── Layer 1 ─────────────────────────────────────────────────────────────── */
 
 export type CoverSlot = "top" | "left" | "right" | "none";
-export type CoverOrientation = "landscape" | "portrait" | "square";
+export type CoverOrientation = "landscape" | "portrait" | "square" | "circle";
 
 export type Arrangement = {
   label: string;
@@ -56,6 +56,11 @@ export type ArrangementId = keyof typeof ARRANGEMENTS;
 export function arrangementsFor(orientation: CoverOrientation): ArrangementId[] {
   if (orientation === "landscape") return ["cover-top", "cover-only", "no-cover"];
   return ["cover-top", "cover-left", "cover-left-below", "cover-right", "cover-only", "no-cover"];
+}
+
+/** A circle is a square that has been rounded off, so it crops and lays out as one. */
+export function isRoundCover(orientation: string | undefined): boolean {
+  return orientation === "circle";
 }
 
 export function isArrangement(value: unknown): value is ArrangementId {
