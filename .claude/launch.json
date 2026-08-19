@@ -7,6 +7,13 @@
       "runtimeArgs": ["run", "dev"],
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "hallery-prod",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "start", "--port", "3100"],
+      "port": 3100,
+      "autoPort": false
     }
   ]
 }

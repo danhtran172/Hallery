@@ -20,6 +20,7 @@ import {
 } from "@/lib/notion-cover";
 import { storedCoverUrl } from "@/lib/cover-store";
 import { RETURN_PARAM, galleryHrefFromReturn } from "@/lib/gallery-query";
+import { getGalleryNotionSnapshot } from "@/lib/gallery-notion-cache";
 import { isFullDataSource, isFullPage } from "@notionhq/client";
 import { ItemDetail, type FieldData } from "./item-detail";
 
@@ -36,12 +37,23 @@ export default async function ItemDetailPage({
   });
   if (!gallery) notFound();
 
-  const notion = getNotionClient(gallery.workspace.accessToken);
+  // The gallery's snapshot already holds this page and the schema, and it is refreshed
+  // whenever Hallery writes. Reading it turns two Notion round trips per item view into a
+  // local one — worth it on a ~3 req/s budget, and it is what made opening a card feel slow.
+  const snapshot = await getGalleryNotionSnapshot({
+    galleryId,
+    dataSourceId: gallery.notionDataSourceId,
+    accessToken: gallery.workspace.accessToken,
+  });
+  const dataSourceRes = snapshot.dataSourceRes;
 
-  const [pageRes, dataSourceRes] = await Promise.all([
-    notion.pages.retrieve({ page_id: pageId }),
-    notion.dataSources.retrieve({ data_source_id: gallery.notionDataSourceId }),
-  ]);
+  // A page created since the snapshot, or past the crawl's ceiling, is not in it — fall
+  // back to fetching just that one rather than showing a missing item.
+  const notion = getNotionClient(gallery.workspace.accessToken);
+  const fromSnapshot = snapshot.queryRes.results.find((result) => result.id === pageId);
+  const pageRes =
+    fromSnapshot && isFullPage(fromSnapshot) ? fromSnapshot : await notion.pages.retrieve({ page_id: pageId });
+
   if (!isFullPage(pageRes) || !isFullDataSource(dataSourceRes)) notFound();
 
   const titlePropertyName = getTitlePropertyName(dataSourceRes.properties);

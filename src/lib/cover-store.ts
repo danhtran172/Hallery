@@ -44,12 +44,42 @@ export function isSafePageId(pageId: string): boolean {
   return /^[0-9a-fA-F-]{32,36}$/.test(pageId);
 }
 
+/**
+ * Stops hammering a host that is not answering.
+ *
+ * Notion's file host is sometimes unreachable from where Hallery runs. Without this, a
+ * gallery of ninety cards spends five seconds per card discovering that again — the
+ * browser runs a handful at a time, so the whole grid stays busy for over a minute and the
+ * server has no capacity left for the page the reader is trying to open. One failure now
+ * speaks for the next minute, and a single probe after that decides whether to resume.
+ */
+const HOST_COOLDOWN_MS = 60 * 1000;
+const unreachableUntil = new Map<string, number>();
+
+function hostIsCoolingDown(host: string): boolean {
+  const until = unreachableUntil.get(host);
+  if (until === undefined) return false;
+  if (Date.now() < until) return true;
+  unreachableUntil.delete(host);
+  return false;
+}
+
 async function downloadCoverImage(sourceUrl: string): Promise<DownloadedImage | null> {
   try {
     const parsed = new URL(sourceUrl);
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+    if (hostIsCoolingDown(parsed.host)) return null;
 
-    const response = await fetch(sourceUrl, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+    let response: Response;
+    try {
+      response = await fetch(sourceUrl, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+    } catch (error) {
+      // A timeout or a refused connection is the host's problem, not this URL's, so it
+      // counts against the host. An HTTP error below does not: that one URL may just be
+      // expired while the host is perfectly fine.
+      unreachableUntil.set(parsed.host, Date.now() + HOST_COOLDOWN_MS);
+      throw error;
+    }
     if (!response.ok) return null;
 
     const declaredLength = Number(response.headers.get("content-length") ?? 0);
