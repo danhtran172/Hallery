@@ -5,15 +5,19 @@ import { getGalleryNotionSnapshot } from "@/lib/gallery-notion-cache";
 import { getPageIcon, getPageTitle, getTitlePropertyName } from "@/lib/notion-schema";
 import { CardCover } from "@/components/card-cover";
 import {
+  PAGE_COVER,
+  PROPERTY_PREFIX,
   parseGalleryConfig,
   resolveCardsPerRow,
   resolveCoverRatio,
+  resolveFormCoverShape,
 } from "@/lib/notion-cover";
 import { isFullDataSource, isFullPage, type PageObjectResponse } from "@notionhq/client";
 import { syncPropertyConfigs, syncResolvedTypes } from "@/lib/property-config-sync";
 import { CategoryBar } from "@/components/category-bar";
 import { bucketPages, filterPagesByCategory } from "@/lib/category";
 import {
+  ARRANGEMENTS,
   CARD_WIDTH_FACTOR,
   TITLE_FIELD_ID,
   cardKindOf,
@@ -161,6 +165,19 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
 
   const formColumns = formLayout?.regions.main?.cols === 2 ? 2 : 1;
 
+  // The form only asks for an image when its layout has somewhere to put one.
+  const formCoverShape = resolveFormCoverShape(galleryConfig);
+  const formCoverTarget = galleryConfig.formCoverTarget ?? PAGE_COVER;
+  const formCover =
+    formLayout && ARRANGEMENTS[formLayout.arrangement].cover !== "none"
+      ? {
+          ratio: formCoverShape.ratio.replace(":", " / "),
+          targetLabel: formCoverTarget.startsWith(PROPERTY_PREFIX)
+            ? `prop "${formCoverTarget.slice(PROPERTY_PREFIX.length)}"`
+            : "ảnh bìa của page",
+        }
+      : null;
+
   // Every card carries the current view, so the item it opens knows what to go back to.
   const returnQuery = returnQueryString(search);
   const itemSuffix = returnQuery ? `?${RETURN_PARAM}=${encodeURIComponent(returnQuery)}` : "";
@@ -294,7 +311,12 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
           </p>
         </div>
         <div className="flex items-center gap-4">
-          <CreateItemPopup galleryId={galleryId} fields={formFields} columns={formColumns} />
+          <CreateItemPopup
+            galleryId={galleryId}
+            fields={formFields}
+            columns={formColumns}
+            cover={formCover}
+          />
           <RelationGalleryMenu entries={relationGalleries} />
           <Link
             href={`/galleries/${galleryId}/settings/category`}

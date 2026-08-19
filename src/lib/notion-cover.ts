@@ -51,7 +51,26 @@ export type GalleryConfig = {
   formDefaults?: FormDefaults;
   /** What the last submission put in each field, feeding the copy-from-last default. */
   formLastValues?: FormLastValues;
+  /**
+   * Where an image picked in the create form gets written: PAGE_COVER, or `property:<name>`
+   * of a Files property. The mirror of `coverSource` — the gallery asks where a picture
+   * comes from, the form asks where one should go.
+   */
+  formCoverTarget?: string;
+  /** The form's own cover shape, so the picker crops the way the card will. */
+  formCoverAspect?: CoverAspect;
+  formCoverRatio?: string;
 };
+
+/** Cover shape for the create form, falling back to the gallery card's while it has none. */
+export function resolveFormCoverShape(config: GalleryConfig): { aspect: CoverAspect; ratio: string } {
+  const aspect = config.formCoverAspect ?? config.coverAspect ?? "landscape";
+  if (aspect === "none") return { aspect, ratio: COVER_RATIOS.landscape[0] };
+
+  const allowed = COVER_RATIOS[aspect];
+  const stored = config.formCoverAspect ? config.formCoverRatio : config.coverRatio;
+  return { aspect, ratio: stored && allowed.includes(stored) ? stored : allowed[0] };
+}
 
 /** Cover shape for a view, falling back to the gallery card's while the detail has none. */
 export function resolveDetailCoverShape(config: GalleryConfig): { aspect: CoverAspect; ratio: string } {
@@ -116,6 +135,18 @@ export function resolveCoverRatio(config: GalleryConfig): string | null {
 export function listImagePropertyNames(dataSource: DataSourceObjectResponse): string[] {
   return Object.entries(dataSource.properties)
     .filter(([, config]) => config.type === "files" || config.type === "url")
+    .map(([name]) => name);
+}
+
+/**
+ * Properties an uploaded image can be written into.
+ *
+ * Narrower than the sources above: a URL property can point at a picture but cannot hold
+ * one, so only Files properties are somewhere to put an upload.
+ */
+export function listUploadTargetNames(dataSource: DataSourceObjectResponse): string[] {
+  return Object.entries(dataSource.properties)
+    .filter(([, config]) => config.type === "files")
     .map(([name]) => name);
 }
 

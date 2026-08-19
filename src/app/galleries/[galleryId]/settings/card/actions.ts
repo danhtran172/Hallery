@@ -111,6 +111,17 @@ export async function saveCardLayout(
     config.coverSource = source;
   }
 
+  const target = String(formData.get("formCoverTarget") ?? "");
+  if (target === PAGE_COVER || target.startsWith(PROPERTY_PREFIX)) config.formCoverTarget = target;
+
+  const formAspect = String(formData.get("formCoverAspect") ?? "");
+  if (formAspect === "landscape" || formAspect === "portrait" || formAspect === "square") {
+    const ratios = COVER_RATIOS[formAspect];
+    const formRatio = String(formData.get("formCoverRatio") ?? "");
+    config.formCoverAspect = formAspect as CoverAspect;
+    config.formCoverRatio = ratios.includes(formRatio) ? formRatio : ratios[0];
+  }
+
   const detailAspect = String(formData.get("detailCoverAspect") ?? "");
   if (detailAspect === "landscape" || detailAspect === "portrait" || detailAspect === "square") {
     const ratios = COVER_RATIOS[detailAspect];

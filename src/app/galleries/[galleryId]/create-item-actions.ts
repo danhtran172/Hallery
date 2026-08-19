@@ -7,8 +7,9 @@ import { invalidateGalleryNotionCache } from "@/lib/gallery-notion-cache";
 import { getNotionClient } from "@/lib/notion";
 import { buildPropertyUpdate } from "@/lib/notion-write";
 import { TITLE_FIELD_ID } from "@/lib/card-layout";
-import { parseGalleryConfig } from "@/lib/notion-cover";
+import { PAGE_COVER, PROPERTY_PREFIX, parseGalleryConfig } from "@/lib/notion-cover";
 import { parseFormDefaults, type FormLastValues } from "@/lib/create-form";
+import { MAX_UPLOAD_BYTES } from "@/components/image-drop-zone";
 
 export type CreateItemState = { error: string | null; createdPageId?: string };
 
@@ -63,10 +64,49 @@ export async function createItem(
     if (configKey && entered.length) lastValues[configKey] = entered.join(", ");
   }
 
+  const notion = getNotionClient(gallery.workspace.accessToken);
+
+  // The image is uploaded before the page exists, so its id can be attached in the same
+  // create call rather than costing a second write.
+  const picked = formData.get("coverImage");
+  let uploadId: string | null = null;
+  if (picked instanceof File && picked.size > 0) {
+    if (picked.size > MAX_UPLOAD_BYTES) {
+      return { error: "Ảnh vượt quá 20MB — Notion không nhận trong một lần tải." };
+    }
+    try {
+      const upload = await notion.fileUploads.create({
+        mode: "single_part",
+        filename: picked.name || "cover",
+        content_type: picked.type || "image/png",
+      });
+      await notion.fileUploads.send({
+        file_upload_id: upload.id,
+        file: { filename: picked.name || "cover", data: picked },
+      });
+      uploadId = upload.id;
+    } catch {
+      return { error: "Không tải được ảnh lên Notion. Item chưa được tạo — thử lại hoặc bỏ ảnh ra." };
+    }
+  }
+
+  const target = config.formCoverTarget ?? PAGE_COVER;
+  if (uploadId && target.startsWith(PROPERTY_PREFIX)) {
+    properties[target.slice(PROPERTY_PREFIX.length)] = {
+      files: [{ type: "file_upload", file_upload: { id: uploadId }, name: picked instanceof File ? picked.name : "cover" }],
+    };
+  }
+
   let createdPageId: string;
   try {
-    const created = await notionCreate(gallery.workspace.accessToken, gallery.notionDataSourceId, properties);
-    createdPageId = created;
+    const created = await notion.pages.create({
+      parent: { data_source_id: gallery.notionDataSourceId },
+      properties: properties as CreatePageParameters["properties"],
+      ...(uploadId && target === PAGE_COVER
+        ? { cover: { type: "file_upload" as const, file_upload: { id: uploadId } } }
+        : {}),
+    });
+    createdPageId = created.id;
   } catch {
     return {
       error: "Notion từ chối request. Có thể một giá trị không khớp kiểu property, hoặc property đã bị đổi.",
@@ -80,13 +120,4 @@ export async function createItem(
   await invalidateGalleryNotionCache(galleryId);
   revalidatePath(`/galleries/${galleryId}`);
   return { error: null, createdPageId };
-}
-
-async function notionCreate(accessToken: string, dataSourceId: string, properties: Record<string, unknown>) {
-  const notion = getNotionClient(accessToken);
-  const created = await notion.pages.create({
-    parent: { data_source_id: dataSourceId },
-    properties: properties as CreatePageParameters["properties"],
-  });
-  return created.id;
 }

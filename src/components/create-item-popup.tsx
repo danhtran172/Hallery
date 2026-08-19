@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createItem, type CreateItemState } from "@/app/galleries/[galleryId]/create-item-actions";
+import { ImageDropZone } from "@/components/image-drop-zone";
 
 export type CreateFormField = {
   propertyId: string;
@@ -26,10 +27,13 @@ export function CreateItemPopup({
   galleryId,
   fields,
   columns,
+  cover,
 }: {
   galleryId: string;
   fields: CreateFormField[];
   columns: 1 | 2;
+  /** Present when the form's layout includes a cover; null when it does not. */
+  cover: { ratio: string; targetLabel: string } | null;
 }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
@@ -69,12 +73,19 @@ export function CreateItemPopup({
 
       {open && (
         <div className="absolute right-0 z-40 mt-1 w-[26rem] rounded-lg border border-stone-200 bg-white p-4 shadow-xl">
-          {fields.length === 0 ? (
+          {fields.length === 0 && !cover ? (
             <p className="text-xs text-stone-500">
               Form chưa có field nào. Vào Bố cục card → Form thêm để kéo property vào.
             </p>
           ) : (
             <form action={formAction} className="flex flex-col gap-3">
+              {cover && (
+                <div>
+                  <ImageDropZone name="coverImage" ratio={cover.ratio} active={open} />
+                  <p className="mt-1 text-[11px] text-stone-400">Lưu vào: {cover.targetLabel}</p>
+                </div>
+              )}
+
               <div
                 className="grid gap-3"
                 style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}

@@ -19,6 +19,8 @@ import {
   resolveCoverUrl,
   resolveDetailCoverShape,
   resolveDetailWidth,
+  resolveFormCoverShape,
+  listUploadTargetNames,
 } from "@/lib/notion-cover";
 import { plainTextValue } from "@/lib/property-text";
 import { parseFormDefaults } from "@/lib/create-form";
@@ -55,6 +57,7 @@ export default async function CardLayoutSettingsPage({
   // Detail is already rendering, so the editor shows the truth rather than a blank.
   const detailLayout = parseCardLayout(config.detailCard) ?? layout;
   const detailShape = resolveDetailCoverShape(config);
+  const formShape = resolveFormCoverShape(config);
 
   // A form starts empty rather than borrowing the card: what reads well on a thumbnail is
   // rarely what you want to be asked for when adding an item.
@@ -101,6 +104,12 @@ export default async function CardLayoutSettingsPage({
           initialLayout={layout}
           initialDetailLayout={detailLayout}
           initialFormLayout={formLayout}
+          initialFormShape={{
+            aspect: formShape.aspect === "none" ? "landscape" : formShape.aspect,
+            ratio: formShape.ratio,
+          }}
+          initialFormCoverTarget={config.formCoverTarget ?? PAGE_COVER}
+          uploadProperties={preview.uploadProperties}
           initialFormDefaults={parseFormDefaults(config.formDefaults)}
           initialDetailWidth={resolveDetailWidth(config)}
           initialCoverSource={config.coverSource ?? PAGE_COVER}
@@ -120,8 +129,16 @@ type PreviewItem = {
   coverUrl: string | null;
   /** Files/URL properties that could serve as a cover — the source picker's options. */
   imageProperties: string[];
+  /** Files properties, the only ones an upload can be written into. */
+  uploadProperties: string[];
 };
-const EMPTY_PREVIEW: PreviewItem = { title: "Item mẫu", values: {}, coverUrl: null, imageProperties: [] };
+const EMPTY_PREVIEW: PreviewItem = {
+  title: "Item mẫu",
+  values: {},
+  coverUrl: null,
+  imageProperties: [],
+  uploadProperties: [],
+};
 
 async function loadPreviewItem(
   dataSourceId: string,
@@ -146,6 +163,7 @@ async function loadPreviewItem(
       title: getPageTitle(page, titleProperty),
       values,
       imageProperties: isFullDataSource(dataSource) ? listImagePropertyNames(dataSource) : [],
+      uploadProperties: isFullDataSource(dataSource) ? listUploadTargetNames(dataSource) : [],
       // Content-image covers resolve lazily elsewhere; the preview settles for the frame
       // rather than spending a blocks crawl here.
       coverUrl: resolveCoverUrl(page, coverSource),

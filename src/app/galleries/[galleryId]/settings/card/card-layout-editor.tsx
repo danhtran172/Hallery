@@ -75,13 +75,16 @@ export function CardLayoutEditor({
   properties,
   initialShape,
   initialDetailShape,
+  initialFormShape,
   initialLayout,
   initialDetailLayout,
   initialFormLayout,
   initialFormDefaults,
   initialDetailWidth,
   initialCoverSource,
+  initialFormCoverTarget,
   imageProperties,
+  uploadProperties,
   previewTitle,
   previewValues,
   previewCoverUrl,
@@ -90,13 +93,16 @@ export function CardLayoutEditor({
   properties: EditableCardProperty[];
   initialShape: CoverShape;
   initialDetailShape: CoverShape;
+  initialFormShape: CoverShape;
   initialLayout: CardLayout;
   initialDetailLayout: CardLayout;
   initialFormLayout: CardLayout;
   initialFormDefaults: FormDefaults;
   initialDetailWidth: number;
   initialCoverSource: string;
+  initialFormCoverTarget: string;
   imageProperties: string[];
+  uploadProperties: string[];
   previewTitle: string;
   previewValues: Record<string, string>;
   previewCoverUrl: string | null;
@@ -114,6 +120,7 @@ export function CardLayoutEditor({
   const [detailWidth, setDetailWidth] = useState(initialDetailWidth);
   // Where the image comes from is a property of the data, not of a view, so both share it.
   const [coverSource, setCoverSource] = useState(initialCoverSource);
+  const [formCoverTarget, setFormCoverTarget] = useState(initialFormCoverTarget);
 
   const detailMode = mode === "detail";
   const formMode = mode === "form";
@@ -122,8 +129,8 @@ export function CardLayoutEditor({
   const configs = detailMode ? detailConfigs : galleryConfigs;
   const setConfigs = detailMode ? setDetailConfigs : setGalleryConfigs;
 
-  // A form is inputs, not a rendered card: it has no cover and nothing to format, and it
-  // can only offer the property types Hallery is able to write back.
+  // A form has nothing to format — it draws inputs — and can only offer the property types
+  // Hallery is able to write back. Its cover is a picker rather than a picture.
   const formEligible = useMemo(
     () => new Set(properties.filter((p) => FORM_FIELD_TYPES.has(p.notionPropertyType)).map((p) => p.notionPropertyId)),
     [properties],
@@ -131,8 +138,9 @@ export function CardLayoutEditor({
 
   const [galleryShape, setGalleryShape] = useState<CoverShape>(initialShape);
   const [detailShape, setDetailShape] = useState<CoverShape>(initialDetailShape);
-  const shape = detailMode ? detailShape : galleryShape;
-  const setShape = detailMode ? setDetailShape : setGalleryShape;
+  const [formShape, setFormShape] = useState<CoverShape>(initialFormShape);
+  const shape = formMode ? formShape : detailMode ? detailShape : galleryShape;
+  const setShape = formMode ? setFormShape : detailMode ? setDetailShape : setGalleryShape;
 
   const [selected, setSelected] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
@@ -351,6 +359,9 @@ export function CardLayoutEditor({
       <input type="hidden" name="detailCoverRatio" value={detailShape.ratio} />
       <input type="hidden" name="detailWidth" value={detailWidth} />
       <input type="hidden" name="coverSource" value={coverSource} />
+      <input type="hidden" name="formCoverTarget" value={formCoverTarget} />
+      <input type="hidden" name="formCoverAspect" value={formShape.aspect} />
+      <input type="hidden" name="formCoverRatio" value={formShape.ratio} />
       <input type="hidden" name="propertyConfigs" value={JSON.stringify(galleryConfigs)} />
       <input type="hidden" name="detailPropertyConfigs" value={JSON.stringify(detailConfigs)} />
       <input type="hidden" name="formLayout" value={JSON.stringify(formLayout)} />
@@ -382,28 +393,31 @@ export function CardLayoutEditor({
             />
           )}
 
-          <CoverSourceSelect
-            value={coverSource}
-            imageProperties={imageProperties}
-            onChange={setCoverSource}
-          />
+          {formMode ? (
+            <CoverTargetSelect
+              value={formCoverTarget}
+              uploadProperties={uploadProperties}
+              onChange={setFormCoverTarget}
+            />
+          ) : (
+            <CoverSourceSelect
+              value={coverSource}
+              imageProperties={imageProperties}
+              onChange={setCoverSource}
+            />
+          )}
 
           <div className="flex items-stretch gap-2">
-            {/* A form draws inputs, so it has no cover to shape or place. */}
-            {!formMode && (
-              <>
-                <CoverShapeButton shape={shape} onChange={changeShape} />
-                <ArrangementButton
-                  value={layout.arrangement}
-                  orientation={shape.aspect}
-                  extended={layout.extended}
-                  onChange={(arrangement, extended) => {
-                    setArrangement(arrangement);
-                    setLayout((c) => ({ ...c, extended }));
-                  }}
-                />
-              </>
-            )}
+            <CoverShapeButton shape={shape} onChange={changeShape} />
+            <ArrangementButton
+              value={layout.arrangement}
+              orientation={shape.aspect}
+              extended={layout.extended}
+              onChange={(arrangement, extended) => {
+                setArrangement(arrangement);
+                setLayout((c) => ({ ...c, extended }));
+              }}
+            />
             <button
               type="button"
               aria-label="Chỉnh khung bố cục"
@@ -413,7 +427,7 @@ export function CardLayoutEditor({
                 setEditingLayout((open) => !open);
                 setSelected(null);
               }}
-              className={`shrink-0 rounded-lg border text-sm ${formMode ? "flex-1 py-1.5" : "w-9"} ${
+              className={`w-9 shrink-0 rounded-lg border text-sm ${
                 editingLayout
                   ? "border-emerald-700 bg-emerald-600 text-white"
                   : "border-stone-300 bg-white text-stone-500 hover:border-stone-500"
@@ -647,6 +661,41 @@ function CoverSourceSelect({
           </option>
         ))}
         <option value={CONTENT_IMAGE}>Ảnh trong nội dung page</option>
+      </select>
+    </label>
+  );
+}
+
+/**
+ * Where an image picked in the create form ends up.
+ *
+ * The mirror of the source select: the gallery asks where a picture comes from, the form
+ * asks where one should be put. Only Files properties are offered alongside the page cover,
+ * because a URL property can point at a picture but cannot hold one.
+ */
+function CoverTargetSelect({
+  value,
+  uploadProperties,
+  onChange,
+}: {
+  value: string;
+  uploadProperties: string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-600">
+      <span className="shrink-0">Lưu ảnh vào</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="min-w-0 flex-1 rounded border border-stone-300 px-1 py-1 text-xs outline-none focus:border-emerald-600"
+      >
+        <option value={PAGE_COVER}>Ảnh bìa của page</option>
+        {uploadProperties.map((name) => (
+          <option key={name} value={`${PROPERTY_PREFIX}${name}`}>
+            Prop: {name}
+          </option>
+        ))}
       </select>
     </label>
   );
