@@ -189,6 +189,18 @@ export function matchesSearch(page: PageObjectResponse, query: string): boolean 
 export type SortKey = { propertyId: string; direction: "asc" | "desc" };
 
 /**
+ * Moves one entry to another position, shifting the rest along. Kept here rather than in
+ * the drag handler so the reordering itself can be reasoned about without a pointer.
+ */
+export function moveItem<T>(list: T[], from: number, to: number): T[] {
+  if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return list;
+  const next = [...list];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
+/**
  * Orders rows by each key in turn. Numbers and dates compare as themselves; everything else
  * compares as Vietnamese text. Empty values always sink to the bottom rather than sorting as
  * zero or as the empty string, because a blank is missing information, not a small value.

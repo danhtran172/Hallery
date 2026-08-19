@@ -9,8 +9,8 @@ import { getNotionClient } from "@/lib/notion";
  */
 const CACHE_TTL_MS = 60 * 1000;
 
-/** Notion's maximum, and the fewest round trips per row. */
-const PAGE_SIZE = 100;
+/** Rows per request. Notion allows up to 100; smaller pages trade round trips for lighter responses. */
+const PAGE_SIZE = 50;
 
 /**
  * Ceiling on how many pages one crawl will walk. At Notion's ~3 req/s a database large

@@ -3,7 +3,18 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
   OPERATOR_LABELS,
+  moveItem,
   operatorsFor,
   serializeFilters,
   serializeSorts,
@@ -215,6 +226,45 @@ function Popover({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** One sort level: a drag handle, its rank, the property, and whatever controls follow. */
+function SortRow({
+  sort,
+  index,
+  name,
+  children,
+}: {
+  sort: SortKey;
+  index: number;
+  name: string;
+  children: React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({ id: sort.propertyId });
+  const { setNodeRef: dropRef, isOver } = useDroppable({ id: sort.propertyId });
+
+  return (
+    <div
+      ref={dropRef}
+      className={`flex items-center gap-1.5 rounded ${isOver ? "bg-emerald-50" : ""} ${
+        isDragging ? "opacity-40" : ""
+      }`}
+    >
+      <button
+        ref={dragRef}
+        {...listeners}
+        {...attributes}
+        type="button"
+        aria-label={`Đổi thứ tự ${name}`}
+        className="shrink-0 cursor-grab px-0.5 text-stone-400 active:cursor-grabbing"
+      >
+        ⠿
+      </button>
+      <span className="w-3 shrink-0 text-center text-[10px] text-stone-400">{index + 1}</span>
+      <span className="min-w-0 flex-1 truncate text-xs text-stone-700">{name}</span>
+      {children}
+    </div>
+  );
+}
+
 function FilterEditor({
   properties,
   filters,
@@ -324,6 +374,14 @@ function FilterEditor({
   );
 }
 
+/**
+ * Sort levels, reorderable by dragging.
+ *
+ * Order is the whole meaning of the list — the first key decides, the rest only break ties —
+ * so moving a level has to be a direct action rather than remove-and-re-add. The keyboard
+ * sensor keeps that reachable without a pointer: focus a handle, space to lift, arrows to
+ * move.
+ */
 function SortEditor({
   properties,
   sorts,
@@ -336,39 +394,51 @@ function SortEditor({
   onChange: (sorts: SortKey[]) => void;
 }) {
   const unused = properties.filter((p) => !sorts.some((s) => s.propertyId === p.notionPropertyId));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor),
+  );
+
+  function handleDragEnd({ active, over }: DragEndEvent) {
+    if (!over || active.id === over.id) return;
+    const from = sorts.findIndex((sort) => sort.propertyId === String(active.id));
+    const to = sorts.findIndex((sort) => sort.propertyId === String(over.id));
+    if (from === -1 || to === -1) return;
+    onChange(moveItem(sorts, from, to));
+  }
 
   return (
     <div className="flex flex-col gap-2">
       {sorts.length === 0 && <p className="text-xs text-stone-400">Chưa sắp xếp theo gì.</p>}
 
-      {sorts.map((sort, index) => (
-        <div key={sort.propertyId} className="flex items-center gap-1.5">
-          <span className="w-4 shrink-0 text-center text-[10px] text-stone-400">{index + 1}</span>
-          <span className="min-w-0 flex-1 truncate text-xs text-stone-700">{nameOf(sort.propertyId)}</span>
-          <select
-            value={sort.direction}
-            onChange={(event) =>
-              onChange(
-                sorts.map((entry, i) =>
-                  i === index ? { ...entry, direction: event.target.value as "asc" | "desc" } : entry,
-                ),
-              )
-            }
-            className="shrink-0 rounded border border-stone-300 px-1 py-1 text-xs"
-          >
-            <option value="asc">Tăng dần</option>
-            <option value="desc">Giảm dần</option>
-          </select>
-          <button
-            type="button"
-            aria-label={`Bỏ sắp xếp theo ${nameOf(sort.propertyId)}`}
-            onClick={() => onChange(sorts.filter((_, i) => i !== index))}
-            className="shrink-0 px-1 text-stone-400 hover:text-red-600"
-          >
-            ✕
-          </button>
-        </div>
-      ))}
+      <DndContext id="sort-levels" sensors={sensors} onDragEnd={handleDragEnd}>
+        {sorts.map((sort, index) => (
+          <SortRow key={sort.propertyId} sort={sort} index={index} name={nameOf(sort.propertyId)}>
+            <select
+              value={sort.direction}
+              onChange={(event) =>
+                onChange(
+                  sorts.map((entry, i) =>
+                    i === index ? { ...entry, direction: event.target.value as "asc" | "desc" } : entry,
+                  ),
+                )
+              }
+              className="shrink-0 rounded border border-stone-300 px-1 py-1 text-xs"
+            >
+              <option value="asc">Tăng dần</option>
+              <option value="desc">Giảm dần</option>
+            </select>
+            <button
+              type="button"
+              aria-label={`Bỏ sắp xếp theo ${nameOf(sort.propertyId)}`}
+              onClick={() => onChange(sorts.filter((_, i) => i !== index))}
+              className="shrink-0 px-1 text-stone-400 hover:text-red-600"
+            >
+              ✕
+            </button>
+          </SortRow>
+        ))}
+      </DndContext>
 
       {unused.length > 0 && (
         <select
