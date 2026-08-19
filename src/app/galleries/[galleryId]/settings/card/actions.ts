@@ -112,7 +112,9 @@ export async function saveCardLayout(
   }
 
   const target = String(formData.get("formCoverTarget") ?? "");
-  if (target === PAGE_COVER || target.startsWith(PROPERTY_PREFIX)) config.formCoverTarget = target;
+  if (target === PAGE_COVER || target === CONTENT_IMAGE || target.startsWith(PROPERTY_PREFIX)) {
+    config.formCoverTarget = target;
+  }
 
   const formAspect = String(formData.get("formCoverAspect") ?? "");
   if (formAspect === "landscape" || formAspect === "portrait" || formAspect === "square") {

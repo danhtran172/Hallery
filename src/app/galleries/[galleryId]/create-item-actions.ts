@@ -7,7 +7,7 @@ import { invalidateGalleryNotionCache } from "@/lib/gallery-notion-cache";
 import { getNotionClient } from "@/lib/notion";
 import { buildPropertyUpdate } from "@/lib/notion-write";
 import { TITLE_FIELD_ID } from "@/lib/card-layout";
-import { PAGE_COVER, PROPERTY_PREFIX, parseGalleryConfig } from "@/lib/notion-cover";
+import { CONTENT_IMAGE, PAGE_COVER, PROPERTY_PREFIX, parseGalleryConfig } from "@/lib/notion-cover";
 import { parseFormDefaults, type FormLastValues } from "@/lib/create-form";
 import { MAX_UPLOAD_BYTES } from "@/components/image-drop-zone";
 
@@ -104,6 +104,11 @@ export async function createItem(
       properties: properties as CreatePageParameters["properties"],
       ...(uploadId && target === PAGE_COVER
         ? { cover: { type: "file_upload" as const, file_upload: { id: uploadId } } }
+        : {}),
+      // Into the body as an image block. This is the one target the gallery can read back
+      // as a cover through its own content_image source, closing that loop.
+      ...(uploadId && target === CONTENT_IMAGE
+        ? { children: [{ type: "image" as const, image: { file_upload: { id: uploadId } } }] }
         : {}),
     });
     createdPageId = created.id;

@@ -670,8 +670,8 @@ function CoverSourceSelect({
  * Where an image picked in the create form ends up.
  *
  * The mirror of the source select: the gallery asks where a picture comes from, the form
- * asks where one should be put. Only Files properties are offered alongside the page cover,
- * because a URL property can point at a picture but cannot hold one.
+ * asks where one should be put. Of the properties, only Files is offered — a URL property
+ * can point at a picture but cannot hold one — alongside the page's cover and its body.
  */
 function CoverTargetSelect({
   value,
@@ -691,6 +691,7 @@ function CoverTargetSelect({
         className="min-w-0 flex-1 rounded border border-stone-300 px-1 py-1 text-xs outline-none focus:border-emerald-600"
       >
         <option value={PAGE_COVER}>Ảnh bìa của page</option>
+        <option value={CONTENT_IMAGE}>Nội dung page</option>
         {uploadProperties.map((name) => (
           <option key={name} value={`${PROPERTY_PREFIX}${name}`}>
             Prop: {name}

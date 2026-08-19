@@ -5,6 +5,7 @@ import { getGalleryNotionSnapshot } from "@/lib/gallery-notion-cache";
 import { getPageIcon, getPageTitle, getTitlePropertyName } from "@/lib/notion-schema";
 import { CardCover } from "@/components/card-cover";
 import {
+  CONTENT_IMAGE,
   PAGE_COVER,
   PROPERTY_PREFIX,
   parseGalleryConfig,
@@ -174,7 +175,9 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
           ratio: formCoverShape.ratio.replace(":", " / "),
           targetLabel: formCoverTarget.startsWith(PROPERTY_PREFIX)
             ? `prop "${formCoverTarget.slice(PROPERTY_PREFIX.length)}"`
-            : "ảnh bìa của page",
+            : formCoverTarget === CONTENT_IMAGE
+              ? "nội dung page"
+              : "ảnh bìa của page",
         }
       : null;
 
