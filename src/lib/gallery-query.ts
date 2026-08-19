@@ -369,6 +369,31 @@ export function applyGalleryQuery(
   return sortPages(result, query.sorts);
 }
 
+/**
+ * The query string to hand an item page so it can find its way back.
+ *
+ * Opening an item leaves the gallery, and the gallery's whole state lives in its URL — so
+ * without carrying it along, the trip back lands on an unfiltered grid and the reader has
+ * to rebuild the view they were just looking at. Doubly so after a random pick, which is
+ * meant to be a peek inside the current filter.
+ */
+export const RETURN_PARAM = "back";
+
+export function returnQueryString(params: Record<string, string | string[] | undefined>): string {
+  const carried = new URLSearchParams();
+  for (const key of ["q", "filter", "sort", "group", "axis", "value"]) {
+    const value = params[key];
+    if (typeof value === "string" && value !== "") carried.set(key, value);
+  }
+  return carried.toString();
+}
+
+/** Rebuilds the gallery href an item page should return to. */
+export function galleryHrefFromReturn(galleryId: string, back: string | string[] | undefined): string {
+  const base = `/galleries/${galleryId}`;
+  return typeof back === "string" && back !== "" ? `${base}?${back}` : base;
+}
+
 export function isQueryActive(query: GalleryQuery): boolean {
   return query.search.trim() !== "" || query.filters.length > 0 || query.sorts.length > 0 || query.groupBy !== null;
 }

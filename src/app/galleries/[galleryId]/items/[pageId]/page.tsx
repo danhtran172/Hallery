@@ -18,13 +18,17 @@ import {
   resolveDetailWidth,
 } from "@/lib/notion-cover";
 import { storedCoverUrl } from "@/lib/cover-store";
+import { RETURN_PARAM, galleryHrefFromReturn } from "@/lib/gallery-query";
 import { isFullDataSource, isFullPage } from "@notionhq/client";
 import { ItemDetail, type FieldData } from "./item-detail";
 
 export default async function ItemDetailPage({
   params,
+  searchParams,
 }: PageProps<"/galleries/[galleryId]/items/[pageId]">) {
   const { galleryId, pageId } = await params;
+  const { [RETURN_PARAM]: back } = await searchParams;
+  const galleryHref = galleryHrefFromReturn(galleryId, back);
   const gallery = await db.gallery.findUnique({
     where: { id: galleryId },
     include: { workspace: true, propertyConfigs: true },
@@ -112,7 +116,7 @@ export default async function ItemDetailPage({
 
   return (
     <div className="mx-auto px-6 py-12" style={{ maxWidth: resolveDetailWidth(galleryConfig) }}>
-      <Link href={`/galleries/${galleryId}`} className="text-xs text-stone-500 hover:underline">
+      <Link href={galleryHref} className="text-xs text-stone-500 hover:underline">
         ← {gallery.name}
       </Link>
       <div className="mt-2 mb-6 flex items-center gap-3">

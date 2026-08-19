@@ -16,7 +16,13 @@ import { bucketPages, filterPagesByCategory } from "@/lib/category";
 import { CARD_WIDTH_FACTOR, cardKindOf, parseCardLayout, resolveCardLayout } from "@/lib/card-layout";
 import { CardGrid } from "@/components/card-grid";
 import { GalleryToolbar, type ToolbarProperty } from "@/components/gallery-toolbar";
-import { applyGalleryQuery, groupPages, parseGalleryQuery } from "@/lib/gallery-query";
+import {
+  RETURN_PARAM,
+  applyGalleryQuery,
+  groupPages,
+  parseGalleryQuery,
+  returnQueryString,
+} from "@/lib/gallery-query";
 import { configTypeOf } from "@/lib/property-kind";
 import { RelationGalleryMenu } from "@/components/relation-gallery-menu";
 import { listRelationGalleries } from "@/lib/relation-galleries";
@@ -100,6 +106,10 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
     (await db.coverPosition.findMany({ where: { galleryId } })).map((p) => [p.notionPageId, p]),
   );
 
+  // Every card carries the current view, so the item it opens knows what to go back to.
+  const returnQuery = returnQueryString(search);
+  const itemSuffix = returnQuery ? `?${RETURN_PARAM}=${encodeURIComponent(returnQuery)}` : "";
+
   const toolbarProperties: ToolbarProperty[] = managed.map((config) => {
       const schema = dataSource?.properties[config.notionPropertyName];
       const options =
@@ -180,7 +190,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
                   style={{ width: `calc(var(--card-base) * ${CARD_WIDTH_FACTOR[cardKind]})` }}
                 >
                   <Link
-                    href={`/galleries/${galleryId}/items/${page.id}`}
+                    href={`/galleries/${galleryId}/items/${page.id}${itemSuffix}`}
                     aria-label={title}
                     className="absolute inset-0 z-10"
                   />

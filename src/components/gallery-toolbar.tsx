@@ -14,6 +14,7 @@ import {
 } from "@dnd-kit/core";
 import {
   OPERATOR_LABELS,
+  RETURN_PARAM,
   moveItem,
   operatorsFor,
   serializeFilters,
@@ -110,7 +111,9 @@ export function GalleryToolbar({
   function pickRandom() {
     if (pickTargets.length === 0) return;
     const target = pickTargets[Math.floor(Math.random() * pickTargets.length)];
-    router.push(`${pathname}/items/${target}`);
+    // Carry the view along, or coming back from the pick lands on an unfiltered grid.
+    const back = params.toString();
+    router.push(`${pathname}/items/${target}${back ? `?${RETURN_PARAM}=${encodeURIComponent(back)}` : ""}`);
   }
 
   const filtered = matchCount !== totalCount;
