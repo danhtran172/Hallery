@@ -38,6 +38,10 @@ export function CardCover({
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [resolved, setResolved] = useState<string | null>(null);
+  // Distinguishes "this item has no picture" from "the picture could not be fetched" —
+  // the two look identical as a grey block, and only one of them is worth retrying.
+  const [failed, setFailed] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [pos, setPos] = useState({ x: initialX, y: initialY });
   const [ctrlHeld, setCtrlHeld] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -50,12 +54,39 @@ export function CardCover({
   const posRef = useRef({ x: initialX, y: initialY });
 
   const loadFullImage = useCallback((url: string | null) => {
-    if (!url || requestedFullRef.current === url) return;
+    if (!url) return;
+    if (requestedFullRef.current === url) return;
     requestedFullRef.current = url;
     const image = new Image();
-    image.onload = () => setResolved(url);
+    image.onload = () => {
+      setResolved(url);
+      setFailed(false);
+    };
+    image.onerror = () => setFailed(true);
     image.src = url;
   }, []);
+
+  /** Re-asks for the cover, telling the server to drop any cooldown it is holding. */
+  const retry = useCallback(async () => {
+    setRetrying(true);
+    setFailed(false);
+    requestedFullRef.current = null;
+    try {
+      const res = await fetch(
+        `/api/galleries/${galleryId}/cover-preview?pageId=${encodeURIComponent(pageId)}&retry=1`,
+      );
+      const data = res.ok ? await res.json() : null;
+      fullUrlRef.current = data?.fullUrl ?? null;
+      setPreviewUrl(data?.previewUrl ?? null);
+      if (data?.previewUrl) setFailed(false);
+      else if (data?.fullUrl) loadFullImage(data.fullUrl);
+      else setFailed(true);
+    } catch {
+      setFailed(true);
+    } finally {
+      setRetrying(false);
+    }
+  }, [galleryId, pageId, loadFullImage]);
 
   // Resolve any cover lazily, once the card is near the viewport.
   useEffect(() => {
@@ -75,9 +106,13 @@ export function CardCover({
             if (cancelled || !data) return;
             fullUrlRef.current = data.fullUrl ?? null;
             setPreviewUrl(data.previewUrl ?? null);
+            // No preview and no full URL means the page simply has no picture; a full URL
+            // that will not load is the case worth offering a retry for.
             if (!data.previewUrl) loadFullImage(data.fullUrl ?? null);
           })
-          .catch(() => {});
+          .catch(() => {
+            if (!cancelled) setFailed(true);
+          });
       },
       { rootMargin: "300px" },
     );
@@ -174,6 +209,24 @@ export function CardCover({
           style={{ objectPosition: `${pos.x}% ${pos.y}%` }}
         />
       )}
+      {failed && !resolved && (
+        <div className="pointer-events-auto absolute inset-0 z-30 flex flex-col items-center justify-center gap-1 bg-stone-100 p-2 text-center">
+          <span className="text-[11px] leading-snug text-stone-500">Không tải được ảnh</span>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              void retry();
+            }}
+            disabled={retrying}
+            className="rounded border border-stone-300 bg-white px-1.5 py-0.5 text-[11px] text-stone-600 hover:border-stone-500 disabled:opacity-50"
+          >
+            {retrying ? "Đang thử…" : "Thử lại"}
+          </button>
+        </div>
+      )}
+
       {resolved && (
         <span
           className={`pointer-events-none absolute bottom-2 left-2 rounded bg-black/65 px-2 py-1 text-[11px] text-white transition-opacity ${

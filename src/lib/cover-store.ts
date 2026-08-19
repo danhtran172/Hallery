@@ -56,6 +56,14 @@ export function isSafePageId(pageId: string): boolean {
 const HOST_COOLDOWN_MS = 60 * 1000;
 const unreachableUntil = new Map<string, number>();
 
+/**
+ * Forgets every cooldown, so a reader who has just fixed their connection does not have to
+ * wait out a minute that is no longer true.
+ */
+export function clearHostCooldowns() {
+  unreachableUntil.clear();
+}
+
 function hostIsCoolingDown(host: string): boolean {
   const until = unreachableUntil.get(host);
   if (until === undefined) return false;

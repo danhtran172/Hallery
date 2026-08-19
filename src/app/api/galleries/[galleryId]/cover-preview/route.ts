@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { isFullPage } from "@notionhq/client";
 import { resolveContentImage } from "@/lib/content-image-cache";
 import {
+  clearHostCooldowns,
   isSafePageId,
   readCoverImage,
   storeCoverThumbnail,
@@ -75,6 +76,10 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/api/gallerie
   if (!pageId || !isSafePageId(pageId)) {
     return Response.json({ previewUrl: null, fullUrl: null }, { status: 400 });
   }
+
+  // Someone pressing retry is telling us the network changed, which outranks a cooldown
+  // that was recorded before it did.
+  if (request.nextUrl.searchParams.get("retry") === "1") clearHostCooldowns();
 
   let source: CoverSource | null;
   try {
