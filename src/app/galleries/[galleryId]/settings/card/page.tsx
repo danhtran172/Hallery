@@ -21,6 +21,7 @@ import {
   resolveDetailWidth,
 } from "@/lib/notion-cover";
 import { plainTextValue } from "@/lib/property-text";
+import { parseFormDefaults } from "@/lib/create-form";
 import { CardLayoutEditor } from "./card-layout-editor";
 
 export default async function CardLayoutSettingsPage({
@@ -54,6 +55,13 @@ export default async function CardLayoutSettingsPage({
   // Detail is already rendering, so the editor shows the truth rather than a blank.
   const detailLayout = parseCardLayout(config.detailCard) ?? layout;
   const detailShape = resolveDetailCoverShape(config);
+
+  // A form starts empty rather than borrowing the card: what reads well on a thumbnail is
+  // rarely what you want to be asked for when adding an item.
+  const formLayout = parseCardLayout(config.formCard) ?? {
+    ...createDefaultCardLayout([]),
+    arrangement: "no-cover" as const,
+  };
 
   const preview = await loadPreviewItem(
     gallery.notionDataSourceId,
@@ -92,6 +100,8 @@ export default async function CardLayoutSettingsPage({
           }}
           initialLayout={layout}
           initialDetailLayout={detailLayout}
+          initialFormLayout={formLayout}
+          initialFormDefaults={parseFormDefaults(config.formDefaults)}
           initialDetailWidth={resolveDetailWidth(config)}
           initialCoverSource={config.coverSource ?? PAGE_COVER}
           imageProperties={preview.imageProperties}

@@ -1,5 +1,6 @@
 import type { Client, DataSourceObjectResponse, PageObjectResponse } from "@notionhq/client";
 import type { CardLayout } from "@/lib/card-layout";
+import type { FormDefaults, FormLastValues } from "@/lib/create-form";
 
 /** Where a card's cover image comes from. Anything but `content_image` is free — it rides along
  *  with the page data the Gallery already fetches. */
@@ -44,6 +45,12 @@ export type GalleryConfig = {
   detailCoverRatio?: string;
   /** Whether the toolbar offers a random pick. Absent means on. */
   randomPick?: boolean;
+  /** Which fields the quick-entry form shows, and in what order — see lib/create-form. */
+  formCard?: CardLayout;
+  /** Per-field entry behaviour for that form: required, and what it starts holding. */
+  formDefaults?: FormDefaults;
+  /** What the last submission put in each field, feeding the copy-from-last default. */
+  formLastValues?: FormLastValues;
 };
 
 /** Cover shape for a view, falling back to the gallery card's while the detail has none. */

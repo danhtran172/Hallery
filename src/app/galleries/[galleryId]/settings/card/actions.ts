@@ -13,6 +13,7 @@ import {
   type Grid,
 } from "@/lib/card-layout";
 import { parseDisplayConfig, type DisplayConfig } from "@/lib/display-config";
+import { parseFormDefaults } from "@/lib/create-form";
 import {
   CONTENT_IMAGE,
   COVER_RATIOS,
@@ -87,6 +88,10 @@ export async function saveCardLayout(
 
   const parsedDetail = parseCardLayout(readJson(formData.get("detailLayout")));
   if (parsedDetail) config.detailCard = sanitize(parsedDetail);
+
+  const parsedForm = parseCardLayout(readJson(formData.get("formLayout")));
+  if (parsedForm) config.formCard = sanitize(parsedForm);
+  config.formDefaults = parseFormDefaults(readJson(formData.get("formDefaults")));
 
   const width = Number(formData.get("detailWidth"));
   if (Number.isFinite(width)) {

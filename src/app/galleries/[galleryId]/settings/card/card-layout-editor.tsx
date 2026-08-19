@@ -48,6 +48,8 @@ import {
   PROPERTY_PREFIX,
 } from "@/lib/notion-cover";
 import { parseDisplayConfig, type DisplayConfig } from "@/lib/display-config";
+import { FORM_FIELD_TYPES, type FormDefaults } from "@/lib/create-form";
+import { FormFieldPanel } from "./form-field-panel";
 import { saveCardLayout, type SaveCardLayoutState } from "./actions";
 import { ArrangementGlyph, RatioGlyph } from "./glyphs";
 import { PropertyPanel, type PanelProperty } from "./property-panel";
@@ -56,8 +58,11 @@ import { LayoutPanel } from "./layout-panel";
 export type EditableCardProperty = PanelProperty & { detailDisplayConfig: string };
 export type CoverShape = { aspect: CoverOrientation; ratio: string };
 
-/** The two things this screen arranges. They share a format and an editor, nothing else. */
-export type ViewMode = "gallery" | "detail";
+/** The three things this screen arranges. They share a format and an editor, nothing else. */
+export type ViewMode = "gallery" | "detail" | "form";
+
+/** Roughly the popup the form opens in, so the preview is honest about its width. */
+const FORM_PREVIEW_WIDTH = 420;
 
 const ORIENTATIONS: { value: CoverOrientation; label: string }[] = [
   { value: "landscape", label: "Ngang" },
@@ -72,6 +77,8 @@ export function CardLayoutEditor({
   initialDetailShape,
   initialLayout,
   initialDetailLayout,
+  initialFormLayout,
+  initialFormDefaults,
   initialDetailWidth,
   initialCoverSource,
   imageProperties,
@@ -85,6 +92,8 @@ export function CardLayoutEditor({
   initialDetailShape: CoverShape;
   initialLayout: CardLayout;
   initialDetailLayout: CardLayout;
+  initialFormLayout: CardLayout;
+  initialFormDefaults: FormDefaults;
   initialDetailWidth: number;
   initialCoverSource: string;
   imageProperties: string[];
@@ -94,21 +103,31 @@ export function CardLayoutEditor({
 }) {
   const [mode, setMode] = useState<ViewMode>("gallery");
 
-  // Both arrangements live here at once so switching views costs nothing and one save
-  // commits the pair — a half-saved screen is worse than a slightly larger form.
+  // All three arrangements live here at once so switching views costs nothing and one save
+  // commits the set — a half-saved screen is worse than a slightly larger form.
   const [galleryLayout, setGalleryLayout] = useState<CardLayout>(initialLayout);
   const [detailLayout, setDetailLayout] = useState<CardLayout>(initialDetailLayout);
+  const [formLayout, setFormLayout] = useState<CardLayout>(initialFormLayout);
   const [galleryConfigs, setGalleryConfigs] = useState<Record<string, DisplayConfig>>({});
   const [detailConfigs, setDetailConfigs] = useState<Record<string, DisplayConfig>>({});
+  const [formDefaults, setFormDefaults] = useState<FormDefaults>(initialFormDefaults);
   const [detailWidth, setDetailWidth] = useState(initialDetailWidth);
   // Where the image comes from is a property of the data, not of a view, so both share it.
   const [coverSource, setCoverSource] = useState(initialCoverSource);
 
   const detailMode = mode === "detail";
-  const layout = detailMode ? detailLayout : galleryLayout;
-  const setLayout = detailMode ? setDetailLayout : setGalleryLayout;
+  const formMode = mode === "form";
+  const layout = formMode ? formLayout : detailMode ? detailLayout : galleryLayout;
+  const setLayout = formMode ? setFormLayout : detailMode ? setDetailLayout : setGalleryLayout;
   const configs = detailMode ? detailConfigs : galleryConfigs;
   const setConfigs = detailMode ? setDetailConfigs : setGalleryConfigs;
+
+  // A form is inputs, not a rendered card: it has no cover and nothing to format, and it
+  // can only offer the property types Hallery is able to write back.
+  const formEligible = useMemo(
+    () => new Set(properties.filter((p) => FORM_FIELD_TYPES.has(p.notionPropertyType)).map((p) => p.notionPropertyId)),
+    [properties],
+  );
 
   const [galleryShape, setGalleryShape] = useState<CoverShape>(initialShape);
   const [detailShape, setDetailShape] = useState<CoverShape>(initialDetailShape);
@@ -162,7 +181,8 @@ export function CardLayoutEditor({
   const unplaced = [
     ...(placed.has(TITLE_FIELD_ID) ? [] : [{ id: TITLE_FIELD_ID, name: "Tiêu đề", type: "title" }]),
     ...properties
-      .filter((p) => !placed.has(p.notionPropertyId))
+      // A form can only offer what Hallery can write, so the rest never reaches the tray.
+      .filter((p) => !placed.has(p.notionPropertyId) && (!formMode || formEligible.has(p.notionPropertyId)))
       .map((p) => ({ id: p.notionPropertyId, name: p.notionPropertyName, type: p.notionPropertyType })),
   ].filter((entry) => entry.name.toLowerCase().includes(search.trim().toLowerCase()));
 
@@ -333,6 +353,8 @@ export function CardLayoutEditor({
       <input type="hidden" name="coverSource" value={coverSource} />
       <input type="hidden" name="propertyConfigs" value={JSON.stringify(galleryConfigs)} />
       <input type="hidden" name="detailPropertyConfigs" value={JSON.stringify(detailConfigs)} />
+      <input type="hidden" name="formLayout" value={JSON.stringify(formLayout)} />
+      <input type="hidden" name="formDefaults" value={JSON.stringify(formDefaults)} />
 
       <DndContext
         id="card-layout"
@@ -367,16 +389,21 @@ export function CardLayoutEditor({
           />
 
           <div className="flex items-stretch gap-2">
-            <CoverShapeButton shape={shape} onChange={changeShape} />
-            <ArrangementButton
-              value={layout.arrangement}
-              orientation={shape.aspect}
-              extended={layout.extended}
-              onChange={(arrangement, extended) => {
-                setArrangement(arrangement);
-                setLayout((c) => ({ ...c, extended }));
-              }}
-            />
+            {/* A form draws inputs, so it has no cover to shape or place. */}
+            {!formMode && (
+              <>
+                <CoverShapeButton shape={shape} onChange={changeShape} />
+                <ArrangementButton
+                  value={layout.arrangement}
+                  orientation={shape.aspect}
+                  extended={layout.extended}
+                  onChange={(arrangement, extended) => {
+                    setArrangement(arrangement);
+                    setLayout((c) => ({ ...c, extended }));
+                  }}
+                />
+              </>
+            )}
             <button
               type="button"
               aria-label="Chỉnh khung bố cục"
@@ -386,7 +413,7 @@ export function CardLayoutEditor({
                 setEditingLayout((open) => !open);
                 setSelected(null);
               }}
-              className={`w-9 shrink-0 rounded-lg border text-sm ${
+              className={`shrink-0 rounded-lg border text-sm ${formMode ? "flex-1 py-1.5" : "w-9"} ${
                 editingLayout
                   ? "border-emerald-700 bg-emerald-600 text-white"
                   : "border-stone-300 bg-white text-stone-500 hover:border-stone-500"
@@ -424,7 +451,9 @@ export function CardLayoutEditor({
                 cardKind={cardKind}
                 // A detail is sized in pixels, not in cards-per-row, so the preview shows
                 // its real width rather than a thumbnail's multiple.
-                widthOverride={detailMode ? detailWidth : undefined}
+                widthOverride={detailMode ? detailWidth : formMode ? FORM_PREVIEW_WIDTH : undefined}
+                // The form previews as inputs, since that is what it will actually be.
+                asInputs={formMode}
               />
             </div>
             <label className="flex items-center gap-2 border-t border-stone-200 bg-white px-4 py-2 text-xs text-stone-600">
@@ -442,7 +471,15 @@ export function CardLayoutEditor({
 
         {/* 5 */}
         <div className="w-72 shrink-0">
-          {editingLayout ? (
+          {formMode && !editingLayout ? (
+            <FormFieldPanel
+              key={`form:${selected ?? "none"}`}
+              propertyName={selected === TITLE_FIELD_ID ? "Tiêu đề" : (rawSelected?.notionPropertyName ?? null)}
+              propertyType={selected === TITLE_FIELD_ID ? "title" : (rawSelected?.notionPropertyType ?? null)}
+              config={formDefaults[selected ?? ""] ?? {}}
+              onChange={(next) => selected && setFormDefaults((c) => ({ ...c, [selected]: next }))}
+            />
+          ) : editingLayout ? (
             <LayoutPanel
               regions={regions.map((id) => ({ id, grid: layout.regions[id] }))}
               regionLabel={(id) =>
@@ -522,6 +559,7 @@ function ModeSwitch({ mode, onChange }: { mode: ViewMode; onChange: (mode: ViewM
   const tabs: { value: ViewMode; label: string }[] = [
     { value: "gallery", label: "Gallery card" },
     { value: "detail", label: "Card Detail" },
+    { value: "form", label: "Form thêm" },
   ];
 
   return (
@@ -939,6 +977,8 @@ type CanvasProps = {
   cardKind: "ngang" | "extra" | "doc";
   /** Exact preview width in px, for views not measured in cards per row. */
   widthOverride?: number;
+  /** Draw fields as the inputs the form will render, not as values. */
+  asInputs?: boolean;
 };
 
 function CardCanvas(props: CanvasProps) {
@@ -1098,6 +1138,7 @@ function BoxSlot({
             property={props.byId.get(field.id) ?? null}
             title={props.title}
             value={props.values[field.id]}
+            asInput={props.asInputs}
             config={props.configs[field.id]}
             selected={props.selected === field.id}
             onSelect={() => props.onSelect(field.id)}
@@ -1206,6 +1247,7 @@ function OverlayZone(props: CanvasProps) {
             property={props.byId.get(field.id) ?? null}
             title={props.title}
             value={props.values[field.id]}
+            asInput={props.asInputs}
             config={props.configs[field.id]}
             selected={props.selected === field.id}
             onSelect={() => props.onSelect(field.id)}
@@ -1228,6 +1270,7 @@ function FieldChip({
   onSelect,
   onRemove,
   dark,
+  asInput,
 }: {
   field: CardField;
   property: EditableCardProperty | null;
@@ -1238,6 +1281,8 @@ function FieldChip({
   onSelect: () => void;
   onRemove: () => void;
   dark?: boolean;
+  /** Preview this field as the input the form will draw, rather than as a value. */
+  asInput?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `field:${field.id}` });
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: `before:${field.id}` });
@@ -1262,10 +1307,21 @@ function FieldChip({
         onClick={onSelect}
         className="flex min-w-0 flex-1 cursor-grab items-baseline gap-1 active:cursor-grabbing"
       >
-        {!isTitle && field.showLabel && (
-          <span className={`shrink-0 truncate ${dark ? "text-white/60" : "text-stone-400"}`}>{name}</span>
+        {asInput ? (
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className={`truncate ${dark ? "text-white/60" : "text-stone-500"}`}>
+              {isTitle ? "Tiêu đề" : name}
+            </span>
+            <span className="h-5 w-full rounded border border-stone-300 bg-stone-50" />
+          </span>
+        ) : (
+          <>
+            {!isTitle && field.showLabel && (
+              <span className={`shrink-0 truncate ${dark ? "text-white/60" : "text-stone-400"}`}>{name}</span>
+            )}
+            <span className={`min-w-0 flex-1 truncate ${isTitle ? "font-semibold" : ""}`}>{shown}</span>
+          </>
         )}
-        <span className={`min-w-0 flex-1 truncate ${isTitle ? "font-semibold" : ""}`}>{shown}</span>
       </span>
       <button
         type="button"

@@ -13,7 +13,20 @@ import { isFullDataSource, isFullPage, type PageObjectResponse } from "@notionhq
 import { syncPropertyConfigs, syncResolvedTypes } from "@/lib/property-config-sync";
 import { CategoryBar } from "@/components/category-bar";
 import { bucketPages, filterPagesByCategory } from "@/lib/category";
-import { CARD_WIDTH_FACTOR, cardKindOf, parseCardLayout, resolveCardLayout } from "@/lib/card-layout";
+import {
+  CARD_WIDTH_FACTOR,
+  TITLE_FIELD_ID,
+  cardKindOf,
+  parseCardLayout,
+  resolveCardLayout,
+} from "@/lib/card-layout";
+import { CreateItemPopup, type CreateFormField } from "@/components/create-item-popup";
+import {
+  FORM_FIELD_TYPES,
+  parseFormDefaults,
+  parseFormLastValues,
+  resolveDefaultValue,
+} from "@/lib/create-form";
 import { CardGrid } from "@/components/card-grid";
 import { GalleryToolbar, type ToolbarProperty } from "@/components/gallery-toolbar";
 import {
@@ -105,6 +118,48 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
   const positions = new Map(
     (await db.coverPosition.findMany({ where: { galleryId } })).map((p) => [p.notionPageId, p]),
   );
+
+  // The quick-entry form: whatever the form layout names, in the order it arranged them,
+  // each starting on its configured default.
+  const formLayout = parseCardLayout(galleryConfig.formCard);
+  const formDefaults = parseFormDefaults(galleryConfig.formDefaults);
+  const lastValues = parseFormLastValues(galleryConfig.formLastValues);
+  const managedById = new Map(managed.map((config) => [config.notionPropertyId, config]));
+
+  const formFields: CreateFormField[] = (
+    formLayout ? Object.values(formLayout.regions).flatMap((grid) => grid.boxes.flatMap((box) => box.fields)) : []
+  ).flatMap((field) => {
+    const isTitle = field.id === TITLE_FIELD_ID;
+    const config = managedById.get(field.id);
+    if (!isTitle && !config) return [];
+
+    const name = isTitle ? (titlePropertyName ?? "Name") : config!.notionPropertyName;
+    const type = isTitle ? "title" : config!.notionPropertyType;
+    if (!FORM_FIELD_TYPES.has(type)) return [];
+
+    const schema = dataSource?.properties[name];
+    const options =
+      schema?.type === "select"
+        ? schema.select.options.map((option) => option.name)
+        : schema?.type === "status"
+          ? schema.status.options.map((option) => option.name)
+          : schema?.type === "multi_select"
+            ? schema.multi_select.options.map((option) => option.name)
+            : undefined;
+
+    return [
+      {
+        propertyId: field.id,
+        name,
+        type,
+        options,
+        required: formDefaults[field.id]?.required === true,
+        initialValue: resolveDefaultValue(formDefaults[field.id], type, lastValues, field.id),
+      },
+    ];
+  });
+
+  const formColumns = formLayout?.regions.main?.cols === 2 ? 2 : 1;
 
   // Every card carries the current view, so the item it opens knows what to go back to.
   const returnQuery = returnQueryString(search);
@@ -239,6 +294,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
           </p>
         </div>
         <div className="flex items-center gap-4">
+          <CreateItemPopup galleryId={galleryId} fields={formFields} columns={formColumns} />
           <RelationGalleryMenu entries={relationGalleries} />
           <Link
             href={`/galleries/${galleryId}/settings/category`}
