@@ -315,7 +315,9 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
 
               const cover = showCover && (
                 <div
-                  className="relative shrink-0 self-start"
+                  // A top cover has no explicit width. It must stretch across the card;
+                  // `self-start` makes a landscape aspect-ratio box shrink to zero.
+                  className={`relative shrink-0 ${cardLayout.sideBySide ? "self-start" : "w-full"}`}
                   style={cardLayout.sideBySide ? { width: `${cardLayout.ratio[0]}%` } : undefined}
                 >
                   {/* Changing source URLs gets a fresh lazy-image lifecycle rather than
