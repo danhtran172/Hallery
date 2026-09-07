@@ -45,6 +45,7 @@ import {
 import { configTypeOf } from "@/lib/property-kind";
 import { RelationGalleryMenu } from "@/components/relation-gallery-menu";
 import { listRelationGalleries } from "@/lib/relation-galleries";
+import { GallerySyncHeartbeat } from "@/components/gallery-sync-heartbeat";
 
 /** Gap between cards, mirrored in the base-width calculation below. */
 const CARD_GAP_REM = 1;
@@ -308,6 +309,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
 
   return (
     <div className="w-full px-6 py-12">
+      <GallerySyncHeartbeat galleryId={galleryId} />
       <div className="mb-8 flex items-center justify-between">
         <div>
           <Link href="/" className="text-xs text-stone-500 hover:underline">
