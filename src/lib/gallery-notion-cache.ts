@@ -1,13 +1,15 @@
 import type { GetDataSourceResponse, QueryDataSourceResponse } from "@notionhq/client";
+import { after } from "next/server";
 import { db } from "@/lib/db";
 import { getNotionClient } from "@/lib/notion";
 
 /**
- * Gallery requests fan out to two comparatively slow Notion endpoints. A one-minute
- * snapshot is short enough for edits made directly in Notion, while turning repeat
- * visits into local SQLite reads. Hallery edits clear it immediately below.
+ * A fresh snapshot is never blocked on Notion. Once it becomes stale, callers still get
+ * the last known-good data while a single refresh runs after the response. The stale
+ * window makes a temporary Notion failure a degraded experience, not a blank Gallery.
  */
-const CACHE_TTL_MS = 60 * 1000;
+const FRESH_TTL_MS = 60 * 1000;
+const STALE_TTL_MS = 10 * 60 * 1000;
 
 /** Rows per request. Notion allows up to 100; smaller pages trade round trips for lighter responses. */
 const PAGE_SIZE = 50;
@@ -24,6 +26,9 @@ const MIN_REQUEST_GAP_MS = 340;
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** One Notion crawl per Gallery at a time. SQLite remains the durable cache. */
+const refreshesInFlight = new Map<string, Promise<GalleryNotionSnapshot>>();
+
 export type GalleryNotionSnapshot = {
   dataSourceRes: GetDataSourceResponse;
   queryRes: QueryDataSourceResponse;
@@ -37,9 +42,9 @@ function parseSnapshot(dataSourceJson: string, queryJson: string): GalleryNotion
 }
 
 /**
- * Reads a Gallery's short-lived Notion snapshot, fetching and storing a new one only
- * when absent or expired. The workspace token is used only for the cache miss and is
- * never persisted in the cache.
+ * Reads a Gallery's durable Notion snapshot. A fresh row is returned immediately; a
+ * valid stale row is also returned immediately and revalidated in the background. Only
+ * an absent or unusable row makes the request wait for Notion.
  */
 export async function getGalleryNotionSnapshot({
   galleryId,
@@ -51,38 +56,106 @@ export async function getGalleryNotionSnapshot({
   accessToken: string;
 }): Promise<GalleryNotionSnapshot> {
   const cached = await db.galleryNotionCache.findUnique({ where: { galleryId } });
-  if (cached && cached.expiresAt > new Date()) {
+  if (cached) {
     try {
-      return parseSnapshot(cached.dataSourceJson, cached.queryJson);
+      const snapshot = parseSnapshot(cached.dataSourceJson, cached.queryJson);
+      const now = Date.now();
+      // Existing rows receive their new policy lazily, so a migration never has to make
+      // one expensive Notion crawl per Gallery before the app can start.
+      const freshUntil = cached.freshUntil ?? cached.expiresAt;
+      const staleUntil = cached.staleUntil ?? new Date(freshUntil.getTime() + STALE_TTL_MS);
+
+      if (freshUntil.getTime() > now) return snapshot;
+      if (staleUntil.getTime() > now) {
+        after(() => {
+          // The previous snapshot stays visible on failure. The refresh stores a concise
+          // diagnostic itself, and swallowing here avoids an unhandled background task.
+          return refreshGalleryNotionSnapshot({ galleryId, dataSourceId, accessToken }).catch(() => undefined);
+        });
+        return snapshot;
+      }
     } catch {
       // A bad record must never make a Gallery unavailable; replace it on the miss below.
       await db.galleryNotionCache.delete({ where: { galleryId } });
     }
   }
 
+  return refreshGalleryNotionSnapshot({ galleryId, dataSourceId, accessToken });
+}
+
+async function refreshGalleryNotionSnapshot({
+  galleryId,
+  dataSourceId,
+  accessToken,
+}: {
+  galleryId: string;
+  dataSourceId: string;
+  accessToken: string;
+}): Promise<GalleryNotionSnapshot> {
+  const existing = refreshesInFlight.get(galleryId);
+  if (existing) return existing;
+
+  const refresh = fetchAndStoreGalleryNotionSnapshot({ galleryId, dataSourceId, accessToken });
+  refreshesInFlight.set(galleryId, refresh);
+  try {
+    return await refresh;
+  } finally {
+    refreshesInFlight.delete(galleryId);
+  }
+}
+
+async function fetchAndStoreGalleryNotionSnapshot({
+  galleryId,
+  dataSourceId,
+  accessToken,
+}: {
+  galleryId: string;
+  dataSourceId: string;
+  accessToken: string;
+}): Promise<GalleryNotionSnapshot> {
   const notion = getNotionClient(accessToken);
-  const [dataSourceRes, queryRes] = await Promise.all([
-    notion.dataSources.retrieve({ data_source_id: dataSourceId }),
-    queryAllPages(notion, dataSourceId),
-  ]);
-  const snapshot = { dataSourceRes, queryRes };
+  try {
+    const [dataSourceRes, queryRes] = await Promise.all([
+      notion.dataSources.retrieve({ data_source_id: dataSourceId }),
+      queryAllPages(notion, dataSourceId),
+    ]);
+    const snapshot = { dataSourceRes, queryRes };
+    const now = Date.now();
+    const freshUntil = new Date(now + FRESH_TTL_MS);
 
-  await db.galleryNotionCache.upsert({
-    where: { galleryId },
-    create: {
-      galleryId,
-      dataSourceJson: JSON.stringify(dataSourceRes),
-      queryJson: JSON.stringify(queryRes),
-      expiresAt: new Date(Date.now() + CACHE_TTL_MS),
-    },
-    update: {
-      dataSourceJson: JSON.stringify(dataSourceRes),
-      queryJson: JSON.stringify(queryRes),
-      expiresAt: new Date(Date.now() + CACHE_TTL_MS),
-    },
-  });
+    await db.galleryNotionCache.upsert({
+      where: { galleryId },
+      create: {
+        galleryId,
+        dataSourceJson: JSON.stringify(dataSourceRes),
+        queryJson: JSON.stringify(queryRes),
+        expiresAt: freshUntil,
+        freshUntil,
+        staleUntil: new Date(now + STALE_TTL_MS),
+        lastFullReconcileAt: new Date(now),
+        lastSyncError: null,
+      },
+      update: {
+        dataSourceJson: JSON.stringify(dataSourceRes),
+        queryJson: JSON.stringify(queryRes),
+        expiresAt: freshUntil,
+        freshUntil,
+        staleUntil: new Date(now + STALE_TTL_MS),
+        lastFullReconcileAt: new Date(now),
+        lastSyncError: null,
+      },
+    });
 
-  return snapshot;
+    return snapshot;
+  } catch (error) {
+    // Do not persist error objects (they can contain sensitive request details); a concise
+    // reason is enough for local diagnostics and is cleared by the next successful sync.
+    await db.galleryNotionCache.updateMany({
+      where: { galleryId },
+      data: { lastSyncError: error instanceof Error ? error.message.slice(0, 500) : "Notion refresh failed" },
+    });
+    throw error;
+  }
 }
 
 /**

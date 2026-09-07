@@ -67,12 +67,19 @@ model Gallery {
 /// Keeping it separate from `Gallery` makes expiration and invalidation cheap, while
 /// cascading deletion keeps it from outliving a removed Gallery.
 model GalleryNotionCache {
-  galleryId       String   @id
-  gallery         Gallery  @relation(fields: [galleryId], references: [id], onDelete: Cascade)
-  dataSourceJson  String
-  queryJson       String
-  expiresAt       DateTime
-  updatedAt       DateTime @updatedAt
+  galleryId            String   @id
+  gallery              Gallery  @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+  dataSourceJson       String
+  queryJson            String
+  /// Kept during the migration from the original one-window cache. New reads use the
+  /// explicit fresh/stale windows below, then this column can be removed safely later.
+  expiresAt            DateTime
+  freshUntil           DateTime?
+  staleUntil           DateTime?
+  lastDeltaSyncAt      DateTime?
+  lastFullReconcileAt  DateTime?
+  lastSyncError        String?
+  updatedAt            DateTime @updatedAt
 }
 
 /// Remembers the first content image found in a Notion page, so the Gallery doesn't
