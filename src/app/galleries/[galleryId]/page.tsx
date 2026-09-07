@@ -49,6 +49,25 @@ import { GallerySyncHeartbeat } from "@/components/gallery-sync-heartbeat";
 
 /** Gap between cards, mirrored in the base-width calculation below. */
 const CARD_GAP_REM = 1;
+const CARDS_PER_PAGE = 24;
+
+function requestedCardPage(value: string | string[] | undefined, totalCards: number) {
+  const parsed = typeof value === "string" ? Number.parseInt(value, 10) : 1;
+  const page = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+  return Math.min(page, Math.max(1, Math.ceil(totalCards / CARDS_PER_PAGE)));
+}
+
+function withCardPage(
+  search: Record<string, string | string[] | undefined>,
+  cardPage: number,
+): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(search)) {
+    if (typeof value === "string" && key !== "cardPage") params.set(key, value);
+  }
+  params.set("cardPage", String(cardPage));
+  return params.toString();
+}
 
 export default async function GalleryPage({ params, searchParams }: PageProps<"/galleries/[galleryId]">) {
   const { galleryId } = await params;
@@ -105,7 +124,17 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
   // fight: pick a category, then search or filter inside it.
   const query = parseGalleryQuery(search);
   const pages = applyGalleryQuery(categoryPages, query, searchable);
+  const cardPage = requestedCardPage(search.cardPage, pages.length);
+  const visiblePages = pages.slice(0, cardPage * CARDS_PER_PAGE);
   const groups = query.groupBy ? groupPages(pages, query.groupBy) : null;
+  const visiblePageIds = new Set(visiblePages.map((page) => page.id));
+  const visibleGroups = groups
+    ?.map((group) => ({
+      ...group,
+      total: group.pages.length,
+      pages: group.pages.filter((page) => visiblePageIds.has(page.id)),
+    }))
+    .filter((group) => group.pages.length > 0);
 
   const galleryConfig = parseGalleryConfig(gallery.displayConfig);
   const cardKindOrientation =
@@ -125,7 +154,11 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
   const cardKind = cardKindOf(cardLayout.arrangement, cardKindOrientation, cardLayout.extended);
 
   const positions = new Map(
-    (await db.coverPosition.findMany({ where: { galleryId } })).map((p) => [p.notionPageId, p]),
+    (
+      await db.coverPosition.findMany({
+        where: { galleryId, notionPageId: { in: visiblePages.map((page) => page.id) } },
+      })
+    ).map((p) => [p.notionPageId, p]),
   );
 
   // The quick-entry form: whatever the form layout names, in the order it arranged them,
@@ -377,21 +410,36 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
             : "Database này chưa có item nào."}
         </p>
       ) : (
-        groups ? (
+        visibleGroups ? (
           <div className="flex flex-col gap-8">
-            {groups.map((group) => (
+            {visibleGroups.map((group) => (
               <section key={group.key}>
                 <h2 className="mb-3 flex items-baseline gap-2 text-sm font-semibold text-stone-700">
                   {group.label}
-                  <span className="text-xs font-normal text-stone-400">{group.pages.length}</span>
+                  <span className="text-xs font-normal text-stone-400">
+                    {group.pages.length} / {group.total}
+                  </span>
                 </h2>
                 {renderGrid(group.pages)}
               </section>
             ))}
           </div>
         ) : (
-          renderGrid(pages)
+          renderGrid(visiblePages)
         )
+      )}
+
+      {visiblePages.length < pages.length && (
+        <div className="mt-8 flex justify-center">
+          <Link
+            href={`/galleries/${galleryId}?${withCardPage(search, cardPage + 1)}`}
+            prefetch={false}
+            scroll={false}
+            className="rounded-md border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 hover:border-stone-500"
+          >
+            Xem thêm {Math.min(CARDS_PER_PAGE, pages.length - visiblePages.length)} item
+          </Link>
+        </div>
       )}
     </div>
   );

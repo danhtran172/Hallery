@@ -11,6 +11,7 @@ production build against the local 94-item `Game Station` Gallery unless noted.
 | 2026-09-07 | Card and Category Settings read the Gallery snapshot | Card/Category: 0.41 s / 0.52 s | Warm Card/Category: 0.040 s / 0.019 s | Kept |
 | 2026-09-07 | Disable viewport prefetch on Gallery card links | 24 Item Detail prefetches on first Gallery visit | 0 Item Detail requests in a fresh browser visit | Kept |
 | 2026-09-07 | Visible-tab Notion delta heartbeat | No proactive local-cache update | One 36-byte same-origin POST; 0.97 s background delta check | Kept |
+| 2026-09-07 | Server-paged Gallery cards (24 per page) | 94-card response: 634 KB | First 24 cards: 184 KB, warm TTFB 0.068 s; 48 cards: 341 KB | Kept |
 
 The cold Notion crawl remains dependent on the remote API and is intentionally
 not compared to warm/stale requests. Each future slice must add its own

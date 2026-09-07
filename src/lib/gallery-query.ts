@@ -381,7 +381,7 @@ export const RETURN_PARAM = "back";
 
 export function returnQueryString(params: Record<string, string | string[] | undefined>): string {
   const carried = new URLSearchParams();
-  for (const key of ["q", "filter", "sort", "group", "axis", "value"]) {
+  for (const key of ["q", "filter", "sort", "group", "axis", "value", "cardPage"]) {
     const value = params[key];
     if (typeof value === "string" && value !== "") carried.set(key, value);
   }

@@ -86,6 +86,9 @@ export function GalleryToolbar({
   /** Rewrites one parameter, keeping the rest — including the category axis — intact. */
   function commit(changes: Record<string, string | null>) {
     const next = new URLSearchParams(params.toString());
+    // Search, filter, sort and grouping all change the result set. Keep the URL's
+    // pagination explicit, but never strand a reader on a later, now-empty page.
+    next.delete("cardPage");
     for (const [key, value] of Object.entries(changes)) {
       if (value === null || value === "") next.delete(key);
       else next.set(key, value);
