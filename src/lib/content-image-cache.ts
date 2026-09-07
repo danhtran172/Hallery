@@ -34,6 +34,7 @@ export async function resolveContentImage(
       // A refreshed original must get a newly derived preview too.
       thumbnailFile: null,
       cardFile: null,
+      detailFile: null,
       thumbnailSource: null,
     };
 

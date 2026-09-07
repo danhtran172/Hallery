@@ -186,7 +186,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
         : sourceUrl
           ? coverSourceFingerprint(sourceUrl)
           : null;
-      return cached.thumbnailFile && cached.cardFile && sourceKey && cached.thumbnailSource === sourceKey
+      return cached.thumbnailFile && cached.cardFile && cached.detailFile && sourceKey && cached.thumbnailSource === sourceKey
         ? [[
             cached.notionPageId,
             {

@@ -15,6 +15,7 @@ production build against the local 94-item `Game Station` Gallery unless noted.
 | 2026-09-07 | Cover queue, atomic file writes and 512 MB LRU bound | Unbounded parallel cover work and direct writes | 34 Gallery images render with no browser errors; queue now limits work to 3 jobs | Kept |
 | 2026-09-07 | Server-provided cached cover manifest | 20 per-card `cover-preview` metadata requests | 3 cold/content-image fallback requests in a fresh browser visit | Kept |
 | 2026-09-07 | Local 320px WebP card derivatives | Cards promoted from 64px preview to their original cover | 21 visible covers generated on first visit; a local card response was 8.7–9.5 KB in 6–10 ms | Kept |
+| 2026-09-07 | Local 768px Card Detail derivative | Detail could download the original cover | Warm Detail: 0.054 s TTFB; 768px local cover: 33 KB in 7–31 ms | Kept |
 
 The cold Notion crawl remains dependent on the remote API and is intentionally
 not compared to warm/stale requests. Each future slice must add its own

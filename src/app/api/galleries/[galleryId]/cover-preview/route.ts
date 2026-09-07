@@ -50,7 +50,7 @@ async function resolveCardCoverUrls(pageId: string, source: CoverSource): Promis
 
   const sourceKey = source.storedFile ? `stored:${source.storedFile}` : coverSourceFingerprint(source.fullUrl);
   const cached = await db.pageImageCache.findUnique({ where: { notionPageId: pageId } });
-  if (cached?.thumbnailFile && cached.cardFile && cached.thumbnailSource === sourceKey) {
+  if (cached?.thumbnailFile && cached.cardFile && cached.detailFile && cached.thumbnailSource === sourceKey) {
     return {
       previewUrl: storedCoverThumbnailUrl(pageId, cached.checkedAt.getTime(), cached.thumbnailFile),
       cardUrl: storedCoverCardUrl(pageId, cached.checkedAt.getTime(), cached.cardFile),
@@ -72,9 +72,15 @@ async function resolveCardCoverUrls(pageId: string, source: CoverSource): Promis
       expiresAt: new Date(0),
       thumbnailFile: variants.thumbnailFile,
       cardFile: variants.cardFile,
+      detailFile: variants.detailFile,
       thumbnailSource: sourceKey,
     },
-    update: { thumbnailFile: variants.thumbnailFile, cardFile: variants.cardFile, thumbnailSource: sourceKey },
+    update: {
+      thumbnailFile: variants.thumbnailFile,
+      cardFile: variants.cardFile,
+      detailFile: variants.detailFile,
+      thumbnailSource: sourceKey,
+    },
   });
   return {
     previewUrl: storedCoverThumbnailUrl(pageId, next.checkedAt.getTime(), variants.thumbnailFile),

@@ -12,13 +12,12 @@ import {
   resolveCardLayout,
 } from "@/lib/card-layout";
 import {
-  CONTENT_IMAGE,
   parseGalleryConfig,
   resolveCoverUrl,
   resolveDetailCoverShape,
   resolveDetailWidth,
 } from "@/lib/notion-cover";
-import { storedCoverUrl } from "@/lib/cover-store";
+import { coverFileExists, coverSourceFingerprint, storedCoverDetailUrl, storedCoverUrl } from "@/lib/cover-store";
 import { RETURN_PARAM, galleryHrefFromReturn } from "@/lib/gallery-query";
 import { getGalleryNotionSnapshot } from "@/lib/gallery-notion-cache";
 import { isFullDataSource, isFullPage } from "@notionhq/client";
@@ -109,23 +108,30 @@ export default async function ItemDetailPage({
     coverShape.aspect,
   );
 
-  // Free when the cover is the page's own or a property; a content image costs a blocks
-  // crawl, so that one is served from whatever an earlier gallery visit already cached.
+  // A known local 768px derivative makes the detail as cheap as a card. Content images
+  // still avoid a blocks crawl here: use only a fresh or locally stored source.
   const coverSource = galleryConfig.coverSource;
   const cached =
-    layout.cover !== "none" && coverSource === CONTENT_IMAGE
-      ? await db.pageImageCache.findFirst({
-          where: {
-            notionPageId: pageId,
-            OR: [{ storedFile: { not: null } }, { expiresAt: { gt: new Date() } }],
-          },
-        })
+    layout.cover !== "none"
+      ? await db.pageImageCache.findUnique({ where: { notionPageId: pageId } })
       : null;
-  const coverUrl =
-    layout.cover === "none"
-      ? null
-      : (resolveCoverUrl(pageRes, coverSource) ??
-        (cached?.storedFile ? storedCoverUrl(pageId) : (cached?.imageUrl ?? null)));
+  const directCoverUrl = resolveCoverUrl(pageRes, coverSource);
+  const cachedContentUrl = cached?.storedFile
+    ? storedCoverUrl(pageId)
+    : cached && cached.expiresAt > new Date()
+      ? cached.imageUrl
+      : null;
+  const coverSourceUrl = directCoverUrl ?? cachedContentUrl;
+  const sourceKey = cached?.storedFile && coverSourceUrl === storedCoverUrl(pageId)
+    ? `stored:${cached.storedFile}`
+    : coverSourceUrl
+      ? coverSourceFingerprint(coverSourceUrl)
+      : null;
+  const localDetailUrl =
+    cached?.detailFile && sourceKey && cached.thumbnailSource === sourceKey && (await coverFileExists(cached.detailFile))
+      ? storedCoverDetailUrl(pageId, cached.checkedAt.getTime(), cached.detailFile)
+      : null;
+  const coverUrl = localDetailUrl ?? coverSourceUrl;
 
   return (
     <div className="mx-auto px-6 py-12" style={{ maxWidth: resolveDetailWidth(galleryConfig) }}>

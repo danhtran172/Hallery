@@ -15,6 +15,7 @@ import sharp from "sharp";
 const CACHE_DIR = path.join(process.cwd(), ".hallery-cache", "covers");
 const THUMBNAIL_SUFFIX = ".thumbnail.webp";
 const CARD_SUFFIX = ".card.webp";
+const DETAIL_SUFFIX = ".detail.webp";
 const CACHE_BYTE_BUDGET = 512 * 1024 * 1024;
 const MAX_CONCURRENT_JOBS = 3;
 const MAINTENANCE_EVERY_WRITES = 16;
@@ -39,7 +40,7 @@ const EXTENSION_BY_TYPE: Record<string, string> = {
 };
 
 type DownloadedImage = { bytes: Buffer; contentType: string };
-export type CoverVariants = { thumbnailFile: string; cardFile: string };
+export type CoverVariants = { thumbnailFile: string; cardFile: string; detailFile: string };
 
 type CoverJob = {
   key: string;
@@ -304,7 +305,7 @@ async function createCoverThumbnail(pageId: string, source: Buffer): Promise<str
   }
 }
 
-/** Generates the two Gallery derivatives from one source buffer and one queued job. */
+/** Generates every Gallery and Detail derivative from one source buffer and queued job. */
 function coverVariantFilename(pageId: string, sourceKey: string, suffix: string) {
   // Source-specific names make concurrent requests for an old and new cover harmless:
   // neither can overwrite the other's immutable browser-cache URL.
@@ -315,14 +316,20 @@ function coverVariantFilename(pageId: string, sourceKey: string, suffix: string)
 async function createCoverVariants(pageId: string, source: Buffer, sourceKey: string): Promise<CoverVariants | null> {
   try {
     const image = sharp(source).rotate();
-    const [thumbnail, card] = await Promise.all([
+    const [thumbnail, card, detail] = await Promise.all([
       image.clone().resize({ width: 64, withoutEnlargement: true }).webp({ quality: 35 }).toBuffer(),
       image.clone().resize({ width: 320, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer(),
+      image.clone().resize({ width: 768, withoutEnlargement: true }).webp({ quality: 78 }).toBuffer(),
     ]);
     const thumbnailFile = coverVariantFilename(pageId, sourceKey, THUMBNAIL_SUFFIX);
     const cardFile = coverVariantFilename(pageId, sourceKey, CARD_SUFFIX);
-    await Promise.all([writeCoverFile(thumbnailFile, thumbnail), writeCoverFile(cardFile, card)]);
-    return { thumbnailFile, cardFile };
+    const detailFile = coverVariantFilename(pageId, sourceKey, DETAIL_SUFFIX);
+    await Promise.all([
+      writeCoverFile(thumbnailFile, thumbnail),
+      writeCoverFile(cardFile, card),
+      writeCoverFile(detailFile, detail),
+    ]);
+    return { thumbnailFile, cardFile, detailFile };
   } catch {
     return null;
   }
@@ -383,6 +390,27 @@ export async function readCoverCard(filename: string): Promise<Buffer | null> {
   }
 }
 
+export async function readCoverDetail(filename: string): Promise<Buffer | null> {
+  if (filename !== path.basename(filename) || !filename.endsWith(DETAIL_SUFFIX)) return null;
+  try {
+    const bytes = await readFile(path.join(CACHE_DIR, filename));
+    touchCoverFile(filename);
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
+/** Lets a server-rendered Detail fall back to its source before referencing an LRU-evicted file. */
+export async function coverFileExists(filename: string): Promise<boolean> {
+  if (filename !== path.basename(filename)) return false;
+  try {
+    return (await stat(path.join(CACHE_DIR, filename))).isFile();
+  } catch {
+    return false;
+  }
+}
+
 /** A derivative may only live under its own page's cache namespace. */
 export function isSafeCoverVariantFile(pageId: string, filename: string, suffix: string): boolean {
   return (
@@ -406,4 +434,9 @@ export function storedCoverThumbnailUrl(pageId: string, version: number, filenam
 /** Versioned local 320px WebP for Gallery cards. */
 export function storedCoverCardUrl(pageId: string, version: number, filename: string): string {
   return `/api/covers/${pageId}/card?v=${version}&f=${encodeURIComponent(filename)}`;
+}
+
+/** Versioned local 768px WebP for the single Card Detail cover. */
+export function storedCoverDetailUrl(pageId: string, version: number, filename: string): string {
+  return `/api/covers/${pageId}/detail?v=${version}&f=${encodeURIComponent(filename)}`;
 }
