@@ -271,6 +271,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
                 >
                   <Link
                     href={`/galleries/${galleryId}/items/${page.id}${itemSuffix}`}
+                    prefetch={false}
                     aria-label={title}
                     className="absolute inset-0 z-10"
                   />

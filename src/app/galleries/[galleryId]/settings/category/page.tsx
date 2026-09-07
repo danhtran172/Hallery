@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isFullDataSource } from "@notionhq/client";
 import { db } from "@/lib/db";
-import { getNotionClient } from "@/lib/notion";
+import { getGalleryNotionSnapshot } from "@/lib/gallery-notion-cache";
 import { SELECT_AXIS_TYPES, listAxisCandidates } from "@/lib/category";
 import { saveCategoryAxes } from "./actions";
 
@@ -16,8 +16,11 @@ export default async function CategorySettingsPage({
   });
   if (!gallery) notFound();
 
-  const notion = getNotionClient(gallery.workspace.accessToken);
-  const dataSource = await notion.dataSources.retrieve({ data_source_id: gallery.notionDataSourceId });
+  const { dataSourceRes: dataSource } = await getGalleryNotionSnapshot({
+    galleryId,
+    dataSourceId: gallery.notionDataSourceId,
+    accessToken: gallery.workspace.accessToken,
+  });
   const candidates = isFullDataSource(dataSource) ? listAxisCandidates(dataSource) : [];
 
   const chosenIds = new Set(gallery.categoryAxes.map((axis) => axis.notionPropertyId));

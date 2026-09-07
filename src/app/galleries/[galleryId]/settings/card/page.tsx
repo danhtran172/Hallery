@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isFullDataSource, isFullPage } from "@notionhq/client";
 import { db } from "@/lib/db";
-import { getNotionClient } from "@/lib/notion";
+import { getGalleryNotionSnapshot, type GalleryNotionSnapshot } from "@/lib/gallery-notion-cache";
 import { getPageTitle, getTitlePropertyName } from "@/lib/notion-schema";
 import {
   arrangementsFor,
@@ -68,11 +68,12 @@ export default async function CardLayoutSettingsPage({
     arrangement: "no-cover" as const,
   };
 
-  const preview = await loadPreviewItem(
-    gallery.notionDataSourceId,
-    gallery.workspace.accessToken,
-    config.coverSource,
-  );
+  const snapshot = await getGalleryNotionSnapshot({
+    galleryId,
+    dataSourceId: gallery.notionDataSourceId,
+    accessToken: gallery.workspace.accessToken,
+  });
+  const preview = loadPreviewItem(snapshot, config.coverSource);
 
   return (
     <div className="flex h-screen w-full flex-col px-6 py-6">
@@ -142,17 +143,9 @@ const EMPTY_PREVIEW: PreviewItem = {
   uploadProperties: [],
 };
 
-async function loadPreviewItem(
-  dataSourceId: string,
-  accessToken: string,
-  coverSource: string | undefined,
-): Promise<PreviewItem> {
+function loadPreviewItem(snapshot: GalleryNotionSnapshot, coverSource: string | undefined): PreviewItem {
   try {
-    const notion = getNotionClient(accessToken);
-    const [dataSource, query] = await Promise.all([
-      notion.dataSources.retrieve({ data_source_id: dataSourceId }),
-      notion.dataSources.query({ data_source_id: dataSourceId, page_size: 1 }),
-    ]);
+    const { dataSourceRes: dataSource, queryRes: query } = snapshot;
 
     const page = query.results.filter(isFullPage)[0];
     if (!page) return EMPTY_PREVIEW;
