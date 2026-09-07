@@ -251,9 +251,7 @@ export function CardCover({
 
       {resolved && (
         <span
-          className={`pointer-events-none absolute bottom-2 left-2 rounded bg-black/65 px-2 py-1 text-[11px] text-white transition-opacity ${
-            armed ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-          }`}
+          className="pointer-events-none absolute top-2 left-2 rounded bg-black/65 px-2 py-1 text-[11px] text-white opacity-0 transition-opacity group-hover:opacity-100"
         >
           {armed ? "Kéo để chỉnh vị trí ảnh" : "Giữ Ctrl rồi kéo để chỉnh vị trí ảnh"}
         </span>
