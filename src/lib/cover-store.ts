@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 
@@ -13,6 +13,9 @@ import sharp from "sharp";
 
 const CACHE_DIR = path.join(process.cwd(), ".hallery-cache", "covers");
 const THUMBNAIL_SUFFIX = ".thumbnail.webp";
+const CACHE_BYTE_BUDGET = 512 * 1024 * 1024;
+const MAX_CONCURRENT_JOBS = 3;
+const MAINTENANCE_EVERY_WRITES = 16;
 
 /** Bigger than this and we keep pointing at Notion rather than hoarding the bytes. */
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -35,9 +38,118 @@ const EXTENSION_BY_TYPE: Record<string, string> = {
 
 type DownloadedImage = { bytes: Buffer; contentType: string };
 
+type CoverJob = {
+  key: string;
+  priority: number;
+  run: () => Promise<string | null>;
+  resolve: (value: string | null) => void;
+};
+
+const inFlightJobs = new Map<string, Promise<string | null>>();
+const queuedJobs: CoverJob[] = [];
+let activeJobs = 0;
+let cacheWrites = 0;
+let pruning: Promise<void> | null = null;
+
 export const CONTENT_TYPE_BY_EXTENSION: Record<string, string> = Object.fromEntries(
   Object.entries(EXTENSION_BY_TYPE).map(([type, ext]) => [ext, type]),
 );
+
+/**
+ * Image work is CPU- and network-heavy. One queue makes every caller share a small fixed
+ * budget instead of allowing a freshly opened Gallery to start dozens of Sharp jobs.
+ */
+function enqueueCoverJob(key: string, priority: number, run: () => Promise<string | null>): Promise<string | null> {
+  const existing = inFlightJobs.get(key);
+  if (existing) return existing;
+
+  const job = new Promise<string | null>((resolve) => {
+    queuedJobs.push({ key, priority, run, resolve });
+    queuedJobs.sort((left, right) => right.priority - left.priority);
+    drainCoverJobs();
+  });
+  inFlightJobs.set(key, job);
+  return job;
+}
+
+function drainCoverJobs() {
+  while (activeJobs < MAX_CONCURRENT_JOBS && queuedJobs.length > 0) {
+    const next = queuedJobs.shift();
+    if (!next) return;
+    activeJobs += 1;
+    void next
+      .run()
+      .catch(() => null)
+      .then(next.resolve)
+      .finally(() => {
+        activeJobs -= 1;
+        inFlightJobs.delete(next.key);
+        drainCoverJobs();
+      });
+  }
+}
+
+async function writeCoverFile(filename: string, bytes: Buffer) {
+  await mkdir(CACHE_DIR, { recursive: true });
+  const target = path.join(CACHE_DIR, filename);
+  const temporary = path.join(CACHE_DIR, `.${filename}.${process.pid}.${crypto.randomUUID()}.tmp`);
+  try {
+    await writeFile(temporary, bytes);
+    await rename(temporary, target);
+  } catch (error) {
+    await unlink(temporary).catch(() => undefined);
+    throw error;
+  }
+
+  cacheWrites += 1;
+  if (cacheWrites % MAINTENANCE_EVERY_WRITES === 0) void scheduleCachePrune();
+}
+
+/** Prunes least-recently-used cache files outside the reader's request path. */
+function scheduleCachePrune(): Promise<void> {
+  if (pruning) return pruning;
+  pruning = pruneCoverCache().finally(() => {
+    pruning = null;
+  });
+  return pruning;
+}
+
+async function pruneCoverCache() {
+  let names: string[];
+  try {
+    names = await readdir(CACHE_DIR);
+  } catch {
+    return;
+  }
+
+  const entries = await Promise.all(
+    names
+      .filter((name) => !name.endsWith(".tmp"))
+      .map(async (name) => {
+        const file = path.join(CACHE_DIR, name);
+        try {
+          const info = await stat(file);
+          return info.isFile() ? { file, size: info.size, usedAt: info.mtimeMs } : null;
+        } catch {
+          return null;
+        }
+      }),
+  );
+  const files = entries.filter((entry): entry is { file: string; size: number; usedAt: number } => entry !== null);
+  let total = files.reduce((sum, file) => sum + file.size, 0);
+  if (total <= CACHE_BYTE_BUDGET) return;
+
+  for (const file of files.sort((left, right) => left.usedAt - right.usedAt)) {
+    await unlink(file.file).catch(() => undefined);
+    total -= file.size;
+    if (total <= CACHE_BYTE_BUDGET) return;
+  }
+}
+
+function touchCoverFile(filename: string) {
+  const now = new Date();
+  void utimes(path.join(CACHE_DIR, filename), now, now).catch(() => undefined);
+}
 
 /** Notion page ids are uuids; refuse anything else so a page id can't escape the cache dir. */
 export function isSafePageId(pageId: string): boolean {
@@ -112,27 +224,28 @@ async function downloadCoverImage(sourceUrl: string): Promise<DownloadedImage | 
  */
 export async function storeCoverImage(pageId: string, sourceUrl: string): Promise<string | null> {
   if (!isSafePageId(pageId)) return null;
+  return enqueueCoverJob(`original:${pageId}:${sourceUrl}`, 1, async () => {
+    const downloaded = await downloadCoverImage(sourceUrl);
+    if (!downloaded) return null;
 
-  const downloaded = await downloadCoverImage(sourceUrl);
-  if (!downloaded) return null;
-
-  try {
-    const extension = EXTENSION_BY_TYPE[downloaded.contentType] ?? "jpg";
-    const filename = `${pageId}.${extension}`;
-
-    await mkdir(CACHE_DIR, { recursive: true });
-    await writeFile(path.join(CACHE_DIR, filename), downloaded.bytes);
-    return filename;
-  } catch {
-    return null;
-  }
+    try {
+      const extension = EXTENSION_BY_TYPE[downloaded.contentType] ?? "jpg";
+      const filename = `${pageId}.${extension}`;
+      await writeCoverFile(filename, downloaded.bytes);
+      return filename;
+    } catch {
+      return null;
+    }
+  });
 }
 
 export async function readCoverImage(filename: string): Promise<Buffer | null> {
   // Guard against a stored name that tries to walk out of the cache directory.
   if (filename !== path.basename(filename)) return null;
   try {
-    return await readFile(path.join(CACHE_DIR, filename));
+    const bytes = await readFile(path.join(CACHE_DIR, filename));
+    touchCoverFile(filename);
+    return bytes;
   } catch {
     return null;
   }
@@ -144,7 +257,10 @@ export async function readCoverImage(filename: string): Promise<Buffer | null> {
  */
 export async function storeCoverThumbnail(pageId: string, source: Buffer): Promise<string | null> {
   if (!isSafePageId(pageId)) return null;
+  return enqueueCoverJob(`thumbnail:${pageId}`, 2, () => createCoverThumbnail(pageId, source));
+}
 
+async function createCoverThumbnail(pageId: string, source: Buffer): Promise<string | null> {
   try {
     const thumbnail = await sharp(source)
       .rotate()
@@ -152,8 +268,7 @@ export async function storeCoverThumbnail(pageId: string, source: Buffer): Promi
       .webp({ quality: 35 })
       .toBuffer();
     const filename = `${pageId}${THUMBNAIL_SUFFIX}`;
-    await mkdir(CACHE_DIR, { recursive: true });
-    await writeFile(path.join(CACHE_DIR, filename), thumbnail);
+    await writeCoverFile(filename, thumbnail);
     return filename;
   } catch {
     return null;
@@ -162,14 +277,19 @@ export async function storeCoverThumbnail(pageId: string, source: Buffer): Promi
 
 /** Downloads only to derive a small preview; the full external image stays at its own URL. */
 export async function storeCoverThumbnailFromUrl(pageId: string, sourceUrl: string): Promise<string | null> {
-  const downloaded = await downloadCoverImage(sourceUrl);
-  return downloaded ? storeCoverThumbnail(pageId, downloaded.bytes) : null;
+  if (!isSafePageId(pageId)) return null;
+  return enqueueCoverJob(`thumbnail:${pageId}:${sourceUrl}`, 2, async () => {
+    const downloaded = await downloadCoverImage(sourceUrl);
+    return downloaded ? createCoverThumbnail(pageId, downloaded.bytes) : null;
+  });
 }
 
 export async function readCoverThumbnail(filename: string): Promise<Buffer | null> {
   if (filename !== path.basename(filename) || !filename.endsWith(THUMBNAIL_SUFFIX)) return null;
   try {
-    return await readFile(path.join(CACHE_DIR, filename));
+    const bytes = await readFile(path.join(CACHE_DIR, filename));
+    touchCoverFile(filename);
+    return bytes;
   } catch {
     return null;
   }
