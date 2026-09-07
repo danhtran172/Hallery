@@ -11,6 +11,7 @@ import {
   parseGalleryConfig,
   resolveCardsPerRow,
   resolveCoverRatio,
+  resolveCoverUrl,
   resolveFormCoverShape,
 } from "@/lib/notion-cover";
 import { isFullDataSource, isFullPage, type PageObjectResponse } from "@notionhq/client";
@@ -46,6 +47,7 @@ import { configTypeOf } from "@/lib/property-kind";
 import { RelationGalleryMenu } from "@/components/relation-gallery-menu";
 import { listRelationGalleries } from "@/lib/relation-galleries";
 import { GallerySyncHeartbeat } from "@/components/gallery-sync-heartbeat";
+import { coverSourceFingerprint, storedCoverThumbnailUrl, storedCoverUrl } from "@/lib/cover-store";
 
 /** Gap between cards, mirrored in the base-width calculation below. */
 const CARD_GAP_REM = 1;
@@ -152,6 +154,38 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
   const coverRatio = resolveCoverRatio(galleryConfig);
 
   const cardKind = cardKindOf(cardLayout.arrangement, cardKindOrientation, cardLayout.extended);
+
+  // This server-produced manifest covers the common page/property sources without another
+  // API request per card. Content-image sources remain lazy because finding their first
+  // block is intentionally deferred until that card is near the viewport.
+  const cachedCoverPreviews = await db.pageImageCache.findMany({
+    where: { notionPageId: { in: visiblePages.map((page) => page.id) } },
+  });
+  const cachedCoversByPageId = new Map(cachedCoverPreviews.map((cached) => [cached.notionPageId, cached]));
+  const coverSources = new Map(
+    galleryConfig.coverSource === CONTENT_IMAGE
+      ? visiblePages.flatMap((page) => {
+          const cached = cachedCoversByPageId.get(page.id);
+          const sourceUrl = cached?.storedFile
+            ? storedCoverUrl(page.id)
+            : (cached?.imageUrl ?? null);
+          return sourceUrl ? [[page.id, sourceUrl] as const] : [];
+        })
+      : visiblePages.map((page) => [page.id, resolveCoverUrl(page, galleryConfig.coverSource)]),
+  );
+  const coverPreviewUrls = new Map(
+    cachedCoverPreviews.flatMap((cached) => {
+      const sourceUrl = coverSources.get(cached.notionPageId);
+      const sourceKey = cached.storedFile
+        ? `stored:${cached.storedFile}`
+        : sourceUrl
+          ? coverSourceFingerprint(sourceUrl)
+          : null;
+      return cached.thumbnailFile && sourceKey && cached.thumbnailSource === sourceKey
+        ? [[cached.notionPageId, storedCoverThumbnailUrl(cached.notionPageId, cached.checkedAt.getTime())] as const]
+        : [];
+    }),
+  );
 
   const positions = new Map(
     (
@@ -276,6 +310,8 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
                     pageId={page.id}
                     initialX={positions.get(page.id)?.posX ?? 50}
                     initialY={positions.get(page.id)?.posY ?? 50}
+                    sourceUrl={coverSources.get(page.id)}
+                    initialPreviewUrl={coverPreviewUrls.get(page.id)}
                   />
                   {cardLayout.overlay.length > 0 && (
                     // Above the card-wide link so overlaid links stay clickable, and on a

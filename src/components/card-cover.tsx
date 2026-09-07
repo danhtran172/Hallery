@@ -27,6 +27,8 @@ export function CardCover({
   pageId,
   initialX,
   initialY,
+  sourceUrl,
+  initialPreviewUrl,
 }: {
   ratio: string;
   /** Crop the frame to a circle. Only ever paired with a 1:1 ratio. */
@@ -35,6 +37,10 @@ export function CardCover({
   pageId: string;
   initialX: number;
   initialY: number;
+  /** Known page/property cover source from the Gallery's batch manifest. Undefined means content-image. */
+  sourceUrl?: string | null;
+  /** A source-matched local 64px WebP preview from the same manifest. */
+  initialPreviewUrl?: string;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [resolved, setResolved] = useState<string | null>(null);
@@ -88,7 +94,8 @@ export function CardCover({
     }
   }, [galleryId, pageId, loadFullImage]);
 
-  // Resolve any cover lazily, once the card is near the viewport.
+  // Resolve any cover lazily, once the card is near the viewport. A source-matched
+  // manifest entry skips this API call entirely; only cold and content-image cards need it.
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
@@ -99,6 +106,16 @@ export function CardCover({
       (entries) => {
         if (!entries.some((e) => e.isIntersecting)) return;
         observer.disconnect();
+
+        if (sourceUrl !== undefined) {
+          fullUrlRef.current = sourceUrl;
+          if (initialPreviewUrl) {
+            setPreviewUrl(initialPreviewUrl);
+            setFailed(false);
+            return;
+          }
+          if (!sourceUrl) return;
+        }
 
         fetch(`/api/galleries/${galleryId}/cover-preview?pageId=${encodeURIComponent(pageId)}`)
           .then((res) => (res.ok ? res.json() : null))
@@ -122,7 +139,7 @@ export function CardCover({
       cancelled = true;
       observer.disconnect();
     };
-  }, [galleryId, pageId, loadFullImage]);
+  }, [galleryId, initialPreviewUrl, pageId, sourceUrl, loadFullImage]);
 
   // Ctrl arms repositioning; without it the cover stays click-through so the card link works.
   useEffect(() => {

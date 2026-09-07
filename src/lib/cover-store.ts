@@ -157,6 +157,29 @@ export function isSafePageId(pageId: string): boolean {
 }
 
 /**
+ * Notion rotates S3 signature/expiry query parameters without changing the image. Keep
+ * meaningful external-image query parameters intact, but remove only well-known volatile
+ * signing keys so a cached derivative survives that harmless URL rotation.
+ */
+export function coverSourceFingerprint(sourceUrl: string): string {
+  try {
+    const url = new URL(sourceUrl);
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(x-amz-|awsaccesskeyid$|signature$|expires$|security-token$)/i.test(key)) {
+        url.searchParams.delete(key);
+      }
+    }
+    url.search = [...url.searchParams.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+      .join("&");
+    return url.toString();
+  } catch {
+    return sourceUrl;
+  }
+}
+
+/**
  * Stops hammering a host that is not answering.
  *
  * Notion's file host is sometimes unreachable from where Hallery runs. Without this, a

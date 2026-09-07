@@ -3,6 +3,7 @@ import { isFullPage } from "@notionhq/client";
 import { resolveContentImage } from "@/lib/content-image-cache";
 import {
   clearHostCooldowns,
+  coverSourceFingerprint,
   isSafePageId,
   readCoverImage,
   storeCoverThumbnail,
@@ -44,7 +45,7 @@ async function resolveCoverSource(galleryId: string, pageId: string): Promise<Co
 async function resolvePreviewUrl(pageId: string, source: CoverSource): Promise<string | null> {
   if (!source.fullUrl) return null;
 
-  const sourceKey = source.storedFile ? `stored:${source.storedFile}` : source.fullUrl;
+  const sourceKey = source.storedFile ? `stored:${source.storedFile}` : coverSourceFingerprint(source.fullUrl);
   const cached = await db.pageImageCache.findUnique({ where: { notionPageId: pageId } });
   if (cached?.thumbnailFile && cached.thumbnailSource === sourceKey) {
     return storedCoverThumbnailUrl(pageId, cached.checkedAt.getTime());
