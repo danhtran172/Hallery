@@ -1,9 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { CreatePageParameters } from "@notionhq/client";
+import { isFullPage, type CreatePageParameters } from "@notionhq/client";
 import { db } from "@/lib/db";
-import { invalidateGalleryNotionCache } from "@/lib/gallery-notion-cache";
+import { patchGalleryNotionSnapshot } from "@/lib/gallery-notion-cache";
 import { getNotionClient } from "@/lib/notion";
 import { buildPropertyUpdate } from "@/lib/notion-write";
 import { TITLE_FIELD_ID } from "@/lib/card-layout";
@@ -97,7 +97,7 @@ export async function createItem(
     };
   }
 
-  let createdPageId: string;
+  let createdPage: Awaited<ReturnType<typeof notion.pages.retrieve>>;
   try {
     const created = await notion.pages.create({
       parent: { data_source_id: gallery.notionDataSourceId },
@@ -111,7 +111,7 @@ export async function createItem(
         ? { children: [{ type: "image" as const, image: { file_upload: { id: uploadId } } }] }
         : {}),
     });
-    createdPageId = created.id;
+    createdPage = isFullPage(created) ? created : await notion.pages.retrieve({ page_id: created.id });
   } catch {
     return {
       error: "Notion từ chối request. Có thể một giá trị không khớp kiểu property, hoặc property đã bị đổi.",
@@ -122,7 +122,7 @@ export async function createItem(
   config.formLastValues = { ...config.formLastValues, ...lastValues };
   await db.gallery.update({ where: { id: galleryId }, data: { displayConfig: JSON.stringify(config) } });
 
-  await invalidateGalleryNotionCache(galleryId);
+  if (isFullPage(createdPage)) await patchGalleryNotionSnapshot(galleryId, createdPage);
   revalidatePath(`/galleries/${galleryId}`);
-  return { error: null, createdPageId };
+  return { error: null, createdPageId: createdPage.id };
 }

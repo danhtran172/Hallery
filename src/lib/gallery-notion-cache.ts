@@ -1,4 +1,4 @@
-import type { GetDataSourceResponse, QueryDataSourceResponse } from "@notionhq/client";
+import type { GetDataSourceResponse, PageObjectResponse, QueryDataSourceResponse } from "@notionhq/client";
 import { after } from "next/server";
 import { db } from "@/lib/db";
 import { getNotionClient } from "@/lib/notion";
@@ -191,7 +191,41 @@ async function queryAllPages(
   return { ...response, results, has_more: Boolean(response.has_more), next_cursor: null };
 }
 
-/** Clears stale page data after Hallery writes a page back to Notion. */
-export function invalidateGalleryNotionCache(galleryId: string) {
-  return db.galleryNotionCache.deleteMany({ where: { galleryId } });
+/**
+ * Applies Hallery's own successful page write to an existing snapshot. This preserves
+ * read-your-own-write without replacing schema or unrelated pages with a new full crawl.
+ */
+export async function patchGalleryNotionSnapshot(galleryId: string, page: PageObjectResponse): Promise<void> {
+  // A concurrent background refresh may replace the row between the read and write. The
+  // timestamp guard prevents an older in-memory copy from discarding that broader refresh.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const cached = await db.galleryNotionCache.findUnique({ where: { galleryId } });
+    if (!cached) return;
+
+    let snapshot: GalleryNotionSnapshot;
+    try {
+      snapshot = parseSnapshot(cached.dataSourceJson, cached.queryJson);
+    } catch {
+      await db.galleryNotionCache.deleteMany({ where: { galleryId } });
+      return;
+    }
+
+    const index = snapshot.queryRes.results.findIndex((result) => result.id === page.id);
+    const existing = index >= 0 ? snapshot.queryRes.results[index] : null;
+    const existingEditedAt =
+      existing && "last_edited_time" in existing && typeof existing.last_edited_time === "string"
+        ? Date.parse(existing.last_edited_time)
+        : Number.NEGATIVE_INFINITY;
+    if (existingEditedAt > Date.parse(page.last_edited_time)) return;
+
+    const results = [...snapshot.queryRes.results];
+    if (index >= 0) results[index] = page;
+    else results.push(page);
+
+    const updated = await db.galleryNotionCache.updateMany({
+      where: { galleryId, updatedAt: cached.updatedAt },
+      data: { queryJson: JSON.stringify({ ...snapshot.queryRes, results }), lastSyncError: null },
+    });
+    if (updated.count === 1) return;
+  }
 }
