@@ -47,7 +47,12 @@ import { configTypeOf } from "@/lib/property-kind";
 import { RelationGalleryMenu } from "@/components/relation-gallery-menu";
 import { listRelationGalleries } from "@/lib/relation-galleries";
 import { GallerySyncHeartbeat } from "@/components/gallery-sync-heartbeat";
-import { coverSourceFingerprint, storedCoverThumbnailUrl, storedCoverUrl } from "@/lib/cover-store";
+import {
+  coverSourceFingerprint,
+  storedCoverCardUrl,
+  storedCoverThumbnailUrl,
+  storedCoverUrl,
+} from "@/lib/cover-store";
 
 /** Gap between cards, mirrored in the base-width calculation below. */
 const CARD_GAP_REM = 1;
@@ -173,7 +178,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
         })
       : visiblePages.map((page) => [page.id, resolveCoverUrl(page, galleryConfig.coverSource)]),
   );
-  const coverPreviewUrls = new Map(
+  const coverVariants = new Map(
     cachedCoverPreviews.flatMap((cached) => {
       const sourceUrl = coverSources.get(cached.notionPageId);
       const sourceKey = cached.storedFile
@@ -181,8 +186,18 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
         : sourceUrl
           ? coverSourceFingerprint(sourceUrl)
           : null;
-      return cached.thumbnailFile && sourceKey && cached.thumbnailSource === sourceKey
-        ? [[cached.notionPageId, storedCoverThumbnailUrl(cached.notionPageId, cached.checkedAt.getTime())] as const]
+      return cached.thumbnailFile && cached.cardFile && sourceKey && cached.thumbnailSource === sourceKey
+        ? [[
+            cached.notionPageId,
+            {
+              previewUrl: storedCoverThumbnailUrl(
+                cached.notionPageId,
+                cached.checkedAt.getTime(),
+                cached.thumbnailFile,
+              ),
+              imageUrl: storedCoverCardUrl(cached.notionPageId, cached.checkedAt.getTime(), cached.cardFile),
+            },
+          ] as const]
         : [];
     }),
   );
@@ -303,7 +318,10 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
                   className="relative shrink-0 self-start"
                   style={cardLayout.sideBySide ? { width: `${cardLayout.ratio[0]}%` } : undefined}
                 >
+                  {/* Changing source URLs gets a fresh lazy-image lifecycle rather than
+                      briefly keeping the previous picture while an observer reconnects. */}
                   <CardCover
+                    key={coverVariants.get(page.id)?.imageUrl ?? coverSources.get(page.id) ?? "no-cover"}
                     ratio={coverRatio}
                     round={isRoundCover(galleryConfig.coverAspect)}
                     galleryId={galleryId}
@@ -311,7 +329,8 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
                     initialX={positions.get(page.id)?.posX ?? 50}
                     initialY={positions.get(page.id)?.posY ?? 50}
                     sourceUrl={coverSources.get(page.id)}
-                    initialPreviewUrl={coverPreviewUrls.get(page.id)}
+                    initialPreviewUrl={coverVariants.get(page.id)?.previewUrl}
+                    initialImageUrl={coverVariants.get(page.id)?.imageUrl}
                   />
                   {cardLayout.overlay.length > 0 && (
                     // Above the card-wide link so overlaid links stay clickable, and on a

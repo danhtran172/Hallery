@@ -10,9 +10,9 @@ import { saveCoverPosition } from "@/app/galleries/[galleryId]/cover-position-ac
 /**
  * Card cover image, with Ctrl-drag to reposition.
  *
- * Each source starts with a tiny local WebP preview, then fades into the full image only
- * after that preview appears. Resolution stays near the viewport so a 90-card gallery
- * never starts 90 image jobs at once.
+ * Each source starts with a tiny local WebP preview, then fades into a local 320px card
+ * derivative after that preview appears. Resolution stays near the viewport so a 90-card
+ * gallery never starts 90 image jobs at once or downloads 90 originals.
  *
  * Painted as a background image on purpose: some Notion cover URLs refuse to be
  * hotlinked, and a background degrades to the plain block instead of a broken icon.
@@ -29,6 +29,7 @@ export function CardCover({
   initialY,
   sourceUrl,
   initialPreviewUrl,
+  initialImageUrl,
 }: {
   ratio: string;
   /** Crop the frame to a circle. Only ever paired with a 1:1 ratio. */
@@ -41,6 +42,8 @@ export function CardCover({
   sourceUrl?: string | null;
   /** A source-matched local 64px WebP preview from the same manifest. */
   initialPreviewUrl?: string;
+  /** A source-matched local 320px WebP card derivative from the same manifest. */
+  initialImageUrl?: string;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [resolved, setResolved] = useState<string | null>(null);
@@ -82,10 +85,11 @@ export function CardCover({
         `/api/galleries/${galleryId}/cover-preview?pageId=${encodeURIComponent(pageId)}&retry=1`,
       );
       const data = res.ok ? await res.json() : null;
-      fullUrlRef.current = data?.fullUrl ?? null;
+      const imageUrl = data?.cardUrl ?? data?.fullUrl ?? null;
+      fullUrlRef.current = imageUrl;
       setPreviewUrl(data?.previewUrl ?? null);
       if (data?.previewUrl) setFailed(false);
-      else if (data?.fullUrl) loadFullImage(data.fullUrl);
+      else if (imageUrl) loadFullImage(imageUrl);
       else setFailed(true);
     } catch {
       setFailed(true);
@@ -108,8 +112,8 @@ export function CardCover({
         observer.disconnect();
 
         if (sourceUrl !== undefined) {
-          fullUrlRef.current = sourceUrl;
-          if (initialPreviewUrl) {
+          fullUrlRef.current = initialImageUrl ?? sourceUrl;
+          if (initialPreviewUrl && fullUrlRef.current) {
             setPreviewUrl(initialPreviewUrl);
             setFailed(false);
             return;
@@ -121,11 +125,12 @@ export function CardCover({
           .then((res) => (res.ok ? res.json() : null))
           .then((data) => {
             if (cancelled || !data) return;
-            fullUrlRef.current = data.fullUrl ?? null;
+            const imageUrl = data.cardUrl ?? data.fullUrl ?? null;
+            fullUrlRef.current = imageUrl;
             setPreviewUrl(data.previewUrl ?? null);
-            // No preview and no full URL means the page simply has no picture; a full URL
-            // that will not load is the case worth offering a retry for.
-            if (!data.previewUrl) loadFullImage(data.fullUrl ?? null);
+            // No preview and no image URL means the page simply has no picture; an image
+            // URL that will not load is the case worth offering a retry for.
+            if (!data.previewUrl) loadFullImage(imageUrl);
           })
           .catch(() => {
             if (!cancelled) setFailed(true);
@@ -139,7 +144,7 @@ export function CardCover({
       cancelled = true;
       observer.disconnect();
     };
-  }, [galleryId, initialPreviewUrl, pageId, sourceUrl, loadFullImage]);
+  }, [galleryId, initialImageUrl, initialPreviewUrl, pageId, sourceUrl, loadFullImage]);
 
   // Ctrl arms repositioning; without it the cover stays click-through so the card link works.
   useEffect(() => {

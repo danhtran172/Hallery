@@ -95,6 +95,9 @@ model PageImageCache {
   storedFile   String?
   /// Tiny local WebP shown while a card's full cover loads.
   thumbnailFile String?
+  /// A bounded 320px WebP derivative for Gallery cards. Original bytes stay available
+  /// for the detail view, but cards do not need to download multi-megabyte covers.
+  cardFile      String?
   /// The full-image URL (or local filename) this preview was derived from. It keeps a
   /// changed cover from accidentally reusing an old thumbnail.
   thumbnailSource String?

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, rename, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
@@ -13,6 +14,7 @@ import sharp from "sharp";
 
 const CACHE_DIR = path.join(process.cwd(), ".hallery-cache", "covers");
 const THUMBNAIL_SUFFIX = ".thumbnail.webp";
+const CARD_SUFFIX = ".card.webp";
 const CACHE_BYTE_BUDGET = 512 * 1024 * 1024;
 const MAX_CONCURRENT_JOBS = 3;
 const MAINTENANCE_EVERY_WRITES = 16;
@@ -37,15 +39,16 @@ const EXTENSION_BY_TYPE: Record<string, string> = {
 };
 
 type DownloadedImage = { bytes: Buffer; contentType: string };
+export type CoverVariants = { thumbnailFile: string; cardFile: string };
 
 type CoverJob = {
   key: string;
   priority: number;
-  run: () => Promise<string | null>;
-  resolve: (value: string | null) => void;
+  run: () => Promise<unknown>;
+  resolve: (value: unknown) => void;
 };
 
-const inFlightJobs = new Map<string, Promise<string | null>>();
+const inFlightJobs = new Map<string, Promise<unknown>>();
 const queuedJobs: CoverJob[] = [];
 let activeJobs = 0;
 let cacheWrites = 0;
@@ -59,17 +62,20 @@ export const CONTENT_TYPE_BY_EXTENSION: Record<string, string> = Object.fromEntr
  * Image work is CPU- and network-heavy. One queue makes every caller share a small fixed
  * budget instead of allowing a freshly opened Gallery to start dozens of Sharp jobs.
  */
-function enqueueCoverJob(key: string, priority: number, run: () => Promise<string | null>): Promise<string | null> {
+function enqueueCoverJob<T>(key: string, priority: number, run: () => Promise<T>): Promise<T | null> {
   const existing = inFlightJobs.get(key);
-  if (existing) return existing;
+  if (existing) return existing as Promise<T | null>;
 
-  const job = new Promise<string | null>((resolve) => {
+  // Jobs are intentionally erased at the shared queue boundary. Every public caller
+  // already models failure as null, which lets the drain recover one image without
+  // poisoning the entire browser-visible request.
+  const job: Promise<unknown> = new Promise((resolve) => {
     queuedJobs.push({ key, priority, run, resolve });
     queuedJobs.sort((left, right) => right.priority - left.priority);
     drainCoverJobs();
   });
   inFlightJobs.set(key, job);
-  return job;
+  return job as Promise<T | null>;
 }
 
 function drainCoverJobs() {
@@ -298,6 +304,54 @@ async function createCoverThumbnail(pageId: string, source: Buffer): Promise<str
   }
 }
 
+/** Generates the two Gallery derivatives from one source buffer and one queued job. */
+function coverVariantFilename(pageId: string, sourceKey: string, suffix: string) {
+  // Source-specific names make concurrent requests for an old and new cover harmless:
+  // neither can overwrite the other's immutable browser-cache URL.
+  const sourceHash = createHash("sha256").update(sourceKey).digest("hex").slice(0, 16);
+  return `${pageId}.${sourceHash}${suffix}`;
+}
+
+async function createCoverVariants(pageId: string, source: Buffer, sourceKey: string): Promise<CoverVariants | null> {
+  try {
+    const image = sharp(source).rotate();
+    const [thumbnail, card] = await Promise.all([
+      image.clone().resize({ width: 64, withoutEnlargement: true }).webp({ quality: 35 }).toBuffer(),
+      image.clone().resize({ width: 320, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer(),
+    ]);
+    const thumbnailFile = coverVariantFilename(pageId, sourceKey, THUMBNAIL_SUFFIX);
+    const cardFile = coverVariantFilename(pageId, sourceKey, CARD_SUFFIX);
+    await Promise.all([writeCoverFile(thumbnailFile, thumbnail), writeCoverFile(cardFile, card)]);
+    return { thumbnailFile, cardFile };
+  } catch {
+    return null;
+  }
+}
+
+export async function storeCoverVariants(
+  pageId: string,
+  source: Buffer,
+  sourceKey: string,
+): Promise<CoverVariants | null> {
+  if (!isSafePageId(pageId)) return null;
+  return enqueueCoverJob(`variants:${pageId}:${sourceKey}`, 3, async () =>
+    createCoverVariants(pageId, source, sourceKey),
+  );
+}
+
+/** Downloads once, then builds both Gallery variants without fetching the original twice. */
+export async function storeCoverVariantsFromUrl(
+  pageId: string,
+  sourceUrl: string,
+  sourceKey: string,
+): Promise<CoverVariants | null> {
+  if (!isSafePageId(pageId)) return null;
+  return enqueueCoverJob(`variants:${pageId}:${sourceKey}`, 3, async () => {
+    const downloaded = await downloadCoverImage(sourceUrl);
+    return downloaded ? createCoverVariants(pageId, downloaded.bytes, sourceKey) : null;
+  });
+}
+
 /** Downloads only to derive a small preview; the full external image stays at its own URL. */
 export async function storeCoverThumbnailFromUrl(pageId: string, sourceUrl: string): Promise<string | null> {
   if (!isSafePageId(pageId)) return null;
@@ -318,12 +372,38 @@ export async function readCoverThumbnail(filename: string): Promise<Buffer | nul
   }
 }
 
+export async function readCoverCard(filename: string): Promise<Buffer | null> {
+  if (filename !== path.basename(filename) || !filename.endsWith(CARD_SUFFIX)) return null;
+  try {
+    const bytes = await readFile(path.join(CACHE_DIR, filename));
+    touchCoverFile(filename);
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
+/** A derivative may only live under its own page's cache namespace. */
+export function isSafeCoverVariantFile(pageId: string, filename: string, suffix: string): boolean {
+  return (
+    isSafePageId(pageId) &&
+    filename === path.basename(filename) &&
+    filename.startsWith(`${pageId}.`) &&
+    filename.endsWith(suffix)
+  );
+}
+
 /** Stable, never-expiring URL for a cover Hallery has a copy of. */
 export function storedCoverUrl(pageId: string): string {
   return `/api/covers/${pageId}`;
 }
 
 /** Versioned by the cache record timestamp at the callsite before browser-caching hard. */
-export function storedCoverThumbnailUrl(pageId: string, version: number): string {
-  return `/api/covers/${pageId}/thumbnail?v=${version}`;
+export function storedCoverThumbnailUrl(pageId: string, version: number, filename: string): string {
+  return `/api/covers/${pageId}/thumbnail?v=${version}&f=${encodeURIComponent(filename)}`;
+}
+
+/** Versioned local 320px WebP for Gallery cards. */
+export function storedCoverCardUrl(pageId: string, version: number, filename: string): string {
+  return `/api/covers/${pageId}/card?v=${version}&f=${encodeURIComponent(filename)}`;
 }

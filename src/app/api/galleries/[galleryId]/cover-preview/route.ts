@@ -6,8 +6,9 @@ import {
   coverSourceFingerprint,
   isSafePageId,
   readCoverImage,
-  storeCoverThumbnail,
-  storeCoverThumbnailFromUrl,
+  storeCoverVariants,
+  storeCoverVariantsFromUrl,
+  storedCoverCardUrl,
   storedCoverThumbnailUrl,
 } from "@/lib/cover-store";
 import { db } from "@/lib/db";
@@ -42,19 +43,26 @@ async function resolveCoverSource(galleryId: string, pageId: string): Promise<Co
   return { fullUrl: resolveCoverUrl(page, config.coverSource), storedFile: null };
 }
 
-async function resolvePreviewUrl(pageId: string, source: CoverSource): Promise<string | null> {
-  if (!source.fullUrl) return null;
+type CardCoverUrls = { previewUrl: string | null; cardUrl: string | null };
+
+async function resolveCardCoverUrls(pageId: string, source: CoverSource): Promise<CardCoverUrls> {
+  if (!source.fullUrl) return { previewUrl: null, cardUrl: null };
 
   const sourceKey = source.storedFile ? `stored:${source.storedFile}` : coverSourceFingerprint(source.fullUrl);
   const cached = await db.pageImageCache.findUnique({ where: { notionPageId: pageId } });
-  if (cached?.thumbnailFile && cached.thumbnailSource === sourceKey) {
-    return storedCoverThumbnailUrl(pageId, cached.checkedAt.getTime());
+  if (cached?.thumbnailFile && cached.cardFile && cached.thumbnailSource === sourceKey) {
+    return {
+      previewUrl: storedCoverThumbnailUrl(pageId, cached.checkedAt.getTime(), cached.thumbnailFile),
+      cardUrl: storedCoverCardUrl(pageId, cached.checkedAt.getTime(), cached.cardFile),
+    };
   }
 
-  const thumbnailFile = source.storedFile
-    ? await readCoverImage(source.storedFile).then((bytes) => (bytes ? storeCoverThumbnail(pageId, bytes) : null))
-    : await storeCoverThumbnailFromUrl(pageId, source.fullUrl);
-  if (!thumbnailFile) return null;
+  const variants = source.storedFile
+    ? await readCoverImage(source.storedFile).then((bytes) =>
+        bytes ? storeCoverVariants(pageId, bytes, sourceKey) : null,
+      )
+    : await storeCoverVariantsFromUrl(pageId, source.fullUrl, sourceKey);
+  if (!variants) return { previewUrl: null, cardUrl: null };
 
   const next = await db.pageImageCache.upsert({
     where: { notionPageId: pageId },
@@ -62,20 +70,24 @@ async function resolvePreviewUrl(pageId: string, source: CoverSource): Promise<s
       notionPageId: pageId,
       imageUrl: null,
       expiresAt: new Date(0),
-      thumbnailFile,
+      thumbnailFile: variants.thumbnailFile,
+      cardFile: variants.cardFile,
       thumbnailSource: sourceKey,
     },
-    update: { thumbnailFile, thumbnailSource: sourceKey },
+    update: { thumbnailFile: variants.thumbnailFile, cardFile: variants.cardFile, thumbnailSource: sourceKey },
   });
-  return storedCoverThumbnailUrl(pageId, next.checkedAt.getTime());
+  return {
+    previewUrl: storedCoverThumbnailUrl(pageId, next.checkedAt.getTime(), variants.thumbnailFile),
+    cardUrl: storedCoverCardUrl(pageId, next.checkedAt.getTime(), variants.cardFile),
+  };
 }
 
-/** Returns a tiny WebP preview and the deferred full-image URL for one gallery card. */
+/** Returns local 64px and 320px WebP derivatives for one gallery card. */
 export async function GET(request: NextRequest, ctx: RouteContext<"/api/galleries/[galleryId]/cover-preview">) {
   const { galleryId } = await ctx.params;
   const pageId = request.nextUrl.searchParams.get("pageId");
   if (!pageId || !isSafePageId(pageId)) {
-    return Response.json({ previewUrl: null, fullUrl: null }, { status: 400 });
+    return Response.json({ previewUrl: null, cardUrl: null, fullUrl: null }, { status: 400 });
   }
 
   // Someone pressing retry is telling us the network changed, which outranks a cooldown
@@ -86,17 +98,19 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/api/gallerie
   try {
     source = await resolveCoverSource(galleryId, pageId);
   } catch {
-    return Response.json({ previewUrl: null, fullUrl: null });
+    return Response.json({ previewUrl: null, cardUrl: null, fullUrl: null });
   }
-  if (!source) return Response.json({ previewUrl: null, fullUrl: null }, { status: 404 });
+  if (!source) return Response.json({ previewUrl: null, cardUrl: null, fullUrl: null }, { status: 404 });
 
   try {
+    const variants = await resolveCardCoverUrls(pageId, source);
     return Response.json({
-      previewUrl: await resolvePreviewUrl(pageId, source),
+      previewUrl: variants.previewUrl,
+      cardUrl: variants.cardUrl,
       fullUrl: source.fullUrl,
     });
   } catch {
-    // A full image remains useful even when a preview cannot be generated.
-    return Response.json({ previewUrl: null, fullUrl: source.fullUrl });
+    // A full image remains useful even when a local derivative cannot be generated.
+    return Response.json({ previewUrl: null, cardUrl: null, fullUrl: source.fullUrl });
   }
 }

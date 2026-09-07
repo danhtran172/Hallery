@@ -33,6 +33,7 @@ export async function resolveContentImage(
       storedFile,
       // A refreshed original must get a newly derived preview too.
       thumbnailFile: null,
+      cardFile: null,
       thumbnailSource: null,
     };
 
