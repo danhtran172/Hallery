@@ -56,11 +56,30 @@ model Gallery {
 
   propertyConfigs    PropertyConfig[]
   categoryAxes       CategoryAxis[]
+  views              GalleryView[]
   notionCache        GalleryNotionCache?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
   @@unique([workspaceId, notionDataSourceId])
+}
+
+/// A persistent, Notion-like lens over one gallery. Query state and gallery-card
+/// presentation belong here, so changing one tab cannot disturb another tab.
+model GalleryView {
+  id           String   @id @default(cuid())
+  galleryId    String
+  gallery      Gallery  @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+  name         String
+  sortOrder    Int      @default(0)
+  filterConfig String   @default("[]")
+  sortConfig   String   @default("[]")
+  groupBy      String?
+  layoutConfig String   @default("{}")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([galleryId, sortOrder])
 }
 
 /// A short-lived, persisted snapshot of the Notion calls needed to render a Gallery.

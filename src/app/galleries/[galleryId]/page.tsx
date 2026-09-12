@@ -36,6 +36,7 @@ import {
 } from "@/lib/create-form";
 import { CardGrid } from "@/components/card-grid";
 import { GalleryToolbar, type ToolbarProperty } from "@/components/gallery-toolbar";
+import { GalleryViewBar } from "@/components/gallery-view-bar";
 import {
   RETURN_PARAM,
   applyGalleryQuery,
@@ -43,6 +44,7 @@ import {
   parseGalleryQuery,
   returnQueryString,
 } from "@/lib/gallery-query";
+import { parseViewLayoutConfig, parseViewQuery } from "@/lib/gallery-view";
 import { configTypeOf } from "@/lib/property-kind";
 import { RelationGalleryMenu } from "@/components/relation-gallery-menu";
 import { listRelationGalleries } from "@/lib/relation-galleries";
@@ -86,6 +88,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
       workspace: true,
       propertyConfigs: { orderBy: { sortOrder: "asc" } },
       categoryAxes: { orderBy: { sortOrder: "asc" } },
+      views: { orderBy: { sortOrder: "asc" } },
     },
   });
   if (!gallery) notFound();
@@ -129,7 +132,15 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
 
   // The toolbar narrows whatever the category axis left, so the two compose rather than
   // fight: pick a category, then search or filter inside it.
-  const query = parseGalleryQuery(search);
+  const requestedViewId = typeof search.view === "string" ? search.view : null;
+  const activeView = gallery.views.find((view) => view.id === requestedViewId) ?? gallery.views[0];
+  if (!activeView) notFound();
+
+  // Views persist the structural query. Search intentionally stays in the URL as a
+  // one-off lookup, rather than silently changing the saved tab for every reader.
+  const savedQuery = parseViewQuery(activeView);
+  const urlQuery = parseGalleryQuery(search);
+  const query = { ...savedQuery, search: urlQuery.search };
   const pages = applyGalleryQuery(categoryPages, query, searchable);
   const cardPage = requestedCardPage(search.cardPage, pages.length);
   const visiblePages = pages.slice(0, cardPage * CARDS_PER_PAGE);
@@ -144,19 +155,20 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
     .filter((group) => group.pages.length > 0);
 
   const galleryConfig = parseGalleryConfig(gallery.displayConfig);
+  const viewConfig = parseViewLayoutConfig(activeView.layoutConfig, galleryConfig);
   const cardKindOrientation =
-    galleryConfig.coverAspect === "portrait" ||
-    galleryConfig.coverAspect === "square" ||
-    galleryConfig.coverAspect === "circle"
-      ? galleryConfig.coverAspect
+    viewConfig.coverAspect === "portrait" ||
+    viewConfig.coverAspect === "square" ||
+    viewConfig.coverAspect === "circle"
+      ? viewConfig.coverAspect
       : "landscape";
   const cardLayout = resolveCardLayout(
-    parseCardLayout(galleryConfig.card),
+    parseCardLayout(viewConfig.card),
     gallery.propertyConfigs,
-    galleryConfig.coverAspect,
+    viewConfig.coverAspect,
   );
-  const cardsPerRow = resolveCardsPerRow(galleryConfig);
-  const coverRatio = resolveCoverRatio(galleryConfig);
+  const cardsPerRow = resolveCardsPerRow(viewConfig);
+  const coverRatio = resolveCoverRatio(viewConfig);
 
   const cardKind = cardKindOf(cardLayout.arrangement, cardKindOrientation, cardLayout.extended);
 
@@ -168,7 +180,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
   });
   const cachedCoversByPageId = new Map(cachedCoverPreviews.map((cached) => [cached.notionPageId, cached]));
   const coverSources = new Map(
-    galleryConfig.coverSource === CONTENT_IMAGE
+    viewConfig.coverSource === CONTENT_IMAGE
       ? visiblePages.flatMap((page) => {
           const cached = cachedCoversByPageId.get(page.id);
           const sourceUrl = cached?.storedFile
@@ -176,7 +188,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
             : (cached?.imageUrl ?? null);
           return sourceUrl ? [[page.id, sourceUrl] as const] : [];
         })
-      : visiblePages.map((page) => [page.id, resolveCoverUrl(page, galleryConfig.coverSource)]),
+      : visiblePages.map((page) => [page.id, resolveCoverUrl(page, viewConfig.coverSource)]),
   );
   const coverVariants = new Map(
     cachedCoverPreviews.flatMap((cached) => {
@@ -325,7 +337,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
                   <CardCover
                     key={coverVariants.get(page.id)?.imageUrl ?? coverSources.get(page.id) ?? "no-cover"}
                     ratio={coverRatio}
-                    round={isRoundCover(galleryConfig.coverAspect)}
+                    round={isRoundCover(viewConfig.coverAspect)}
                     galleryId={galleryId}
                     pageId={page.id}
                     initialX={positions.get(page.id)?.posX ?? 50}
@@ -426,13 +438,13 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
             Phân loại
           </Link>
           <Link
-            href={`/galleries/${galleryId}/settings/card`}
+            href={`/galleries/${galleryId}/settings/card?view=${activeView.id}`}
             className="text-xs text-stone-500 hover:underline"
           >
             Bố cục card
           </Link>
           <Link
-            href={`/galleries/${galleryId}/settings/display`}
+            href={`/galleries/${galleryId}/settings/display?view=${activeView.id}`}
             className="text-xs text-stone-500 hover:underline"
           >
             Cài đặt hiển thị
@@ -451,7 +463,15 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
         />
       )}
 
+      <GalleryViewBar
+        galleryId={galleryId}
+        views={gallery.views.map((view) => ({ id: view.id, name: view.name }))}
+        activeViewId={activeView.id}
+      />
+
       <GalleryToolbar
+        galleryId={galleryId}
+        viewId={activeView.id}
         properties={toolbarProperties}
         query={query}
         matchCount={pages.length}

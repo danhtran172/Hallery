@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   DndContext,
@@ -17,13 +17,12 @@ import {
   RETURN_PARAM,
   moveItem,
   operatorsFor,
-  serializeFilters,
-  serializeSorts,
   type Filter,
   type FilterOperator,
   type GalleryQuery,
   type SortKey,
 } from "@/lib/gallery-query";
+import { saveGalleryViewQuery } from "@/app/galleries/[galleryId]/view-actions";
 
 export type ToolbarProperty = {
   notionPropertyId: string;
@@ -40,11 +39,12 @@ const VALUELESS = new Set<FilterOperator>(["empty", "not_empty", "is_checked", "
 /**
  * Search, filter, sort, group and random pick for a gallery.
  *
- * Every control writes to the URL rather than to local state, so a view can be shared, the
- * back button steps through it, and the server does the filtering against the full snapshot
- * instead of the browser guessing from what it can see.
+ * Search is intentionally transient in the URL. Filter, sort and group belong to the selected
+ * persisted view, while the server still applies the whole query against its full snapshot.
  */
 export function GalleryToolbar({
+  galleryId,
+  viewId,
   properties,
   query,
   matchCount,
@@ -52,6 +52,8 @@ export function GalleryToolbar({
   pickTargets,
   randomPickEnabled,
 }: {
+  galleryId: string;
+  viewId: string;
   properties: ToolbarProperty[];
   query: GalleryQuery;
   matchCount: number;
@@ -64,6 +66,8 @@ export function GalleryToolbar({
   const params = useSearchParams();
   const [open, setOpen] = useState<"filter" | "sort" | null>(null);
   const [draft, setDraft] = useState(query.search);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, startTransition] = useTransition();
   const wrapRef = useRef<HTMLDivElement>(null);
 
   // Adjust the box when the URL changes underneath it — "Xoá hết", or the back button.
@@ -83,11 +87,10 @@ export function GalleryToolbar({
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  /** Rewrites one parameter, keeping the rest — including the category axis — intact. */
+  /** Rewrites transient URL parameters, keeping the active view and category axis intact. */
   function commit(changes: Record<string, string | null>) {
     const next = new URLSearchParams(params.toString());
-    // Search, filter, sort and grouping all change the result set. Keep the URL's
-    // pagination explicit, but never strand a reader on a later, now-empty page.
+    // Every query change can make a later page empty.
     next.delete("cardPage");
     for (const [key, value] of Object.entries(changes)) {
       if (value === null || value === "") next.delete(key);
@@ -108,8 +111,20 @@ export function GalleryToolbar({
   const nameOf = (propertyId: string) =>
     properties.find((property) => property.notionPropertyId === propertyId)?.name ?? "?";
 
-  const setFilters = (filters: Filter[]) => commit({ filter: serializeFilters(filters) || null });
-  const setSorts = (sorts: SortKey[]) => commit({ sort: serializeSorts(sorts) || null });
+  function persist(next: Pick<GalleryQuery, "filters" | "sorts" | "groupBy">) {
+    setSaveError(null);
+    startTransition(async () => {
+      const result = await saveGalleryViewQuery(galleryId, viewId, next);
+      if (result.error) {
+        setSaveError(result.error);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  const setFilters = (filters: Filter[]) => persist({ filters, sorts: query.sorts, groupBy: query.groupBy });
+  const setSorts = (sorts: SortKey[]) => persist({ filters: query.filters, sorts, groupBy: query.groupBy });
 
   function pickRandom() {
     if (pickTargets.length === 0) return;
@@ -162,7 +177,9 @@ export function GalleryToolbar({
         Nhóm
         <select
           value={query.groupBy ?? ""}
-          onChange={(event) => commit({ group: event.target.value || null })}
+          onChange={(event) =>
+            persist({ filters: query.filters, sorts: query.sorts, groupBy: event.target.value || null })
+          }
           className="rounded-md border border-stone-300 px-1.5 py-1 text-xs outline-none focus:border-emerald-600"
         >
           <option value="">Không</option>
@@ -184,15 +201,21 @@ export function GalleryToolbar({
         {filtered ? `${matchCount} / ${totalCount} item` : `${totalCount} item`}
       </span>
 
-      {(filtered || query.groupBy) && (
+      {(filtered || query.sorts.length > 0 || query.groupBy) && (
         <button
           type="button"
-          onClick={() => commit({ q: null, filter: null, sort: null, group: null })}
+          disabled={saving}
+          onClick={() => {
+            setDraft("");
+            commit({ q: null });
+            persist({ filters: [], sorts: [], groupBy: null });
+          }}
           className="text-xs text-stone-500 underline hover:text-stone-800"
         >
           Xoá hết
         </button>
       )}
+      {saveError && <p className="basis-full text-xs text-red-700">{saveError}</p>}
     </div>
   );
 }
