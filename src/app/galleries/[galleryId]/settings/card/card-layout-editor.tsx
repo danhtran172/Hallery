@@ -87,6 +87,7 @@ function isSymmetric(aspect: CoverOrientation): boolean {
 
 export function CardLayoutEditor({
   galleryId,
+  viewId,
   properties,
   initialShape,
   initialDetailShape,
@@ -105,6 +106,7 @@ export function CardLayoutEditor({
   previewCoverUrl,
 }: {
   galleryId: string;
+  viewId: string;
   properties: EditableCardProperty[];
   initialShape: CoverShape;
   initialDetailShape: CoverShape;
@@ -133,7 +135,7 @@ export function CardLayoutEditor({
   const [detailConfigs, setDetailConfigs] = useState<Record<string, DisplayConfig>>({});
   const [formDefaults, setFormDefaults] = useState<FormDefaults>(initialFormDefaults);
   const [detailWidth, setDetailWidth] = useState(initialDetailWidth);
-  // Where the image comes from is a property of the data, not of a view, so both share it.
+  // This source controls gallery cards, so it belongs to the selected view.
   const [coverSource, setCoverSource] = useState(initialCoverSource);
   const [formCoverTarget, setFormCoverTarget] = useState(initialFormCoverTarget);
 
@@ -179,7 +181,7 @@ export function CardLayoutEditor({
     setSelected(null);
   }
 
-  const action = saveCardLayout.bind(null, galleryId);
+  const action = saveCardLayout.bind(null, galleryId, viewId);
   const [state, formAction, pending] = useActionState<SaveCardLayoutState, FormData>(action, { error: null });
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),

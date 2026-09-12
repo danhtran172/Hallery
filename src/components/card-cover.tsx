@@ -24,6 +24,7 @@ export function CardCover({
   ratio,
   round,
   galleryId,
+  viewId,
   pageId,
   initialX,
   initialY,
@@ -35,6 +36,8 @@ export function CardCover({
   /** Crop the frame to a circle. Only ever paired with a 1:1 ratio. */
   round?: boolean;
   galleryId: string;
+  /** Used by the lazy cover endpoint when this view has its own cover source. */
+  viewId: string;
   pageId: string;
   initialX: number;
   initialY: number;
@@ -82,7 +85,7 @@ export function CardCover({
     requestedFullRef.current = null;
     try {
       const res = await fetch(
-        `/api/galleries/${galleryId}/cover-preview?pageId=${encodeURIComponent(pageId)}&retry=1`,
+        `/api/galleries/${galleryId}/cover-preview?pageId=${encodeURIComponent(pageId)}&view=${encodeURIComponent(viewId)}&retry=1`,
       );
       const data = res.ok ? await res.json() : null;
       const imageUrl = data?.cardUrl ?? data?.fullUrl ?? null;
@@ -96,7 +99,7 @@ export function CardCover({
     } finally {
       setRetrying(false);
     }
-  }, [galleryId, pageId, loadFullImage]);
+  }, [galleryId, pageId, viewId, loadFullImage]);
 
   // Resolve any cover lazily, once the card is near the viewport. A source-matched
   // manifest entry skips this API call entirely; only cold and content-image cards need it.
@@ -121,7 +124,7 @@ export function CardCover({
           if (!sourceUrl) return;
         }
 
-        fetch(`/api/galleries/${galleryId}/cover-preview?pageId=${encodeURIComponent(pageId)}`)
+        fetch(`/api/galleries/${galleryId}/cover-preview?pageId=${encodeURIComponent(pageId)}&view=${encodeURIComponent(viewId)}`)
           .then((res) => (res.ok ? res.json() : null))
           .then((data) => {
             if (cancelled || !data) return;
@@ -144,7 +147,7 @@ export function CardCover({
       cancelled = true;
       observer.disconnect();
     };
-  }, [galleryId, initialImageUrl, initialPreviewUrl, pageId, sourceUrl, loadFullImage]);
+  }, [galleryId, initialImageUrl, initialPreviewUrl, pageId, sourceUrl, viewId, loadFullImage]);
 
   // Ctrl arms repositioning; without it the cover stays click-through so the card link works.
   useEffect(() => {

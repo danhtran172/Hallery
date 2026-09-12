@@ -339,6 +339,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
                     ratio={coverRatio}
                     round={isRoundCover(viewConfig.coverAspect)}
                     galleryId={galleryId}
+                    viewId={activeView.id}
                     pageId={page.id}
                     initialX={positions.get(page.id)?.posX ?? 50}
                     initialY={positions.get(page.id)?.posY ?? 50}

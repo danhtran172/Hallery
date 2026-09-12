@@ -14,18 +14,21 @@ import {
 import { db } from "@/lib/db";
 import { getGalleryNotionSnapshot } from "@/lib/gallery-notion-cache";
 import { parseGalleryConfig, CONTENT_IMAGE, resolveCoverUrl } from "@/lib/notion-cover";
+import { parseViewLayoutConfig } from "@/lib/gallery-view";
 
 type CoverSource = { fullUrl: string | null; storedFile: string | null };
 
 /** Resolves a card cover from its Gallery/Page identity, never from a caller-provided URL. */
-async function resolveCoverSource(galleryId: string, pageId: string): Promise<CoverSource | null> {
+async function resolveCoverSource(galleryId: string, pageId: string, viewId: string | null): Promise<CoverSource | null> {
   const gallery = await db.gallery.findUnique({
     where: { id: galleryId },
-    include: { workspace: true },
+    include: { workspace: true, views: { orderBy: { sortOrder: "asc" } } },
   });
   if (!gallery) return null;
 
-  const config = parseGalleryConfig(gallery.displayConfig);
+  const legacyConfig = parseGalleryConfig(gallery.displayConfig);
+  const view = gallery.views.find((entry) => entry.id === viewId) ?? gallery.views[0];
+  const config = view ? parseViewLayoutConfig(view.layoutConfig, legacyConfig) : legacyConfig;
   if (config.coverSource === CONTENT_IMAGE) {
     return resolveContentImage(gallery.workspace.accessToken, pageId);
   }
@@ -92,6 +95,7 @@ async function resolveCardCoverUrls(pageId: string, source: CoverSource): Promis
 export async function GET(request: NextRequest, ctx: RouteContext<"/api/galleries/[galleryId]/cover-preview">) {
   const { galleryId } = await ctx.params;
   const pageId = request.nextUrl.searchParams.get("pageId");
+  const viewId = request.nextUrl.searchParams.get("view");
   if (!pageId || !isSafePageId(pageId)) {
     return Response.json({ previewUrl: null, cardUrl: null, fullUrl: null }, { status: 400 });
   }
@@ -102,7 +106,7 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/api/gallerie
 
   let source: CoverSource | null;
   try {
-    source = await resolveCoverSource(galleryId, pageId);
+    source = await resolveCoverSource(galleryId, pageId, viewId);
   } catch {
     return Response.json({ previewUrl: null, cardUrl: null, fullUrl: null });
   }

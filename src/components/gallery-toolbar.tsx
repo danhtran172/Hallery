@@ -68,6 +68,18 @@ export function GalleryToolbar({
   const [draft, setDraft] = useState(query.search);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, startTransition] = useTransition();
+  const incomingViewState = JSON.stringify({ filters: query.filters, sorts: query.sorts, groupBy: query.groupBy });
+  const [lastViewState, setLastViewState] = useState(incomingViewState);
+  const [viewQuery, setViewQuery] = useState<Pick<GalleryQuery, "filters" | "sorts" | "groupBy">>({
+    filters: query.filters,
+    sorts: query.sorts,
+    groupBy: query.groupBy,
+  });
+  if (lastViewState !== incomingViewState) {
+    setLastViewState(incomingViewState);
+    setViewQuery({ filters: query.filters, sorts: query.sorts, groupBy: query.groupBy });
+  }
+  const activeQuery: GalleryQuery = { ...query, ...viewQuery };
   const wrapRef = useRef<HTMLDivElement>(null);
 
   // Adjust the box when the URL changes underneath it — "Xoá hết", or the back button.
@@ -112,6 +124,9 @@ export function GalleryToolbar({
     properties.find((property) => property.notionPropertyId === propertyId)?.name ?? "?";
 
   function persist(next: Pick<GalleryQuery, "filters" | "sorts" | "groupBy">) {
+    // Controls can change twice before a Server Component refresh returns. Keep an
+    // optimistic query locally, otherwise the second save would overwrite the first.
+    setViewQuery(next);
     setSaveError(null);
     startTransition(async () => {
       const result = await saveGalleryViewQuery(galleryId, viewId, next);
@@ -123,8 +138,8 @@ export function GalleryToolbar({
     });
   }
 
-  const setFilters = (filters: Filter[]) => persist({ filters, sorts: query.sorts, groupBy: query.groupBy });
-  const setSorts = (sorts: SortKey[]) => persist({ filters: query.filters, sorts, groupBy: query.groupBy });
+  const setFilters = (filters: Filter[]) => persist({ ...viewQuery, filters });
+  const setSorts = (sorts: SortKey[]) => persist({ ...viewQuery, sorts });
 
   function pickRandom() {
     if (pickTargets.length === 0) return;
@@ -147,14 +162,14 @@ export function GalleryToolbar({
       />
 
       <div className="relative">
-        <ToolbarButton active={query.filters.length > 0} onClick={() => setOpen(open === "filter" ? null : "filter")}>
-          Lọc{query.filters.length > 0 ? ` (${query.filters.length})` : ""}
+        <ToolbarButton active={activeQuery.filters.length > 0} onClick={() => setOpen(open === "filter" ? null : "filter")}>
+          Lọc{activeQuery.filters.length > 0 ? ` (${activeQuery.filters.length})` : ""}
         </ToolbarButton>
         {open === "filter" && (
           <Popover>
             <FilterEditor
               properties={properties}
-              filters={query.filters}
+              filters={activeQuery.filters}
               nameOf={nameOf}
               onChange={setFilters}
             />
@@ -163,12 +178,12 @@ export function GalleryToolbar({
       </div>
 
       <div className="relative">
-        <ToolbarButton active={query.sorts.length > 0} onClick={() => setOpen(open === "sort" ? null : "sort")}>
-          Sắp xếp{query.sorts.length > 0 ? ` (${query.sorts.length})` : ""}
+        <ToolbarButton active={activeQuery.sorts.length > 0} onClick={() => setOpen(open === "sort" ? null : "sort")}>
+          Sắp xếp{activeQuery.sorts.length > 0 ? ` (${activeQuery.sorts.length})` : ""}
         </ToolbarButton>
         {open === "sort" && (
           <Popover>
-            <SortEditor properties={properties} sorts={query.sorts} nameOf={nameOf} onChange={setSorts} />
+            <SortEditor properties={properties} sorts={activeQuery.sorts} nameOf={nameOf} onChange={setSorts} />
           </Popover>
         )}
       </div>
@@ -176,9 +191,9 @@ export function GalleryToolbar({
       <label className="flex items-center gap-1.5 text-xs text-stone-500">
         Nhóm
         <select
-          value={query.groupBy ?? ""}
+          value={activeQuery.groupBy ?? ""}
           onChange={(event) =>
-            persist({ filters: query.filters, sorts: query.sorts, groupBy: event.target.value || null })
+            persist({ ...viewQuery, groupBy: event.target.value || null })
           }
           className="rounded-md border border-stone-300 px-1.5 py-1 text-xs outline-none focus:border-emerald-600"
         >
@@ -201,7 +216,7 @@ export function GalleryToolbar({
         {filtered ? `${matchCount} / ${totalCount} item` : `${totalCount} item`}
       </span>
 
-      {(filtered || query.sorts.length > 0 || query.groupBy) && (
+      {(filtered || activeQuery.filters.length > 0 || activeQuery.sorts.length > 0 || activeQuery.groupBy) && (
         <button
           type="button"
           disabled={saving}

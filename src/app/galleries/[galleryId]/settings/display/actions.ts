@@ -9,6 +9,7 @@ import {
   MIN_CARDS_PER_ROW,
   parseGalleryConfig,
 } from "@/lib/notion-cover";
+import { parseViewLayoutConfig, viewLayoutConfig } from "@/lib/gallery-view";
 
 /**
  * `configType` is the type whose options were shown — for formula and rollup properties
@@ -60,22 +61,25 @@ export async function saveDisplayConfig(
   revalidatePath(`/galleries/${galleryId}/settings/card`);
 }
 
-export async function saveGalleryGridSettings(galleryId: string, formData: FormData) {
+export async function saveGalleryGridSettings(galleryId: string, viewId: string, formData: FormData) {
   const gallery = await db.gallery.findUniqueOrThrow({ where: { id: galleryId } });
+  const view = await db.galleryView.findFirst({ where: { id: viewId, galleryId } });
+  if (!view) return;
   const config = parseGalleryConfig(gallery.displayConfig);
+  const viewConfig = parseViewLayoutConfig(view.layoutConfig, config);
   const cardsPerRow = Number(formData.get("cardsPerRow"));
 
-  config.cardsPerRow =
+  viewConfig.cardsPerRow =
     Number.isInteger(cardsPerRow) && cardsPerRow >= MIN_CARDS_PER_ROW && cardsPerRow <= MAX_CARDS_PER_ROW
       ? cardsPerRow
       : DEFAULT_CARDS_PER_ROW;
 
   config.randomPick = formData.get("randomPick") !== null;
 
-  await db.gallery.update({
-    where: { id: galleryId },
-    data: { displayConfig: JSON.stringify(config) },
-  });
+  await db.$transaction([
+    db.gallery.update({ where: { id: galleryId }, data: { displayConfig: JSON.stringify(config) } }),
+    db.galleryView.update({ where: { id: view.id }, data: { layoutConfig: viewLayoutConfig(viewConfig) } }),
+  ]);
 
   revalidatePath(`/galleries/${galleryId}`);
   revalidatePath(`/galleries/${galleryId}/settings/display`);

@@ -24,6 +24,7 @@ import {
   parseGalleryConfig,
   type CoverAspect,
 } from "@/lib/notion-cover";
+import { parseViewLayoutConfig, viewLayoutConfig } from "@/lib/gallery-view";
 
 export type SaveCardLayoutState = { error: string | null };
 
@@ -37,6 +38,7 @@ export type SaveCardLayoutState = { error: string | null };
  */
 export async function saveCardLayout(
   galleryId: string,
+  viewId: string,
   _previous: SaveCardLayoutState,
   formData: FormData,
 ): Promise<SaveCardLayoutState> {
@@ -45,6 +47,8 @@ export async function saveCardLayout(
     include: { propertyConfigs: true },
   });
   if (!gallery) return { error: "Gallery không còn tồn tại." };
+  const view = await db.galleryView.findFirst({ where: { id: viewId, galleryId } });
+  if (!view) return { error: "View này không còn tồn tại." };
 
   const parsed = parseCardLayout(readJson(formData.get("layout")));
   if (!parsed) return { error: "Không đọc được bố cục. Tải lại trang rồi thử lại." };
@@ -83,8 +87,11 @@ export async function saveCardLayout(
     return { ...layout, overlay, regions };
   };
 
+  // Only the gallery card is a view concern. Detail and quick-entry retain their
+  // gallery-wide configuration below, even though one editor exposes all three.
   const config = parseGalleryConfig(gallery.displayConfig);
-  config.card = sanitize(parsed);
+  const viewConfig = parseViewLayoutConfig(view.layoutConfig, config);
+  viewConfig.card = sanitize(parsed);
 
   const parsedDetail = parseCardLayout(readJson(formData.get("detailLayout")));
   if (parsedDetail) config.detailCard = sanitize(parsedDetail);
@@ -102,13 +109,13 @@ export async function saveCardLayout(
   if (aspect === "landscape" || aspect === "portrait" || aspect === "square" || aspect === "circle") {
     const ratios = COVER_RATIOS[aspect];
     const ratio = String(formData.get("coverRatio") ?? "");
-    config.coverAspect = aspect as CoverAspect;
-    config.coverRatio = ratios.includes(ratio) ? ratio : ratios[0];
+    viewConfig.coverAspect = aspect as CoverAspect;
+    viewConfig.coverRatio = ratios.includes(ratio) ? ratio : ratios[0];
   }
 
   const source = String(formData.get("coverSource") ?? "");
   if (source === PAGE_COVER || source === CONTENT_IMAGE || source.startsWith(PROPERTY_PREFIX)) {
-    config.coverSource = source;
+    viewConfig.coverSource = source;
   }
 
   const target = String(formData.get("formCoverTarget") ?? "");
@@ -134,6 +141,7 @@ export async function saveCardLayout(
 
   const writes = [
     db.gallery.update({ where: { id: galleryId }, data: { displayConfig: JSON.stringify(config) } }),
+    db.galleryView.update({ where: { id: view.id }, data: { layoutConfig: viewLayoutConfig(viewConfig) } }),
     ...propertyConfigWrites(
       readJson(formData.get("propertyConfigs")),
       readJson(formData.get("detailPropertyConfigs")),

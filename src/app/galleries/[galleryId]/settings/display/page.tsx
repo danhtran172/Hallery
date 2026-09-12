@@ -9,6 +9,7 @@ import {
   resolveCardsPerRow,
 } from "@/lib/notion-cover";
 import { describePropertyType } from "@/lib/property-kind";
+import { parseViewLayoutConfig } from "@/lib/gallery-view";
 import { saveGalleryGridSettings, setPropertyDisabled, updatePropertyPlacement } from "./actions";
 import { PropertyList, type ListedProperty } from "./property-list";
 
@@ -17,16 +18,19 @@ export default async function DisplaySettingsPage({
   searchParams,
 }: PageProps<"/galleries/[galleryId]/settings/display">) {
   const { galleryId } = await params;
-  const { prop } = await searchParams;
+  const { prop, view: viewParam } = await searchParams;
   const gallery = await db.gallery.findUnique({
     where: { id: galleryId },
-    include: { propertyConfigs: { orderBy: { sortOrder: "asc" } } },
+    include: { propertyConfigs: { orderBy: { sortOrder: "asc" } }, views: { orderBy: { sortOrder: "asc" } } },
   });
   if (!gallery) notFound();
+  const requestedViewId = typeof viewParam === "string" ? viewParam : null;
+  const view = gallery.views.find((entry) => entry.id === requestedViewId) ?? gallery.views[0];
+  if (!view) notFound();
 
   const properties = gallery.propertyConfigs.filter((p) => p.notionPropertyType !== "title");
   const galleryConfig = parseGalleryConfig(gallery.displayConfig);
-  const cardsPerRow = resolveCardsPerRow(galleryConfig);
+  const cardsPerRow = resolveCardsPerRow(parseViewLayoutConfig(view.layoutConfig, galleryConfig));
 
   const selectedId = typeof prop === "string" ? prop : null;
   const selected = properties.find((p) => p.notionPropertyId === selectedId) ?? null;
@@ -45,7 +49,7 @@ export default async function DisplaySettingsPage({
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-12">
-      <Link href={`/galleries/${galleryId}`} className="text-xs text-stone-500 hover:underline">
+      <Link href={`/galleries/${galleryId}?view=${view.id}`} className="text-xs text-stone-500 hover:underline">
         ← {gallery.name}
       </Link>
       <h1 className="mt-2 mb-1 text-2xl font-semibold text-stone-900">Cài đặt hiển thị</h1>
@@ -56,6 +60,7 @@ export default async function DisplaySettingsPage({
 
       <GalleryGridSettings
         galleryId={galleryId}
+        viewId={view.id}
         cardsPerRow={cardsPerRow}
         randomPick={galleryConfig.randomPick !== false}
       />
@@ -86,15 +91,17 @@ export default async function DisplaySettingsPage({
 
 function GalleryGridSettings({
   galleryId,
+  viewId,
   cardsPerRow,
   randomPick,
 }: {
   galleryId: string;
+  viewId: string;
   cardsPerRow: number;
   randomPick: boolean;
 }) {
   return (
-    <form action={saveGalleryGridSettings.bind(null, galleryId)} className="mb-6 rounded-lg border border-stone-200 p-4">
+    <form action={saveGalleryGridSettings.bind(null, galleryId, viewId)} className="mb-6 rounded-lg border border-stone-200 p-4">
       <label htmlFor="cardsPerRow" className="block text-sm font-medium text-stone-900">
         Số card mỗi hàng
       </label>
