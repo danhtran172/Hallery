@@ -218,7 +218,7 @@ export function unmergeBox(grid: Grid, boxId: string): Grid {
   };
 }
 
-/** Merge a rectangular 2- or 3-cell selection. Only empty, independent cells may join. */
+/** Merge a rectangular 2- or 3-cell selection. One populated cell may join empty neighbours. */
 export function mergeBoxes(grid: Grid, boxIds: string[]): Grid {
   const indexes = boxIds.map((id) => grid.boxes.findIndex((box) => box.id === id)).filter((index) => index >= 0);
   if (indexes.length !== 2 && indexes.length !== 3) return grid;
@@ -227,13 +227,18 @@ export function mergeBoxes(grid: Grid, boxIds: string[]): Grid {
   const minRow = Math.min(...rows), maxRow = Math.max(...rows), minCol = Math.min(...cols), maxCol = Math.max(...cols);
   const width = maxCol - minCol + 1, height = maxRow - minRow + 1;
   if (width * height !== indexes.length || (width !== 1 && height !== 1)) return grid;
-  if (indexes.some((index) => grid.boxes[index].mergedInto || grid.boxes[index].fields.length > 0)) return grid;
+  if (indexes.some((index) => grid.boxes[index].mergedInto)) return grid;
+  if (indexes.filter((index) => grid.boxes[index].fields.length > 0).length > 1) return grid;
 
   const root = minRow * grid.cols + minCol;
+  // The root is always the top-left box. Move its single set of fields there so a
+  // property is retained even if it began in the right-hand or lower box.
+  const carried = [...indexes].sort((left, right) => left - right).flatMap((index) => grid.boxes[index].fields);
   return {
     ...grid,
     boxes: grid.boxes.map((box, index) => {
-      if (!indexes.includes(index) || index === root) return box;
+      if (!indexes.includes(index)) return box;
+      if (index === root) return { ...box, fields: carried };
       return { ...box, mergedInto: index % grid.cols === minCol ? "up" : "left", fields: [] };
     }),
   };
