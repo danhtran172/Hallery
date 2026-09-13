@@ -314,7 +314,7 @@ function StructureEditor({
             key={index}
             type="button"
             aria-label="Kéo đổi cột"
-            title={canMoveColumns ? "Kéo để đổi cột" : "Tách merge ngang để đổi cột"}
+            title={canMoveColumns ? "Kéo để đổi các ô không gộp" : "Không còn ô lẻ để đổi cột"}
             {...track("column", index, canMoveColumns)}
             disabled={!canMoveColumns}
             className="h-4 cursor-ew-resize text-[10px] text-stone-400 disabled:cursor-not-allowed disabled:opacity-30"
@@ -330,7 +330,7 @@ function StructureEditor({
               key={index}
               type="button"
               aria-label="Kéo đổi hàng"
-              title={canMoveRows ? "Kéo để đổi hàng" : "Tách merge dọc để đổi hàng"}
+              title={canMoveRows ? "Kéo để đổi các ô không gộp" : "Không còn ô lẻ để đổi hàng"}
               {...track("row", index, canMoveRows)}
               disabled={!canMoveRows}
               className="min-h-10 flex-1 cursor-ns-resize text-[10px] text-stone-400 disabled:cursor-not-allowed disabled:opacity-30"

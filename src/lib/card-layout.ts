@@ -272,21 +272,51 @@ export function unmergeBoxes(grid: Grid, boxIds: string[]): Grid {
   };
 }
 
-/** Swapping a track is safe only when no merge crosses that same axis. */
+/** A merged root and each folded cell travel as a fixed block, never as loose cells. */
+function belongsToMerge(grid: Grid, index: number): boolean {
+  if (grid.boxes[index]?.mergedInto) return true;
+  const { colSpan, rowSpan } = spanOf(grid, index);
+  return colSpan > 1 || rowSpan > 1;
+}
+
+/** Track controls stay available when at least one independent pair can move. */
 export function canSwapGridTrack(grid: Grid, axis: "row" | "column"): boolean {
-  return !grid.boxes.some((box) => box.mergedInto === (axis === "row" ? "up" : "left"));
+  const count = axis === "row" ? grid.rows : grid.cols;
+  if (count < 2) return false;
+
+  const crossCount = axis === "row" ? grid.cols : grid.rows;
+  for (let cross = 0; cross < crossCount; cross += 1) {
+    const independent = Array.from({ length: count }, (_, track) =>
+      axis === "row" ? track * grid.cols + cross : cross * grid.cols + track,
+    ).filter((index) => !belongsToMerge(grid, index));
+    if (independent.length >= 2) return true;
+  }
+  return false;
 }
 
 export function swapGridTrack(grid: Grid, axis: "row" | "column", from: number, to: number): Grid {
   const count = axis === "row" ? grid.rows : grid.cols;
   if (!canSwapGridTrack(grid, axis) || from === to || from < 0 || to < 0 || from >= count || to >= count) return grid;
   const boxes = [...grid.boxes];
+  let moved = false;
   if (axis === "row") {
-    for (let col = 0; col < grid.cols; col += 1) [boxes[from * grid.cols + col], boxes[to * grid.cols + col]] = [boxes[to * grid.cols + col], boxes[from * grid.cols + col]];
+    for (let col = 0; col < grid.cols; col += 1) {
+      const fromIndex = from * grid.cols + col;
+      const toIndex = to * grid.cols + col;
+      if (belongsToMerge(grid, fromIndex) || belongsToMerge(grid, toIndex)) continue;
+      [boxes[fromIndex], boxes[toIndex]] = [boxes[toIndex], boxes[fromIndex]];
+      moved = true;
+    }
   } else {
-    for (let row = 0; row < grid.rows; row += 1) [boxes[row * grid.cols + from], boxes[row * grid.cols + to]] = [boxes[row * grid.cols + to], boxes[row * grid.cols + from]];
+    for (let row = 0; row < grid.rows; row += 1) {
+      const fromIndex = row * grid.cols + from;
+      const toIndex = row * grid.cols + to;
+      if (belongsToMerge(grid, fromIndex) || belongsToMerge(grid, toIndex)) continue;
+      [boxes[fromIndex], boxes[toIndex]] = [boxes[toIndex], boxes[fromIndex]];
+      moved = true;
+    }
   }
-  return { ...grid, boxes };
+  return moved ? { ...grid, boxes } : grid;
 }
 
 /**
