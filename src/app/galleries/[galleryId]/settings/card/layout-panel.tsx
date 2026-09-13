@@ -332,19 +332,23 @@ function StructureEditor({
             >
               Tách
             </button>
-          ) : canMergeSelection ? (
-            <button
-              type="button"
-              onClick={() => {
-                onMerge(regionId, selected);
-                setSelected([]);
-              }}
-              className="rounded bg-emerald-700 px-2 py-1 text-white hover:bg-emerald-800"
-            >
-              Gộp {selected.length} ô
-            </button>
           ) : (
-            <span className="text-stone-500">Chọn 2–3 ô trống liền nhau để gộp.</span>
+            <div className="flex flex-col items-start gap-1.5">
+              <button
+                type="button"
+                disabled={!canMergeSelection}
+                onClick={() => {
+                  onMerge(regionId, selected);
+                  setSelected([]);
+                }}
+                className="rounded bg-emerald-700 px-2 py-1 text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+              >
+                Gộp {selected.length} ô
+              </button>
+              {!canMergeSelection && (
+                <span className="text-stone-500">Chọn 2–3 ô trống liền nhau để gộp.</span>
+              )}
+            </div>
           )}
         </div>
       )}
