@@ -12,6 +12,7 @@ import {
   type CoverOrientation,
 } from "@/lib/card-layout";
 import {
+  CONTENT_IMAGE,
   COVER_RATIOS,
   PAGE_COVER,
   listImagePropertyNames,
@@ -22,6 +23,7 @@ import {
   resolveFormCoverShape,
   listUploadTargetNames,
 } from "@/lib/notion-cover";
+import { resolveContentImage } from "@/lib/content-image-cache";
 import { plainTextValue } from "@/lib/property-text";
 import { parseFormDefaults } from "@/lib/create-form";
 import { parseViewLayoutConfig } from "@/lib/gallery-view";
@@ -80,7 +82,7 @@ export default async function CardLayoutSettingsPage({
     dataSourceId: gallery.notionDataSourceId,
     accessToken: gallery.workspace.accessToken,
   });
-  const preview = loadPreviewItem(snapshot, viewConfig.coverSource);
+  const preview = await loadPreviewItem(snapshot, viewConfig.coverSource, gallery.workspace.accessToken);
 
   return (
     <div className="flex h-screen w-full flex-col px-6 py-6">
@@ -151,7 +153,11 @@ const EMPTY_PREVIEW: PreviewItem = {
   uploadProperties: [],
 };
 
-function loadPreviewItem(snapshot: GalleryNotionSnapshot, coverSource: string | undefined): PreviewItem {
+async function loadPreviewItem(
+  snapshot: GalleryNotionSnapshot,
+  coverSource: string | undefined,
+  accessToken: string,
+): Promise<PreviewItem> {
   try {
     const { dataSourceRes: dataSource, queryRes: query } = snapshot;
 
@@ -167,9 +173,10 @@ function loadPreviewItem(snapshot: GalleryNotionSnapshot, coverSource: string | 
       values,
       imageProperties: isFullDataSource(dataSource) ? listImagePropertyNames(dataSource) : [],
       uploadProperties: isFullDataSource(dataSource) ? listUploadTargetNames(dataSource) : [],
-      // Content-image covers resolve lazily elsewhere; the preview settles for the frame
-      // rather than spending a blocks crawl here.
-      coverUrl: resolveCoverUrl(page, coverSource),
+      coverUrl:
+        coverSource === CONTENT_IMAGE
+          ? (await resolveContentImage(accessToken, page.id)).fullUrl
+          : resolveCoverUrl(page, coverSource),
     };
   } catch {
     return EMPTY_PREVIEW;
