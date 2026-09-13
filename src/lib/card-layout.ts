@@ -284,10 +284,28 @@ function belongsToMerge(grid: Grid, index: number): boolean {
   return colSpan > 1 || rowSpan > 1;
 }
 
-/** Track controls stay available when at least one independent pair can move. */
+/** A whole row/column can move when no merge crosses the direction of travel. */
+function canMoveWholeTrack(grid: Grid, axis: "row" | "column", track: number): boolean {
+  const crossCount = axis === "row" ? grid.cols : grid.rows;
+  for (let cross = 0; cross < crossCount; cross += 1) {
+    const index = axis === "row" ? track * grid.cols + cross : cross * grid.cols + track;
+    const box = grid.boxes[index];
+    const span = spanOf(grid, index);
+    if (!box) return false;
+    if (axis === "row" && (box.mergedInto === "up" || span.rowSpan > 1)) return false;
+    if (axis === "column" && (box.mergedInto === "left" || span.colSpan > 1)) return false;
+  }
+  return true;
+}
+
+/** Track controls stay available for whole compatible tracks, or independent cells. */
 export function canSwapGridTrack(grid: Grid, axis: "row" | "column"): boolean {
   const count = axis === "row" ? grid.rows : grid.cols;
   if (count < 2) return false;
+
+  if (Array.from({ length: count }, (_, track) => track).filter((track) => canMoveWholeTrack(grid, axis, track)).length >= 2) {
+    return true;
+  }
 
   const crossCount = axis === "row" ? grid.cols : grid.rows;
   for (let cross = 0; cross < crossCount; cross += 1) {
@@ -304,6 +322,15 @@ export function swapGridTrack(grid: Grid, axis: "row" | "column", from: number, 
   if (!canSwapGridTrack(grid, axis) || from === to || from < 0 || to < 0 || from >= count || to >= count) return grid;
   const boxes = [...grid.boxes];
   let moved = false;
+  if (canMoveWholeTrack(grid, axis, from) && canMoveWholeTrack(grid, axis, to)) {
+    const crossCount = axis === "row" ? grid.cols : grid.rows;
+    for (let cross = 0; cross < crossCount; cross += 1) {
+      const fromIndex = axis === "row" ? from * grid.cols + cross : cross * grid.cols + from;
+      const toIndex = axis === "row" ? to * grid.cols + cross : cross * grid.cols + to;
+      [boxes[fromIndex], boxes[toIndex]] = [boxes[toIndex], boxes[fromIndex]];
+    }
+    return { ...grid, boxes };
+  }
   if (axis === "row") {
     for (let col = 0; col < grid.cols; col += 1) {
       const fromIndex = from * grid.cols + col;
