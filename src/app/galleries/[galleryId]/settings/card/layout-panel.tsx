@@ -7,6 +7,7 @@ import {
   canSwapGridTrack,
   mergeBoxes,
   mergedBoxIds,
+  spanOf,
   type CardRatio,
   type FrameAlign,
   type Grid,
@@ -300,23 +301,30 @@ function StructureEditor({
           ))}
         </div>
         <div className="grid flex-1 gap-1" style={{ gridTemplateColumns: `repeat(${grid.cols}, minmax(0, 1fr))` }}>
-          {grid.boxes.map((box, index) => (
-            <button
-              key={box.id}
-              type="button"
-              onMouseDown={(event) => beginSelection(index, event)}
-              onMouseEnter={() => selecting.current && selectRectangle(index)}
-              className={`min-h-10 rounded border text-[10px] transition-colors ${
-                selectedSet.has(box.id)
-                  ? "border-emerald-600 bg-emerald-100 ring-1 ring-emerald-400"
-                  : box.mergedInto
-                    ? "border-stone-200 bg-stone-100 text-stone-400"
+          {grid.boxes.map((box, index) => {
+            // A folded cell is represented by its root's span, not a second visual button.
+            if (box.mergedInto) return null;
+            const { colSpan, rowSpan } = spanOf(grid, index);
+            return (
+              <button
+                key={box.id}
+                type="button"
+                onMouseDown={(event) => beginSelection(index, event)}
+                onMouseEnter={() => selecting.current && selectRectangle(index)}
+                style={{
+                  gridColumn: colSpan > 1 ? `span ${colSpan}` : undefined,
+                  gridRow: rowSpan > 1 ? `span ${rowSpan}` : undefined,
+                }}
+                className={`min-h-10 rounded border text-[10px] transition-colors ${
+                  selectedSet.has(box.id)
+                    ? "border-emerald-600 bg-emerald-100 ring-1 ring-emerald-400"
                     : "border-stone-300 bg-white text-stone-500 hover:border-stone-500"
-              }`}
-            >
-              {box.mergedInto ? "↳" : box.fields.length ? `${box.fields.length} prop` : "Ô trống"}
-            </button>
-          ))}
+                }`}
+              >
+                {box.fields.length ? `${box.fields.length} prop` : "Ô trống"}
+              </button>
+            );
+          })}
         </div>
       </div>
       {selected.length > 0 && (
@@ -338,8 +346,11 @@ function StructureEditor({
                 type="button"
                 disabled={!canMergeSelection}
                 onClick={() => {
+                  const rootId = [...selected]
+                    .sort((left, right) => grid.boxes.findIndex((box) => box.id === left) - grid.boxes.findIndex((box) => box.id === right))[0];
                   onMerge(regionId, selected);
-                  setSelected([]);
+                  // Keep the merged root selected so its only reversal action, Tách, stays below the grid.
+                  setSelected(rootId ? [rootId] : []);
                 }}
                 className="rounded bg-emerald-700 px-2 py-1 text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-stone-300"
               >
