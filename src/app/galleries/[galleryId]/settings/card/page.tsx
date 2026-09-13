@@ -12,7 +12,6 @@ import {
   type CoverOrientation,
 } from "@/lib/card-layout";
 import {
-  CONTENT_IMAGE,
   COVER_RATIOS,
   PAGE_COVER,
   listImagePropertyNames,
@@ -23,11 +22,10 @@ import {
   resolveFormCoverShape,
   listUploadTargetNames,
 } from "@/lib/notion-cover";
-import { resolveContentImage } from "@/lib/content-image-cache";
 import { plainTextValue } from "@/lib/property-text";
 import { parseFormDefaults } from "@/lib/create-form";
 import { parseViewLayoutConfig } from "@/lib/gallery-view";
-import { CardLayoutEditor } from "./card-layout-editor";
+import { CardLayoutEditor, type PreviewRecord } from "./card-layout-editor";
 
 export default async function CardLayoutSettingsPage({
   params,
@@ -82,7 +80,7 @@ export default async function CardLayoutSettingsPage({
     dataSourceId: gallery.notionDataSourceId,
     accessToken: gallery.workspace.accessToken,
   });
-  const preview = await loadPreviewItem(snapshot, viewConfig.coverSource, gallery.workspace.accessToken);
+  const preview = loadPreviewItems(snapshot);
 
   return (
     <div className="flex h-screen w-full flex-col px-6 py-6">
@@ -127,56 +125,51 @@ export default async function CardLayoutSettingsPage({
           initialDetailWidth={resolveDetailWidth(config)}
           initialCoverSource={viewConfig.coverSource ?? PAGE_COVER}
           imageProperties={preview.imageProperties}
-          previewTitle={preview.title}
-          previewValues={preview.values}
-          previewCoverUrl={preview.coverUrl}
+          previewItems={preview.items}
         />
       )}
     </div>
   );
 }
 
-type PreviewItem = {
-  title: string;
-  values: Record<string, string>;
-  coverUrl: string | null;
+type PreviewData = {
+  items: PreviewRecord[];
   /** Files/URL properties that could serve as a cover — the source picker's options. */
   imageProperties: string[];
   /** Files properties, the only ones an upload can be written into. */
   uploadProperties: string[];
 };
-const EMPTY_PREVIEW: PreviewItem = {
-  title: "Item mẫu",
-  values: {},
-  coverUrl: null,
+const EMPTY_PREVIEW: PreviewData = {
+  items: [],
   imageProperties: [],
   uploadProperties: [],
 };
 
-async function loadPreviewItem(
-  snapshot: GalleryNotionSnapshot,
-  coverSource: string | undefined,
-  accessToken: string,
-): Promise<PreviewItem> {
+function loadPreviewItems(snapshot: GalleryNotionSnapshot): PreviewData {
   try {
     const { dataSourceRes: dataSource, queryRes: query } = snapshot;
-
-    const page = query.results.filter(isFullPage)[0];
-    if (!page) return EMPTY_PREVIEW;
-
     const titleProperty = "properties" in dataSource ? getTitlePropertyName(dataSource.properties) : null;
-    const values: Record<string, string> = {};
-    for (const value of Object.values(page.properties)) values[value.id] = plainTextValue(value);
+    const imageProperties = isFullDataSource(dataSource) ? listImagePropertyNames(dataSource) : [];
+    const coverSources = [PAGE_COVER, ...imageProperties.map((name) => `property:${name}`)];
+    const items = query.results
+      .filter(isFullPage)
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 50)
+      .map((page) => {
+        const values: Record<string, string> = {};
+        for (const value of Object.values(page.properties)) values[value.id] = plainTextValue(value);
+        return {
+          pageId: page.id,
+          title: getPageTitle(page, titleProperty),
+          values,
+          coverUrls: Object.fromEntries(coverSources.map((source) => [source, resolveCoverUrl(page, source)])),
+        };
+      });
 
     return {
-      title: getPageTitle(page, titleProperty),
-      values,
-      imageProperties: isFullDataSource(dataSource) ? listImagePropertyNames(dataSource) : [],
+      items,
+      imageProperties,
       uploadProperties: isFullDataSource(dataSource) ? listUploadTargetNames(dataSource) : [],
-      coverUrl:
-        coverSource === CONTENT_IMAGE
-          ? (await resolveContentImage(accessToken, page.id)).fullUrl
-          : resolveCoverUrl(page, coverSource),
     };
   } catch {
     return EMPTY_PREVIEW;

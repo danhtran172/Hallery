@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -57,6 +57,12 @@ import { LayoutPanel } from "./layout-panel";
 
 export type EditableCardProperty = PanelProperty & { detailDisplayConfig: string };
 export type CoverShape = { aspect: CoverOrientation; ratio: string };
+export type PreviewRecord = {
+  pageId: string;
+  title: string;
+  values: Record<string, string>;
+  coverUrls: Record<string, string | null>;
+};
 
 /** The three things this screen arranges. They share a format and an editor, nothing else. */
 export type ViewMode = "gallery" | "detail" | "form";
@@ -100,9 +106,7 @@ export function CardLayoutEditor({
   initialFormCoverTarget,
   imageProperties,
   uploadProperties,
-  previewTitle,
-  previewValues,
-  previewCoverUrl,
+  previewItems,
 }: {
   galleryId: string;
   viewId: string;
@@ -119,9 +123,7 @@ export function CardLayoutEditor({
   initialFormCoverTarget: string;
   imageProperties: string[];
   uploadProperties: string[];
-  previewTitle: string;
-  previewValues: Record<string, string>;
-  previewCoverUrl: string | null;
+  previewItems: PreviewRecord[];
 }) {
   const [mode, setMode] = useState<ViewMode>("gallery");
 
@@ -163,6 +165,37 @@ export function CardLayoutEditor({
   const [search, setSearch] = useState("");
   const [recordPreview, setRecordPreview] = useState(true);
   const [editingLayout, setEditingLayout] = useState(true);
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const [contentImage, setContentImage] = useState<{ pageId: string; url: string | null } | null>(null);
+  const previewItem = previewItems[previewIndex] ?? null;
+
+  useEffect(() => {
+    if (coverSource !== CONTENT_IMAGE || !previewItem) {
+      return;
+    }
+
+    let active = true;
+    void fetch(`/api/galleries/${galleryId}/content-image?pageId=${encodeURIComponent(previewItem.pageId)}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { url?: unknown } | null) => {
+        if (active) setContentImage({ pageId: previewItem.pageId, url: typeof data?.url === "string" ? data.url : null });
+      })
+      .catch(() => {
+        if (active) setContentImage({ pageId: previewItem.pageId, url: null });
+      });
+    return () => {
+      active = false;
+    };
+  }, [coverSource, galleryId, previewItem]);
+
+  const pickRandomPreview = () => {
+    if (previewItems.length < 2) return;
+    setPreviewIndex((current) => {
+      let next = current;
+      while (next === current) next = Math.floor(Math.random() * previewItems.length);
+      return next;
+    });
+  };
 
   /** Makes the detail match the card, which is the state it starts in before anyone edits it. */
   function syncFromGalleryCard() {
@@ -474,10 +507,14 @@ export function CardLayoutEditor({
               <CardCanvas
                 layout={layout}
                 coverRatio={coverRatio}
-                coverUrl={previewCoverUrl}
-                title={previewTitle}
+                coverUrl={
+                  coverSource === CONTENT_IMAGE
+                    ? (contentImage?.pageId === previewItem?.pageId ? contentImage.url : null)
+                    : (previewItem?.coverUrls[coverSource] ?? null)
+                }
+                title={previewItem?.title ?? "Item mẫu"}
                 byId={byId}
-                values={recordPreview ? previewValues : {}}
+                values={recordPreview ? (previewItem?.values ?? {}) : {}}
                 configs={configs}
                 selected={selected}
                 onSelect={selectProperty}
@@ -495,14 +532,24 @@ export function CardLayoutEditor({
                 shapeIsRound={isRoundCover(shape.aspect)}
               />
             </div>
-            <label className="flex items-center gap-2 border-t border-stone-200 bg-white px-4 py-2 text-xs text-stone-600">
-              <input
-                type="checkbox"
-                checked={recordPreview}
-                onChange={(event) => setRecordPreview(event.target.checked)}
-              />
-              Xem bằng dữ liệu thật của item đầu tiên
-            </label>
+            <div className="flex items-center justify-between gap-3 border-t border-stone-200 bg-white px-4 py-2 text-xs text-stone-600">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={recordPreview}
+                  onChange={(event) => setRecordPreview(event.target.checked)}
+                />
+                Xem bằng dữ liệu thật
+              </label>
+              <button
+                type="button"
+                onClick={pickRandomPreview}
+                disabled={!recordPreview || previewItems.length < 2}
+                className="rounded border border-stone-300 px-2 py-1 text-[11px] font-medium text-stone-600 hover:border-stone-500 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Random
+              </button>
+            </div>
           </div>
 
           {state.error && <p className="text-sm text-red-600">{state.error}</p>}
