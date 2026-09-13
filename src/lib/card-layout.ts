@@ -378,7 +378,7 @@ export function createDefaultCardLayout(properties: CardEligibleProperty[]): Car
     { id: TITLE_FIELD_ID, showLabel: false },
     ...cardEligibleProperties(properties)
       .slice(0, DEFAULT_CARD_FIELD_COUNT)
-      .map((property) => ({ id: property.notionPropertyId, showLabel: true })),
+      .map((property) => ({ id: property.notionPropertyId, showLabel: false })),
   ];
 
   return {
@@ -400,7 +400,7 @@ function parseFields(raw: unknown): CardField[] {
     if (typeof entry !== "object" || entry === null) continue;
     const { id, showLabel } = entry as { id?: unknown; showLabel?: unknown };
     if (typeof id !== "string" || id === "") continue;
-    fields.push({ id, showLabel: showLabel !== false });
+    fields.push({ id, showLabel: showLabel === true });
   }
   return fields;
 }
