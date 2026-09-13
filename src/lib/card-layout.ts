@@ -218,6 +218,72 @@ export function unmergeBox(grid: Grid, boxId: string): Grid {
   };
 }
 
+/** Merge a rectangular 2- or 3-cell selection. Only empty, independent cells may join. */
+export function mergeBoxes(grid: Grid, boxIds: string[]): Grid {
+  const indexes = boxIds.map((id) => grid.boxes.findIndex((box) => box.id === id)).filter((index) => index >= 0);
+  if (indexes.length !== 2 && indexes.length !== 3) return grid;
+  const rows = indexes.map((index) => Math.floor(index / grid.cols));
+  const cols = indexes.map((index) => index % grid.cols);
+  const minRow = Math.min(...rows), maxRow = Math.max(...rows), minCol = Math.min(...cols), maxCol = Math.max(...cols);
+  const width = maxCol - minCol + 1, height = maxRow - minRow + 1;
+  if (width * height !== indexes.length || (width !== 1 && height !== 1)) return grid;
+  if (indexes.some((index) => grid.boxes[index].mergedInto || grid.boxes[index].fields.length > 0)) return grid;
+
+  const root = minRow * grid.cols + minCol;
+  return {
+    ...grid,
+    boxes: grid.boxes.map((box, index) => {
+      if (!indexes.includes(index) || index === root) return box;
+      return { ...box, mergedInto: index % grid.cols === minCol ? "up" : "left", fields: [] };
+    }),
+  };
+}
+
+/** Returns every cell in the merged block touched by this cell, including its root. */
+export function mergedBoxIds(grid: Grid, boxId: string): string[] {
+  const index = grid.boxes.findIndex((box) => box.id === boxId);
+  if (index < 0) return [];
+  let root = index;
+  while (grid.boxes[root]?.mergedInto === "left") root -= 1;
+  while (grid.boxes[root]?.mergedInto === "up") root -= grid.cols;
+  const { colSpan, rowSpan } = spanOf(grid, root);
+  const ids: string[] = [];
+  for (let row = 0; row < rowSpan; row += 1) {
+    for (let col = 0; col < colSpan; col += 1) ids.push(grid.boxes[root + row * grid.cols + col].id);
+  }
+  return ids;
+}
+
+export function unmergeBoxes(grid: Grid, boxIds: string[]): Grid {
+  const ids = new Set(boxIds.flatMap((id) => mergedBoxIds(grid, id)));
+  return {
+    ...grid,
+    boxes: grid.boxes.map((box) => {
+      if (!ids.has(box.id)) return box;
+      const next = { ...box };
+      delete next.mergedInto;
+      return next;
+    }),
+  };
+}
+
+/** Swapping a track is safe only when no merge crosses that same axis. */
+export function canSwapGridTrack(grid: Grid, axis: "row" | "column"): boolean {
+  return !grid.boxes.some((box) => box.mergedInto === (axis === "row" ? "up" : "left"));
+}
+
+export function swapGridTrack(grid: Grid, axis: "row" | "column", from: number, to: number): Grid {
+  const count = axis === "row" ? grid.rows : grid.cols;
+  if (!canSwapGridTrack(grid, axis) || from === to || from < 0 || to < 0 || from >= count || to >= count) return grid;
+  const boxes = [...grid.boxes];
+  if (axis === "row") {
+    for (let col = 0; col < grid.cols; col += 1) [boxes[from * grid.cols + col], boxes[to * grid.cols + col]] = [boxes[to * grid.cols + col], boxes[from * grid.cols + col]];
+  } else {
+    for (let row = 0; row < grid.rows; row += 1) [boxes[row * grid.cols + from], boxes[row * grid.cols + to]] = [boxes[row * grid.cols + to], boxes[row * grid.cols + from]];
+  }
+  return { ...grid, boxes };
+}
+
 /**
  * Whether an empty box can fold that way. A box only merges into a neighbour that is
  * itself standing on its own, so merges never chain into shapes a grid cannot express.

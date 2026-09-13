@@ -1,7 +1,6 @@
 "use client";
 
 import { CARD_RATIOS, MAX_ROWS, type CardRatio, type FrameAlign, type Grid } from "@/lib/card-layout";
-import { GridGlyph } from "./glyphs";
 
 /**
  * Panel 5 in layout mode: how many boxes each frame is divided into, and how the cover
@@ -125,7 +124,7 @@ function AlignChooser({ value, onChange }: { value: FrameAlign; onChange: (value
   );
 }
 
-/** One-column choices on the left, two-column choices on the right. */
+/** A compact 2×3 matrix: each cell represents the grid bounded at that point. */
 function GridChooser({
   grid,
   maxRows,
@@ -135,34 +134,31 @@ function GridChooser({
   maxRows: number;
   onChange: (cols: 1 | 2, rows: number) => void;
 }) {
-  const rows = Array.from({ length: Math.min(MAX_ROWS, maxRows) }, (_, index) => index + 1);
+  const options = [
+    { cols: 1 as const, rows: 1 }, { cols: 2 as const, rows: 1 },
+    { cols: 1 as const, rows: 2 }, { cols: 2 as const, rows: 2 },
+    { cols: 1 as const, rows: 3 }, { cols: 2 as const, rows: 3 },
+  ];
 
   return (
-    <div className="grid grid-cols-2 gap-2">
-      {([1, 2] as const).map((cols) => (
-        <div key={cols} className="flex flex-col gap-1.5">
-          <span className="text-center text-[10px] text-stone-400">{cols} cột</span>
-          {rows.map((rowCount) => {
-            const selected = grid.cols === cols && grid.rows === rowCount;
-            return (
-              <button
-                key={rowCount}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => onChange(cols, rowCount)}
-                className={`flex items-center justify-center gap-1.5 rounded-md border px-1 py-1.5 ${
-                  selected ? "border-emerald-700 bg-emerald-50" : "border-stone-300 hover:border-stone-500"
-                }`}
-              >
-                <GridGlyph cols={cols} rows={rowCount} selected={selected} />
-                <span className="font-mono text-[10px] text-stone-600">
-                  {cols}×{rowCount}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      ))}
+    <div className="grid aspect-square grid-cols-2 grid-rows-3 gap-1">
+      {options.map((option) => {
+        const selected = grid.cols === option.cols && grid.rows === option.rows;
+        const allowed = option.rows <= Math.min(MAX_ROWS, maxRows);
+        return (
+          <button
+            key={`${option.cols}-${option.rows}`}
+            type="button"
+            aria-label={`${option.cols} cột, ${option.rows} hàng`}
+            aria-pressed={selected}
+            disabled={!allowed}
+            onClick={() => onChange(option.cols, option.rows)}
+            className={`rounded-sm border transition-colors disabled:cursor-not-allowed disabled:opacity-25 ${
+              selected ? "border-emerald-700 bg-emerald-500" : "border-stone-300 bg-stone-100 hover:border-stone-500"
+            }`}
+          />
+        );
+      })}
     </div>
   );
 }
