@@ -375,7 +375,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
               return (
                 <div
                   key={page.id}
-                  className="group relative flex shrink-0 flex-col overflow-hidden rounded-lg border border-stone-200 hover:border-emerald-600 hover:shadow-sm"
+                  className="group relative flex shrink-0 flex-col overflow-hidden rounded-xl border border-stone-200 hover:border-emerald-600 hover:shadow-sm"
                   style={{ width: `calc(var(--card-base) * ${CARD_WIDTH_FACTOR[cardKind]})` }}
                 >
                   <Link
