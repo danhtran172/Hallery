@@ -84,7 +84,14 @@ export async function saveCardLayout(
     for (const id of ARRANGEMENTS[layout.arrangement].regions) {
       regions[id] = prune(layout.regions[id]);
     }
-    return { ...layout, overlay, regions };
+    return {
+      ...layout,
+      overlay,
+      regions,
+      labelVisibility: Object.fromEntries(
+        Object.entries(layout.labelVisibility).filter(([id]) => allowed.has(id)),
+      ),
+    };
   };
 
   // Only the gallery card is a view concern. Detail and quick-entry retain their

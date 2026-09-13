@@ -143,6 +143,11 @@ export type CardLayout = {
   /** Burned onto the cover. Capped — a cover buried under text stops being an image. */
   overlay: CardField[];
   regions: Record<string, Grid>;
+  /**
+   * Label choices made while a property is still in the tray. The choice transfers to
+   * the field as soon as it is dropped onto the card.
+   */
+  labelVisibility: Record<string, boolean>;
 };
 
 export const MAX_OVERLAY_FIELDS = 3;
@@ -388,6 +393,7 @@ export function createDefaultCardLayout(properties: CardEligibleProperty[]): Car
     ratio: [40, 60],
     overlay: [],
     regions: { main: makeGrid(1, 1, [fields]) },
+    labelVisibility: {},
   };
 }
 
@@ -403,6 +409,13 @@ function parseFields(raw: unknown): CardField[] {
     fields.push({ id, showLabel: showLabel === true });
   }
   return fields;
+}
+
+function parseLabelVisibility(raw: unknown): Record<string, boolean> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw).flatMap(([id, visible]) => (typeof visible === "boolean" ? [[id, visible]] : [])),
+  );
 }
 
 function parseRatio(raw: unknown): CardRatio {
@@ -475,6 +488,7 @@ export function parseCardLayout(raw: unknown): CardLayout | null {
     ratio: parseRatio(value.ratio),
     overlay: parseFields(value.overlay).slice(0, MAX_OVERLAY_FIELDS),
     regions,
+    labelVisibility: parseLabelVisibility(value.labelVisibility),
   };
 }
 
@@ -482,7 +496,7 @@ export function parseCardLayout(raw: unknown): CardLayout | null {
 function liftLegacyLayout(value: Record<string, unknown>): CardLayout | null {
   const overlay = parseFields(value.overlay ?? value.overlayFields).slice(0, MAX_OVERLAY_FIELDS);
   const ratio = parseRatio(value.ratio);
-  const base = { version: CARD_LAYOUT_VERSION, extended: false, ratio, overlay } as const;
+  const base = { version: CARD_LAYOUT_VERSION, extended: false, ratio, overlay, labelVisibility: {} } as const;
 
   const collect = (): { main: CardField[]; below: CardField[]; cover: CoverSlot } => {
     if (value.cells && typeof value.cells === "object") {

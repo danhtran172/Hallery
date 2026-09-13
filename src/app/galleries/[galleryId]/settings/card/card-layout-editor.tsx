@@ -235,7 +235,10 @@ export function CardLayoutEditor({
     };
     return (
       current.overlay.find((f) => f.id === id) ??
-      Object.values(current.regions).map(search).find(Boolean) ?? { id, showLabel: false }
+      Object.values(current.regions).map(search).find(Boolean) ?? {
+        id,
+        showLabel: current.labelVisibility[id] ?? false,
+      }
     );
   }
 
@@ -297,6 +300,7 @@ export function CardLayoutEditor({
         ...current,
         overlay: flip(current.overlay),
         regions: Object.fromEntries(Object.entries(current.regions).map(([k, g]) => [k, walk(g)])),
+        labelVisibility: { ...current.labelVisibility, [id]: showLabel },
       };
     });
 
