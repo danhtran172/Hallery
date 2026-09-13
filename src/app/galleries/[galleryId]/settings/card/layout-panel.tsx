@@ -158,6 +158,7 @@ function GridChooser({
   maxRows: number;
   onChange: (cols: 1 | 2, rows: number) => void;
 }) {
+  const [open, setOpen] = useState(false);
   const options = [
     { cols: 1 as const, rows: 1 }, { cols: 2 as const, rows: 1 },
     { cols: 1 as const, rows: 2 }, { cols: 2 as const, rows: 2 },
@@ -165,32 +166,70 @@ function GridChooser({
   ];
 
   return (
-    <div className="grid aspect-square grid-cols-2 grid-rows-3 gap-1">
-      {options.map((option, index) => {
-        const selected = grid.cols === option.cols && grid.rows === option.rows;
-        const allowed = option.rows <= Math.min(MAX_ROWS, maxRows);
+    <div className="relative">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center justify-between rounded-md border border-stone-300 px-2 py-1.5 text-left text-xs text-stone-700 hover:border-stone-500"
+      >
+        <span className="flex items-center gap-2">
+          <GridPreview cols={grid.cols} rows={grid.rows} />
+          <span>
+            {grid.cols} cột × {grid.rows} hàng
+          </span>
+        </span>
+        <span aria-hidden className="text-stone-400">⌄</span>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-40 mt-1.5 w-40 rounded-md border border-stone-200 bg-white p-2 shadow-lg">
+          <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-stone-400">Chọn khung nội dung</p>
+          <div className="grid w-24 grid-cols-2 gap-1">
+            {options.map((option, index) => {
+              const selected = grid.cols === option.cols && grid.rows === option.rows;
+              const allowed = option.rows <= Math.min(MAX_ROWS, maxRows);
+              const row = Math.floor(index / 2) + 1;
+              const col = (index % 2) + 1;
+              const included = allowed && row <= grid.rows && col <= grid.cols;
+              return (
+                <button
+                  key={`${option.cols}-${option.rows}`}
+                  type="button"
+                  aria-label={`${option.cols} cột, ${option.rows} hàng`}
+                  aria-pressed={selected}
+                  disabled={!allowed}
+                  onClick={() => {
+                    onChange(option.cols, option.rows);
+                    setOpen(false);
+                  }}
+                  className={`aspect-square rounded-sm border transition-colors disabled:cursor-not-allowed disabled:opacity-25 ${
+                    selected
+                      ? "border-emerald-800 bg-emerald-600"
+                      : included
+                        ? "border-emerald-500 bg-emerald-400"
+                        : "border-stone-300 bg-stone-100 hover:border-stone-500"
+                  }`}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A quiet thumbnail in the trigger, so the size control reads before it opens. */
+function GridPreview({ cols, rows }: { cols: 1 | 2; rows: number }) {
+  return (
+    <span aria-hidden className="grid h-5 w-5 grid-cols-2 gap-px rounded-sm bg-stone-200 p-px">
+      {Array.from({ length: 6 }, (_, index) => {
         const row = Math.floor(index / 2) + 1;
         const col = (index % 2) + 1;
-        const included = allowed && row <= grid.rows && col <= grid.cols;
-        return (
-          <button
-            key={`${option.cols}-${option.rows}`}
-            type="button"
-            aria-label={`${option.cols} cột, ${option.rows} hàng`}
-            aria-pressed={selected}
-            disabled={!allowed}
-            onClick={() => onChange(option.cols, option.rows)}
-            className={`rounded-sm border transition-colors disabled:cursor-not-allowed disabled:opacity-25 ${
-              selected
-                ? "border-emerald-800 bg-emerald-600"
-                : included
-                  ? "border-emerald-500 bg-emerald-400"
-                  : "border-stone-300 bg-stone-100 hover:border-stone-500"
-            }`}
-          />
-        );
+        return <span key={index} className={`rounded-[1px] ${row <= rows && col <= cols ? "bg-emerald-500" : "bg-white"}`} />;
       })}
-    </div>
+    </span>
   );
 }
 
