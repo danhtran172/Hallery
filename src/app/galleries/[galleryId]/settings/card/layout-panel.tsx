@@ -57,7 +57,6 @@ export function LayoutPanel({
             {regionLabel(id)}
           </p>
           <GridChooser grid={grid} maxRows={rowCap(id)} onChange={(cols, rows) => onResize(id, cols, rows)} />
-          <AlignChooser value={grid.align ?? "start"} onChange={(align) => onAlign(id, align)} />
           <StructureEditor
             regionId={id}
             grid={grid}
@@ -65,6 +64,7 @@ export function LayoutPanel({
             onUnmerge={onUnmergeSelection}
             onSwapTrack={onSwapTrack}
           />
+          <AlignChooser value={grid.align ?? "start"} onChange={(align) => onAlign(id, align)} />
         </section>
       ))}
 
@@ -367,7 +367,7 @@ function StructureEditor({
         </div>
       </div>
       {selected.length > 0 && (
-        <div className="mt-2 rounded-md border border-stone-200 bg-stone-50 p-2 text-xs">
+        <div className="mt-2 flex justify-end text-xs">
           {selectedHasMerge ? (
             <button
               type="button"
@@ -380,7 +380,7 @@ function StructureEditor({
               Tách
             </button>
           ) : (
-            <div className="flex flex-col items-start gap-1.5">
+            <div className="flex flex-col items-end gap-1.5">
               <button
                 type="button"
                 disabled={!canMergeSelection}
@@ -396,7 +396,7 @@ function StructureEditor({
                 Gộp {selected.length} ô
               </button>
               {!canMergeSelection && (
-                <span className="text-stone-500">Chọn 2–3 ô liền nhau; tối đa một ô có property.</span>
+                <span className="text-right text-stone-500">Chọn 2–3 ô liền nhau; tối đa một ô có property.</span>
               )}
             </div>
           )}
