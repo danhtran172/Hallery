@@ -1156,15 +1156,9 @@ function GridBlock({ grid, ...props }: CanvasProps & { grid: Grid }) {
   return (
     <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${grid.cols}, minmax(0, 1fr))` }}>
       {grid.boxes.map((box, index) => {
-        if (box.mergedInto) {
-          return (
-            <div
-              key={box.id}
-              aria-hidden
-              className={`flex items-center justify-center rounded bg-stone-100/70 ${box.mergedInto === "left" ? "w-4" : "h-4"}`}
-            />
-          );
-        }
+        // The root spans this cell, so rendering its folded child would make CSS Grid
+        // place a stray placeholder in the next available slot.
+        if (box.mergedInto) return null;
         const { colSpan, rowSpan } = spanOf(grid, index);
         return (
           <BoxSlot
