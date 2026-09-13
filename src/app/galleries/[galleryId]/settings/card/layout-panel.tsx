@@ -396,7 +396,7 @@ function StructureEditor({
                 Gộp {selected.length} ô
               </button>
               {!canMergeSelection && (
-                <span className="text-stone-500">Chọn 2–3 ô trống liền nhau để gộp.</span>
+                <span className="text-stone-500">Chọn 2–3 ô liền nhau; tối đa một ô có property.</span>
               )}
             </div>
           )}
