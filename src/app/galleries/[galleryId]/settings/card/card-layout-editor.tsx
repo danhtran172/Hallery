@@ -508,9 +508,11 @@ export function CardLayoutEditor({
                 layout={layout}
                 coverRatio={coverRatio}
                 coverUrl={
-                  coverSource === CONTENT_IMAGE
-                    ? (contentImage?.pageId === previewItem?.pageId ? contentImage.url : null)
-                    : (previewItem?.coverUrls[coverSource] ?? null)
+                  recordPreview
+                    ? coverSource === CONTENT_IMAGE
+                      ? (contentImage?.pageId === previewItem?.pageId ? contentImage.url : null)
+                      : (previewItem?.coverUrls[coverSource] ?? null)
+                    : null
                 }
                 title={previewItem?.title ?? "Item mẫu"}
                 byId={byId}
