@@ -1346,6 +1346,7 @@ function FieldChip({
 
   const name = config?.nameOverride?.trim() || property?.notionPropertyName || "";
   const shown = isTitle ? title : value || "—";
+  const isUrl = property?.notionPropertyType === "url" && Boolean(value);
 
   return (
     <span
@@ -1373,7 +1374,24 @@ function FieldChip({
             {!isTitle && field.showLabel && (
               <span className={`shrink-0 truncate ${dark ? "text-white/60" : "text-stone-400"}`}>{name}</span>
             )}
-            <span className={`min-w-0 flex-1 truncate ${isTitle ? "font-semibold" : ""}`}>{shown}</span>
+            {isUrl ? (
+              <a
+                href={value}
+                target="_blank"
+                rel="noreferrer"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+                className={
+                  config?.kind === "button"
+                    ? "shrink-0 rounded bg-emerald-700 px-2 py-1 font-medium text-white hover:bg-emerald-800"
+                    : "min-w-0 flex-1 truncate text-emerald-700 underline"
+                }
+              >
+                {config?.kind === "button" ? config.label || "Mở link" : value}
+              </a>
+            ) : (
+              <span className={`min-w-0 flex-1 truncate ${isTitle ? "font-semibold" : ""}`}>{shown}</span>
+            )}
           </>
         )}
       </span>

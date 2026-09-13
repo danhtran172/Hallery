@@ -82,7 +82,7 @@ function BoxFields({
             {field.showLabel && (
               <dt className="w-24 shrink-0 truncate text-xs text-stone-400">{label}</dt>
             )}
-            <dd className="min-w-0 flex-1 truncate [&_a]:pointer-events-auto">
+            <dd className="min-w-0 flex-1 truncate [&_a]:pointer-events-auto [&_a]:relative [&_a]:z-20">
               <PropertyValue value={value} displayConfig={config} />
             </dd>
           </div>
