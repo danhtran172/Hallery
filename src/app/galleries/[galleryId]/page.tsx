@@ -49,6 +49,7 @@ import { configTypeOf } from "@/lib/property-kind";
 import { RelationGalleryMenu } from "@/components/relation-gallery-menu";
 import { listRelationGalleries } from "@/lib/relation-galleries";
 import { GallerySyncHeartbeat } from "@/components/gallery-sync-heartbeat";
+import { DeferredCards } from "@/components/deferred-cards";
 import {
   coverSourceFingerprint,
   storedCoverCardUrl,
@@ -58,7 +59,9 @@ import {
 
 /** Gap between cards, mirrored in the base-width calculation below. */
 const CARD_GAP_REM = 1;
-const CARDS_PER_PAGE = 24;
+/** Each "Xem thêm" reveals a 50-card batch, but paints its first half before the rest. */
+const CARDS_PER_PAGE = 50;
+const PRIORITY_CARDS_PER_BATCH = 25;
 
 function requestedCardPage(value: string | string[] | undefined, totalCards: number) {
   const parsed = typeof value === "string" ? Number.parseInt(value, 10) : 1;
@@ -144,6 +147,13 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
   const pages = applyGalleryQuery(categoryPages, query, searchable);
   const cardPage = requestedCardPage(search.cardPage, pages.length);
   const visiblePages = pages.slice(0, cardPage * CARDS_PER_PAGE);
+  // Existing batches remain mounted; only the newest batch splits into a first paint of
+  // 25 cards and a deferred second 25 cards.
+  const eagerCardCount = Math.min(
+    visiblePages.length,
+    Math.max(0, cardPage - 1) * CARDS_PER_PAGE + PRIORITY_CARDS_PER_BATCH,
+  );
+  const eagerPageIds = new Set(visiblePages.slice(0, eagerCardCount).map((page) => page.id));
   const groups = query.groupBy ? groupPages(pages, query.groupBy) : null;
   const visiblePageIds = new Set(visiblePages.map((page) => page.id));
   const visibleGroups = groups
@@ -303,18 +313,13 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
     });
 
   // Cards are a fixed width per kind rather than stretching, so a gallery of mixed
-  // layouts still lines up. "Cards per row" now sets what one normal card is wide.
-  // Extracted so a grouped gallery can draw the same grid once per section.
-  const renderGrid = (list: PageObjectResponse[]) => (
-          <div
-            className="flex flex-wrap gap-4"
-            style={
-              {
-                "--card-base": `calc((100% - ${(cardsPerRow - 1) * CARD_GAP_REM}rem) / ${cardsPerRow})`,
-              } as React.CSSProperties
-            }
-          >
-            {list.map((page) => {
+  // layouts still lines up. A shared renderer lets the second half of a batch mount
+  // later without adding another flex container or changing the card layout.
+  const gridStyle = {
+    "--card-base": `calc((100% - ${(cardsPerRow - 1) * CARD_GAP_REM}rem) / ${cardsPerRow})`,
+  } as React.CSSProperties;
+  const renderCards = (list: PageObjectResponse[]) =>
+    list.map((page) => {
               const title = getPageTitle(page, titlePropertyName);
               const icon = getPageIcon(page);
               const showCover = cardLayout.cover !== "none" && coverRatio;
@@ -406,9 +411,18 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
                   )}
                 </div>
               );
-            })}
-          </div>
-  );
+    });
+
+  const renderPrioritizedGrid = (list: PageObjectResponse[]) => {
+    const eager = list.filter((page) => eagerPageIds.has(page.id));
+    const deferred = list.filter((page) => !eagerPageIds.has(page.id));
+    return (
+      <div className="flex flex-wrap gap-4" style={gridStyle}>
+        {renderCards(eager)}
+        {deferred.length > 0 && <DeferredCards>{renderCards(deferred)}</DeferredCards>}
+      </div>
+    );
+  };
 
   return (
     <div className="w-full px-6 py-12">
@@ -498,12 +512,12 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
                     {group.pages.length} / {group.total}
                   </span>
                 </h2>
-                {renderGrid(group.pages)}
+                {renderPrioritizedGrid(group.pages)}
               </section>
             ))}
           </div>
         ) : (
-          renderGrid(visiblePages)
+          renderPrioritizedGrid(visiblePages)
         )
       )}
 
