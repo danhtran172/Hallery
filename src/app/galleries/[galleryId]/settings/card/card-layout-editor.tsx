@@ -162,7 +162,7 @@ export function CardLayoutEditor({
   const [dragging, setDragging] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [recordPreview, setRecordPreview] = useState(true);
-  const [editingLayout, setEditingLayout] = useState(false);
+  const [editingLayout, setEditingLayout] = useState(true);
 
   /** Makes the detail match the card, which is the state it starts in before anyone edits it. */
   function syncFromGalleryCard() {
@@ -178,6 +178,7 @@ export function CardLayoutEditor({
       ),
     );
     setSelected(null);
+    setEditingLayout(true);
   }
 
   const action = saveCardLayout.bind(null, galleryId, viewId);
@@ -234,7 +235,7 @@ export function CardLayoutEditor({
     };
     return (
       current.overlay.find((f) => f.id === id) ??
-      Object.values(current.regions).map(search).find(Boolean) ?? { id, showLabel: id !== TITLE_FIELD_ID }
+      Object.values(current.regions).map(search).find(Boolean) ?? { id, showLabel: false }
     );
   }
 
@@ -359,6 +360,10 @@ export function CardLayoutEditor({
       ? { ...rawSelected, displayConfig: rawSelected.detailDisplayConfig || rawSelected.displayConfig }
       : rawSelected;
   const selectedField = selected ? findField(layout, selected) : null;
+  const selectProperty = (id: string) => {
+    setSelected(id);
+    setEditingLayout(false);
+  };
   const draggingLabel =
     dragging === TITLE_FIELD_ID ? "Tiêu đề" : dragging ? byId.get(dragging)?.notionPropertyName : null;
 
@@ -388,13 +393,13 @@ export function CardLayoutEditor({
         onDragCancel={() => setDragging(null)}
       >
         {/* 1 + 2 + 3 */}
-        <div className="flex w-64 shrink-0 flex-col gap-3">
+        <div className="flex w-80 shrink-0 flex-col gap-3">
           <ModeSwitch
             mode={mode}
-            onChange={(next) => {
-              setMode(next);
-              setSelected(null);
-              setEditingLayout(false);
+              onChange={(next) => {
+                setMode(next);
+                setSelected(null);
+                setEditingLayout(true);
             }}
           />
 
@@ -437,7 +442,7 @@ export function CardLayoutEditor({
               title="Chỉnh khung bố cục"
               aria-pressed={editingLayout}
               onClick={() => {
-                setEditingLayout((open) => !open);
+                setEditingLayout(true);
                 setSelected(null);
               }}
               className={`w-9 shrink-0 rounded-lg border text-sm ${
@@ -454,7 +459,7 @@ export function CardLayoutEditor({
             search={search}
             onSearch={setSearch}
             selected={selected}
-            onSelect={setSelected}
+            onSelect={selectProperty}
           />
         </div>
 
@@ -471,8 +476,12 @@ export function CardLayoutEditor({
                 values={recordPreview ? previewValues : {}}
                 configs={configs}
                 selected={selected}
-                onSelect={setSelected}
-                onRemove={(id) => place(id, "tray")}
+                onSelect={selectProperty}
+                onRemove={(id) => {
+                  place(id, "tray");
+                  setSelected(null);
+                  setEditingLayout(true);
+                }}
                 cardKind={cardKind}
                 // A detail is sized in pixels, not in cards-per-row, so the preview shows
                 // its real width rather than a thumbnail's multiple.
@@ -496,7 +505,7 @@ export function CardLayoutEditor({
         </div>
 
         {/* 5 */}
-        <div className="w-72 shrink-0">
+        <div className="w-80 shrink-0">
           {formMode && !editingLayout ? (
             <FormFieldPanel
               key={`form:${selected ?? "none"}`}
