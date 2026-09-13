@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import { useActionState, useMemo, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -22,13 +22,11 @@ import {
   CARD_WIDTH_FACTOR,
   arrangementsFor,
   canExtend,
-  canSwapGridTrack,
   cardKindOf,
   isRoundCover,
   makeGrid,
   maxRowsBesideCover,
   mergeBoxes,
-  mergedBoxIds,
   resizeGrid,
   spanOf,
   swapGridTrack,
@@ -475,10 +473,6 @@ export function CardLayoutEditor({
                 selected={selected}
                 onSelect={setSelected}
                 onRemove={(id) => place(id, "tray")}
-                layoutEditing={editingLayout}
-                onMergeSelection={mergeSelection}
-                onUnmergeSelection={unmergeSelection}
-                onSwapTrack={swapTrack}
                 cardKind={cardKind}
                 // A detail is sized in pixels, not in cards-per-row, so the preview shows
                 // its real width rather than a thumbnail's multiple.
@@ -523,6 +517,9 @@ export function CardLayoutEditor({
               onResize={resizeRegion}
               onAlign={alignRegion}
               onRatio={(ratio) => setLayout((c) => ({ ...c, ratio }))}
+              onMergeSelection={mergeSelection}
+              onUnmergeSelection={unmergeSelection}
+              onSwapTrack={swapTrack}
             />
           ) : (
             <PropertyPanel
@@ -1067,10 +1064,6 @@ type CanvasProps = {
   selected: string | null;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
-  layoutEditing: boolean;
-  onMergeSelection: (regionId: string, boxIds: string[]) => void;
-  onUnmergeSelection: (regionId: string, boxIds: string[]) => void;
-  onSwapTrack: (regionId: string, axis: "row" | "column", from: number, to: number) => void;
   cardKind: "ngang" | "extra" | "doc";
   /** Exact preview width in px, for views not measured in cards per row. */
   widthOverride?: number;
@@ -1143,78 +1136,19 @@ function CardCanvas(props: CanvasProps) {
 function RegionBlock({ regionId, ...props }: CanvasProps & { regionId: string }) {
   const grid = props.layout.regions[regionId];
   if (!grid) return null;
-  return <GridBlock {...props} grid={grid} regionId={regionId} />;
+  return <GridBlock {...props} grid={grid} />;
 }
 
-function GridBlock({ grid, regionId, ...props }: CanvasProps & { grid: Grid; regionId: string }) {
-  const [selectedBoxes, setSelectedBoxes] = useState<string[]>([]);
-  const anchor = useRef<number | null>(null);
-  const selecting = useRef(false);
-  const selectedSet = new Set(selectedBoxes);
-
-  useEffect(() => {
-    const stop = () => { selecting.current = false; };
-    window.addEventListener("mouseup", stop);
-    return () => window.removeEventListener("mouseup", stop);
-  }, []);
-
-  function rectangle(to: number) {
-    if (anchor.current === null) return;
-    const fromRow = Math.floor(anchor.current / grid.cols), fromCol = anchor.current % grid.cols;
-    const toRow = Math.floor(to / grid.cols), toCol = to % grid.cols;
-    const ids: string[] = [];
-    for (let row = Math.min(fromRow, toRow); row <= Math.max(fromRow, toRow); row += 1) {
-      for (let col = Math.min(fromCol, toCol); col <= Math.max(fromCol, toCol); col += 1) ids.push(grid.boxes[row * grid.cols + col].id);
-    }
-    setSelectedBoxes(ids);
-  }
-
-  const beginSelection = (index: number, event: React.MouseEvent) => {
-    if (!props.layoutEditing) return;
-    event.preventDefault();
-    const id = grid.boxes[index].id;
-    if (event.ctrlKey || event.metaKey) {
-      setSelectedBoxes((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]);
-      anchor.current = null;
-      return;
-    }
-    anchor.current = index;
-    selecting.current = true;
-    setSelectedBoxes([id]);
-  };
-  const extendSelection = (index: number) => { if (props.layoutEditing && selecting.current) rectangle(index); };
-  const selectedHasMerge = selectedBoxes.some((id) => mergedBoxIds(grid, id).length > 1);
-  const canMergeSelection = selectedBoxes.length >= 2 && mergeBoxes(grid, selectedBoxes) !== grid;
-  const canMoveRows = canSwapGridTrack(grid, "row");
-  const canMoveColumns = canSwapGridTrack(grid, "column");
-  const [dragTrack, setDragTrack] = useState<{ axis: "row" | "column"; index: number } | null>(null);
-  const track = (axis: "row" | "column", index: number, allowed: boolean) => ({
-    draggable: allowed,
-    onDragStart: () => allowed && setDragTrack({ axis, index }),
-    onDragOver: (event: React.DragEvent) => { if (allowed) event.preventDefault(); },
-    onDrop: () => { if (dragTrack?.axis === axis && allowed) props.onSwapTrack(regionId, axis, dragTrack.index, index); setDragTrack(null); },
-  });
-
+function GridBlock({ grid, ...props }: CanvasProps & { grid: Grid }) {
   return (
-    <div className="relative">
-      {props.layoutEditing && (
-        <div className="mb-1 ml-5 grid gap-1" style={{ gridTemplateColumns: `repeat(${grid.cols}, minmax(0, 1fr))` }}>
-          {Array.from({ length: grid.cols }, (_, index) => <button key={index} type="button" aria-label="Kéo đổi cột" title={canMoveColumns ? "Kéo để đổi cột" : "Tách merge ngang để đổi cột"} {...track("column", index, canMoveColumns)} className="h-4 cursor-ew-resize text-[10px] text-stone-400 disabled:cursor-not-allowed" disabled={!canMoveColumns}>↔</button>)}
-        </div>
-      )}
-      <div className="flex gap-1">
-        {props.layoutEditing && <div className="flex w-4 flex-col gap-1">{Array.from({ length: grid.rows }, (_, index) => <button key={index} type="button" aria-label="Kéo đổi hàng" title={canMoveRows ? "Kéo để đổi hàng" : "Tách merge dọc để đổi hàng"} {...track("row", index, canMoveRows)} className="min-h-10 flex-1 cursor-ns-resize text-[10px] text-stone-400 disabled:cursor-not-allowed" disabled={!canMoveRows}>↕</button>)}</div>}
-        <div className="grid flex-1 gap-1" style={{ gridTemplateColumns: `repeat(${grid.cols}, minmax(0, 1fr))` }}>
-          {grid.boxes.map((box, index) => {
+    <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${grid.cols}, minmax(0, 1fr))` }}>
+      {grid.boxes.map((box, index) => {
         if (box.mergedInto) {
           return (
             <div
               key={box.id}
-              onMouseDown={(event) => beginSelection(index, event)}
-              onMouseEnter={() => extendSelection(index)}
-              className={`flex items-center justify-center rounded bg-stone-100/70 ${
-                box.mergedInto === "left" ? "w-4" : "h-4"
-              } ${selectedSet.has(box.id) ? "ring-2 ring-emerald-500" : ""}`}
+              aria-hidden
+              className={`flex items-center justify-center rounded bg-stone-100/70 ${box.mergedInto === "left" ? "w-4" : "h-4"}`}
             />
           );
         }
@@ -1228,19 +1162,9 @@ function GridBlock({ grid, regionId, ...props }: CanvasProps & { grid: Grid; reg
             index={index}
             colSpan={colSpan}
             rowSpan={rowSpan}
-            mergeSelected={selectedSet.has(box.id)}
-            onBeginSelection={beginSelection}
-            onExtendSelection={extendSelection}
           />
         );
-          })}
-        </div>
-      </div>
-      {props.layoutEditing && selectedBoxes.length > 0 && (
-        <div className="absolute left-0 top-full z-30 mt-2 rounded-md border border-stone-300 bg-white p-2 text-xs shadow-lg">
-          {selectedHasMerge ? <button type="button" onClick={() => { props.onUnmergeSelection(regionId, selectedBoxes); setSelectedBoxes([]); }} className="rounded bg-stone-800 px-2 py-1 text-white">Tách</button> : canMergeSelection ? <button type="button" onClick={() => { props.onMergeSelection(regionId, selectedBoxes); setSelectedBoxes([]); }} className="rounded bg-emerald-700 px-2 py-1 text-white">Gộp {selectedBoxes.length} ô</button> : <span className="text-stone-500">Chọn 2–3 ô trống thành hình chữ nhật để gộp.</span>}
-        </div>
-      )}
+      })}
     </div>
   );
 }
@@ -1251,9 +1175,6 @@ function BoxSlot({
   index,
   colSpan,
   rowSpan,
-  mergeSelected,
-  onBeginSelection,
-  onExtendSelection,
   ...props
 }: CanvasProps & {
   grid: Grid;
@@ -1261,9 +1182,6 @@ function BoxSlot({
   index: number;
   colSpan: number;
   rowSpan: number;
-  mergeSelected: boolean;
-  onBeginSelection: (index: number, event: React.MouseEvent) => void;
-  onExtendSelection: (index: number) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `box:${box.id}` });
   const absorbed = grid.boxes.some(
@@ -1276,14 +1194,12 @@ function BoxSlot({
   return (
     <div
       ref={setNodeRef}
-      onMouseDown={(event) => onBeginSelection(index, event)}
-      onMouseEnter={() => onExtendSelection(index)}
       style={{
         gridColumn: colSpan > 1 ? `span ${colSpan}` : undefined,
         gridRow: rowSpan > 1 ? `span ${rowSpan}` : undefined,
       }}
       className={`relative min-h-10 rounded border border-dashed p-1 ${
-        isOver ? "border-emerald-500 bg-emerald-50" : mergeSelected ? "border-emerald-600 bg-emerald-50 ring-2 ring-emerald-400" : absorbed ? "border-stone-200 bg-stone-50/70" : "border-stone-300"
+        isOver ? "border-emerald-500 bg-emerald-50" : absorbed ? "border-stone-200 bg-stone-50/70" : "border-stone-300"
       }`}
     >
       {box.fields.length === 0 && (
