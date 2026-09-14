@@ -514,7 +514,7 @@ export function CardLayoutEditor({
                       : (previewItem?.coverUrls[coverSource] ?? null)
                     : null
                 }
-                title={previewItem?.title ?? "Item mẫu"}
+                title={recordPreview ? (previewItem?.title ?? "Item mẫu") : "Item mẫu"}
                 byId={byId}
                 values={recordPreview ? (previewItem?.values ?? {}) : {}}
                 configs={configs}
