@@ -484,8 +484,8 @@ export function CardLayoutEditor({
               }}
               className={`w-9 shrink-0 rounded-lg border text-sm ${
                 editingLayout
-                  ? "border-emerald-700 bg-emerald-600 text-white"
-                  : "border-stone-300 bg-white text-stone-500 hover:border-stone-500"
+                  ? "border-brand bg-emerald-600 text-white"
+                  : "border-line-strong bg-white text-muted hover:border-stone-500"
               }`}
             >
               ✎
@@ -502,7 +502,7 @@ export function CardLayoutEditor({
 
         {/* 4 */}
         <div className="flex min-w-0 flex-1 flex-col gap-3">
-          <div className="flex flex-1 flex-col overflow-hidden rounded-lg border border-stone-200 bg-stone-50">
+          <div className="flex flex-1 flex-col overflow-hidden rounded-lg border border-line bg-canvas">
             <div className="flex flex-1 justify-center overflow-auto p-6 pb-24">
               <CardCanvas
                 layout={layout}
@@ -534,7 +534,7 @@ export function CardLayoutEditor({
                 shapeIsRound={isRoundCover(shape.aspect)}
               />
             </div>
-            <div className="flex items-center justify-between gap-3 border-t border-stone-200 bg-white px-4 py-2 text-xs text-stone-600">
+            <div className="flex items-center justify-between gap-3 border-t border-line bg-white px-4 py-2 text-xs text-ink-soft">
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -547,7 +547,7 @@ export function CardLayoutEditor({
                 type="button"
                 onClick={pickRandomPreview}
                 disabled={!recordPreview || previewItems.length < 2}
-                className="rounded border border-stone-300 px-2 py-1 text-[11px] font-medium text-stone-600 hover:border-stone-500 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded border border-line-strong px-2 py-1 text-[11px] font-medium text-ink-soft hover:border-stone-500 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Random
               </button>
@@ -598,14 +598,14 @@ export function CardLayoutEditor({
         <button
           type="submit"
           disabled={pending}
-          className="fixed bottom-6 right-6 z-40 rounded-md bg-emerald-700 px-5 py-2.5 text-sm font-medium text-white shadow-lg hover:bg-emerald-800 disabled:opacity-50"
+          className="fixed bottom-6 right-6 z-40 rounded-md bg-brand px-5 py-2.5 text-sm font-medium text-white shadow-lg hover:bg-brand-hover disabled:opacity-50"
         >
           {pending ? "Đang lưu…" : "Lưu bố cục"}
         </button>
 
         <DragOverlay>
           {draggingLabel && (
-            <span className="rounded-md border border-emerald-600 bg-white px-2.5 py-1 text-sm shadow-lg">
+            <span className="rounded-md border border-brand bg-white px-2.5 py-1 text-sm shadow-lg">
               {draggingLabel}
             </span>
           )}
@@ -648,7 +648,7 @@ function ModeSwitch({ mode, onChange }: { mode: ViewMode; onChange: (mode: ViewM
   ];
 
   return (
-    <div role="tablist" aria-label="Chỉnh bố cục cho" className="flex rounded-lg border border-stone-300 bg-white p-0.5">
+    <div role="tablist" aria-label="Chỉnh bố cục cho" className="flex rounded-lg border border-line-strong bg-white p-0.5">
       {tabs.map((tab) => (
         <button
           key={tab.value}
@@ -657,7 +657,7 @@ function ModeSwitch({ mode, onChange }: { mode: ViewMode; onChange: (mode: ViewM
           aria-selected={mode === tab.value}
           onClick={() => onChange(tab.value)}
           className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium ${
-            mode === tab.value ? "bg-emerald-600 text-white" : "text-stone-600 hover:bg-stone-100"
+            mode === tab.value ? "bg-emerald-600 text-white" : "text-ink-soft hover:bg-stone-100"
           }`}
         >
           {tab.label}
@@ -678,8 +678,8 @@ function DetailBar({
   onSync: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-stone-200 bg-white p-2">
-      <label className="flex items-center gap-2 text-xs text-stone-600">
+    <div className="flex flex-col gap-2 rounded-lg border border-line bg-white p-2">
+      <label className="flex items-center gap-2 text-xs text-ink-soft">
         <span className="shrink-0">Rộng</span>
         <input
           type="range"
@@ -690,12 +690,12 @@ function DetailBar({
           onChange={(event) => onWidth(Number(event.target.value))}
           className="min-w-0 flex-1 accent-emerald-600"
         />
-        <span className="w-12 shrink-0 text-right font-mono text-[11px] text-stone-500">{width}px</span>
+        <span className="w-12 shrink-0 text-right font-mono text-[11px] text-muted">{width}px</span>
       </label>
       <button
         type="button"
         onClick={onSync}
-        className="rounded-md border border-stone-300 px-2 py-1.5 text-xs font-medium text-stone-700 hover:border-emerald-600 hover:text-emerald-700"
+        className="rounded-md border border-line-strong px-2 py-1.5 text-xs font-medium text-ink-soft hover:border-brand hover:text-brand"
       >
         Sync từ gallery card
       </button>
@@ -718,12 +718,12 @@ function CoverSourceSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="flex items-center gap-2 rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-600">
+    <label className="flex items-center gap-2 rounded-lg border border-line bg-white px-2 py-1.5 text-xs text-ink-soft">
       <span className="shrink-0">Ảnh</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="min-w-0 flex-1 rounded border border-stone-300 px-1 py-1 text-xs outline-none focus:border-emerald-600"
+        className="min-w-0 flex-1 rounded border border-line-strong px-1 py-1 text-xs outline-none focus:border-brand"
       >
         <option value={PAGE_COVER}>Ảnh bìa của page</option>
         {imageProperties.map((name) => (
@@ -754,12 +754,12 @@ function CoverTargetSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="flex items-center gap-2 rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-600">
+    <label className="flex items-center gap-2 rounded-lg border border-line bg-white px-2 py-1.5 text-xs text-ink-soft">
       <span className="shrink-0">Lưu ảnh vào</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="min-w-0 flex-1 rounded border border-stone-300 px-1 py-1 text-xs outline-none focus:border-emerald-600"
+        className="min-w-0 flex-1 rounded border border-line-strong px-1 py-1 text-xs outline-none focus:border-brand"
       >
         <option value={PAGE_COVER}>Ảnh bìa của page</option>
         <option value={CONTENT_IMAGE}>Nội dung page</option>
@@ -790,11 +790,11 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
           setOpen((o) => !o);
         }}
         className={`flex h-24 w-full flex-col items-center justify-center gap-1 rounded-lg border bg-white p-1.5 ${
-          open ? "border-emerald-700" : "border-stone-300 hover:border-stone-500"
+          open ? "border-brand" : "border-line-strong hover:border-stone-500"
         }`}
       >
         <RatioGlyph ratio={shape.ratio} selected round={shape.aspect === "circle"} />
-        <span className="font-mono text-[11px] text-stone-600">
+        <span className="font-mono text-[11px] text-ink-soft">
           {shape.aspect === "circle" ? "Tròn" : shape.ratio}
         </span>
       </button>
@@ -803,9 +803,9 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
         <div
           role="dialog"
           aria-label="Chiều ảnh"
-          className="absolute left-0 top-full z-30 mt-2 w-72 rounded-lg border border-stone-300 bg-white p-3 shadow-lg"
+          className="absolute left-0 top-full z-30 mt-2 w-72 rounded-lg border border-line-strong bg-white p-3 shadow-lg"
         >
-          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-500">Chiều ảnh</p>
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Chiều ảnh</p>
           <div className="mb-3 flex gap-1">
             {ORIENTATIONS.map((option) => (
               <button
@@ -824,8 +824,8 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
                 }
                 className={`flex-1 rounded border px-2 py-1 text-xs ${
                   (option.value === "square" ? isSymmetric(draft.aspect) : draft.aspect === option.value)
-                    ? "border-emerald-700 bg-emerald-50 font-medium text-emerald-800"
-                    : "border-stone-300 text-stone-600 hover:border-stone-500"
+                    ? "border-brand bg-brand-soft font-medium text-brand-hover"
+                    : "border-line-strong text-ink-soft hover:border-stone-500"
                 }`}
               >
                 {option.label}
@@ -843,11 +843,11 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
                     aria-pressed={selected}
                     onClick={() => setDraft({ aspect: option.value, ratio: "1:1" })}
                     className={`flex flex-col items-center gap-1 rounded-md border p-2 ${
-                      selected ? "border-emerald-700 bg-emerald-50" : "border-stone-300 hover:border-stone-500"
+                      selected ? "border-brand bg-brand-soft" : "border-line-strong hover:border-stone-500"
                     }`}
                   >
                     <RatioGlyph ratio="1:1" selected={selected} round={option.value === "circle"} />
-                    <span className="text-[11px] text-stone-700">{option.label}</span>
+                    <span className="text-[11px] text-ink-soft">{option.label}</span>
                   </button>
                 );
               })}
@@ -863,22 +863,22 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
                   aria-pressed={selected}
                   onClick={() => setDraft({ ...draft, ratio })}
                   className={`flex flex-col items-center gap-1 rounded-md border p-2 ${
-                    selected ? "border-emerald-700 bg-emerald-50" : "border-stone-300 hover:border-stone-500"
+                    selected ? "border-brand bg-brand-soft" : "border-line-strong hover:border-stone-500"
                   }`}
                 >
                   <RatioGlyph ratio={ratio} selected={selected} />
-                  <span className="font-mono text-[11px] text-stone-700">{ratio}</span>
+                  <span className="font-mono text-[11px] text-ink-soft">{ratio}</span>
                 </button>
               );
             })}
           </div>
           )}
 
-          <div className="mt-3 flex justify-end gap-2 border-t border-stone-200 pt-3">
+          <div className="mt-3 flex justify-end gap-2 border-t border-line pt-3">
             <button
               type="button"
               onClick={() => setOpen(false)}
-              className="rounded border border-stone-300 px-2 py-1 text-xs text-stone-600 hover:border-stone-500"
+              className="rounded border border-line-strong px-2 py-1 text-xs text-ink-soft hover:border-stone-500"
             >
               Huỷ
             </button>
@@ -888,7 +888,7 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
                 onChange(draft);
                 setOpen(false);
               }}
-              className="rounded bg-emerald-700 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-800"
+              className="rounded bg-brand px-3 py-1 text-xs font-medium text-white hover:bg-brand-hover"
             >
               OK
             </button>
@@ -933,11 +933,11 @@ function ArrangementButton({
         aria-expanded={open}
         onClick={() => (open ? setOpen(false) : openPicker())}
         className={`flex h-24 w-full flex-col items-center justify-center gap-1 rounded-lg border bg-white p-1.5 ${
-          open ? "border-emerald-700" : "border-stone-300 hover:border-stone-500"
+          open ? "border-brand" : "border-line-strong hover:border-stone-500"
         }`}
       >
         <ArrangementGlyph id={value} selected />
-        <span className="text-center text-[10px] leading-tight text-stone-600">
+        <span className="text-center text-[10px] leading-tight text-ink-soft">
           {ARRANGEMENTS[value].label}
         </span>
       </button>
@@ -946,9 +946,9 @@ function ArrangementButton({
         <div
           role="dialog"
           aria-label="Bố cục ảnh"
-          className="absolute left-0 top-full z-30 mt-2 w-72 rounded-lg border border-stone-300 bg-white p-3 shadow-lg"
+          className="absolute left-0 top-full z-30 mt-2 w-72 rounded-lg border border-line-strong bg-white p-3 shadow-lg"
         >
-          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-500">Ảnh nằm ở đâu</p>
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Ảnh nằm ở đâu</p>
           <div className="grid grid-cols-2 gap-2">
             {options.map((id) => {
               const selected = id === draftArrangement;
@@ -959,11 +959,11 @@ function ArrangementButton({
                   aria-pressed={selected}
                   onClick={() => setDraftArrangement(id)}
                   className={`rounded-md border p-2 text-left ${
-                    selected ? "border-emerald-700 bg-emerald-50" : "border-stone-300 hover:border-stone-500"
+                    selected ? "border-brand bg-brand-soft" : "border-line-strong hover:border-stone-500"
                   }`}
                 >
                   <ArrangementGlyph id={id} selected={selected} />
-                  <span className="mt-1.5 block text-[11px] leading-tight text-stone-700">
+                  <span className="mt-1.5 block text-[11px] leading-tight text-ink-soft">
                     {ARRANGEMENTS[id].label}
                   </span>
                 </button>
@@ -973,7 +973,7 @@ function ArrangementButton({
 
           <label
             className={`mt-3 flex items-start gap-2 text-xs ${
-              extendable ? "text-stone-700" : "text-stone-400"
+              extendable ? "text-ink-soft" : "text-faint"
             }`}
           >
             <input
@@ -993,15 +993,15 @@ function ArrangementButton({
             </span>
           </label>
 
-          <div className="mt-3 flex items-center justify-between border-t border-stone-200 pt-3">
-            <span className="text-[11px] text-stone-500">
+          <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
+            <span className="text-[11px] text-muted">
               Loại card: <b>{kind === "doc" ? "Dọc" : kind === "extra" ? "Extra ngang" : "Ngang"}</b>
             </span>
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="rounded border border-stone-300 px-2 py-1 text-xs text-stone-600 hover:border-stone-500"
+                className="rounded border border-line-strong px-2 py-1 text-xs text-ink-soft hover:border-stone-500"
               >
                 Huỷ
               </button>
@@ -1011,7 +1011,7 @@ function ArrangementButton({
                   onChange(draftArrangement, extendable && draftExtended);
                   setOpen(false);
                 }}
-                className="rounded bg-emerald-700 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-800"
+                className="rounded bg-brand px-3 py-1 text-xs font-medium text-white hover:bg-brand-hover"
               >
                 OK
               </button>
@@ -1044,7 +1044,7 @@ function PropertyList({
     <div
       ref={setNodeRef}
       className={`flex min-h-0 flex-1 flex-col rounded-lg border bg-white p-2 ${
-        isOver ? "border-emerald-500 bg-emerald-50" : "border-stone-200"
+        isOver ? "border-emerald-500 bg-brand-soft" : "border-line"
       }`}
     >
       <div className="relative mb-2">
@@ -1053,16 +1053,16 @@ function PropertyList({
           value={search}
           onChange={(event) => onSearch(event.target.value)}
           placeholder="Tìm property"
-          className="w-full rounded-md border border-stone-300 py-1.5 pl-2 pr-7 text-xs outline-none focus:border-emerald-600"
+          className="w-full rounded-md border border-line-strong py-1.5 pl-2 pr-7 text-xs outline-none focus:border-brand"
         />
-        <span aria-hidden className="pointer-events-none absolute right-2 top-1.5 text-stone-400">
+        <span aria-hidden className="pointer-events-none absolute right-2 top-1.5 text-faint">
           ⌕
         </span>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
         {entries.length === 0 ? (
-          <p className="px-1 py-2 text-[11px] text-stone-400">Không còn property nào.</p>
+          <p className="px-1 py-2 text-[11px] text-faint">Không còn property nào.</p>
         ) : (
           entries.map((entry) => (
             <TrayChip
@@ -1103,12 +1103,12 @@ function TrayChip({
       type="button"
       onClick={onSelect}
       className={`flex w-full cursor-grab items-center gap-1.5 rounded border px-1.5 py-1 text-left text-xs active:cursor-grabbing ${
-        selected ? "border-emerald-600 bg-emerald-50" : "border-stone-200 hover:border-stone-400"
+        selected ? "border-brand bg-brand-soft" : "border-line hover:border-stone-400"
       } ${isDragging ? "opacity-40" : ""}`}
     >
-      <span className="text-stone-400">⠿</span>
+      <span className="text-faint">⠿</span>
       <span className={`min-w-0 flex-1 truncate ${id === TITLE_FIELD_ID ? "font-semibold" : ""}`}>{name}</span>
-      <span className="shrink-0 font-mono text-[10px] text-stone-400">{type}</span>
+      <span className="shrink-0 font-mono text-[10px] text-faint">{type}</span>
     </button>
   );
 }
@@ -1163,7 +1163,7 @@ function CardCanvas(props: CanvasProps) {
 
   return (
     <div className="relative w-full" style={{ maxWidth: previewWidth }}>
-      <div className="overflow-hidden rounded-lg border border-stone-300 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-lg border border-line-strong bg-white shadow-sm">
         {wide ? (
           <>
             <div className="flex">
@@ -1255,11 +1255,11 @@ function BoxSlot({
         gridRow: rowSpan > 1 ? `span ${rowSpan}` : undefined,
       }}
       className={`relative min-h-10 rounded border border-dashed p-1 ${
-        isOver ? "border-emerald-500 bg-emerald-50" : absorbed ? "border-stone-200 bg-stone-50/70" : "border-stone-300"
+        isOver ? "border-emerald-500 bg-brand-soft" : absorbed ? "border-line bg-canvas/70" : "border-line-strong"
       }`}
     >
       {box.fields.length === 0 && (
-        <span className="block px-1 py-1 text-[10px] text-stone-400">Kéo prop vào</span>
+        <span className="block px-1 py-1 text-[10px] text-faint">Kéo prop vào</span>
       )}
       <div className="flex flex-col gap-1">
         {box.fields.map((field) => (
@@ -1354,8 +1354,8 @@ function FieldChip({
     <span
       ref={setDropRef}
       className={`flex w-full items-center gap-1 rounded border px-1 py-0.5 text-[11px] ${
-        selected ? "border-emerald-600 ring-1 ring-emerald-400" : isOver ? "border-emerald-500" : dark ? "border-white/25" : "border-stone-200"
-      } ${isDragging ? "opacity-40" : ""} ${dark ? "bg-black/40 text-white" : "bg-white text-stone-800"}`}
+        selected ? "border-brand ring-1 ring-emerald-400" : isOver ? "border-emerald-500" : dark ? "border-white/25" : "border-line"
+      } ${isDragging ? "opacity-40" : ""} ${dark ? "bg-black/40 text-white" : "bg-white text-ink"}`}
     >
       <span
         ref={setNodeRef}
@@ -1366,15 +1366,15 @@ function FieldChip({
       >
         {asInput ? (
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className={`truncate ${dark ? "text-white/60" : "text-stone-500"}`}>
+            <span className={`truncate ${dark ? "text-white/60" : "text-muted"}`}>
               {isTitle ? "Tiêu đề" : name}
             </span>
-            <span className="h-5 w-full rounded border border-stone-300 bg-stone-50" />
+            <span className="h-5 w-full rounded border border-line-strong bg-canvas" />
           </span>
         ) : (
           <>
             {!isTitle && field.showLabel && (
-              <span className={`shrink-0 truncate ${dark ? "text-white/60" : "text-stone-400"}`}>{name}</span>
+              <span className={`shrink-0 truncate ${dark ? "text-white/60" : "text-faint"}`}>{name}</span>
             )}
             {isUrl ? (
               <a
@@ -1385,8 +1385,8 @@ function FieldChip({
                 onClick={(event) => event.stopPropagation()}
                 className={
                   config?.kind === "button"
-                    ? "shrink-0 rounded bg-emerald-700 px-2 py-1 font-medium text-white hover:bg-emerald-800"
-                    : "min-w-0 flex-1 truncate text-emerald-700 underline"
+                    ? "shrink-0 rounded bg-brand px-2 py-1 font-medium text-white hover:bg-brand-hover"
+                    : "min-w-0 flex-1 truncate text-brand underline"
                 }
               >
                 {config?.kind === "button" ? config.label || "Mở link" : value}
@@ -1401,7 +1401,7 @@ function FieldChip({
         type="button"
         onClick={onRemove}
         aria-label="Bỏ khỏi card"
-        className={`shrink-0 ${dark ? "text-white/60 hover:text-white" : "text-stone-300 hover:text-stone-700"}`}
+        className={`shrink-0 ${dark ? "text-white/60 hover:text-white" : "text-stone-300 hover:text-ink-soft"}`}
       >
         ✕
       </button>

@@ -44,16 +44,16 @@ export function LayoutPanel({
   onSwapTrack: (regionId: string, axis: "row" | "column", from: number, to: number) => void;
 }) {
   return (
-    <aside className="flex h-full w-full flex-col gap-5 overflow-y-auto rounded-lg border border-stone-200 bg-white p-4">
-      <h2 className="text-[11px] font-medium uppercase tracking-wide text-stone-500">Bố cục khung</h2>
+    <aside className="flex h-full w-full flex-col gap-5 overflow-y-auto rounded-lg border border-line bg-white p-4">
+      <h2 className="text-[11px] font-medium uppercase tracking-wide text-muted">Bố cục khung</h2>
 
       {regions.length === 0 && (
-        <p className="text-xs text-stone-400">Bố cục này chỉ có ảnh, không có khung nội dung nào.</p>
+        <p className="text-xs text-faint">Bố cục này chỉ có ảnh, không có khung nội dung nào.</p>
       )}
 
       {regions.map(({ id, grid }) => (
         <section key={id}>
-          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-stone-400">
+          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-faint">
             {regionLabel(id)}
           </p>
           <GridChooser grid={grid} maxRows={rowCap(id)} onChange={(cols, rows) => onResize(id, cols, rows)} />
@@ -70,7 +70,7 @@ export function LayoutPanel({
 
       {showRatio && (
         <section>
-          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-stone-400">Tỉ lệ ảnh / khung</p>
+          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-faint">Tỉ lệ ảnh / khung</p>
           <div className="flex flex-col gap-1">
             {CARD_RATIOS.map((option) => {
               const selected = option[0] === ratio[0];
@@ -81,7 +81,7 @@ export function LayoutPanel({
                   aria-pressed={selected}
                   onClick={() => onRatio(option)}
                   className={`flex items-center gap-2 rounded-md border px-2 py-1.5 ${
-                    selected ? "border-emerald-700 bg-emerald-50" : "border-stone-300 hover:border-stone-500"
+                    selected ? "border-brand bg-brand-soft" : "border-line-strong hover:border-stone-500"
                   }`}
                 >
                   <span aria-hidden className="flex h-4 w-12 shrink-0 gap-0.5 rounded-sm bg-stone-200/70 p-0.5">
@@ -91,11 +91,11 @@ export function LayoutPanel({
                     />
                     <span
                       className={`flex-1 rounded-[1px] border ${
-                        selected ? "border-emerald-400 bg-emerald-100" : "border-stone-300 bg-stone-100"
+                        selected ? "border-emerald-400 bg-emerald-100" : "border-line-strong bg-stone-100"
                       }`}
                     />
                   </span>
-                  <span className="font-mono text-[11px] text-stone-700">
+                  <span className="font-mono text-[11px] text-ink-soft">
                     {option[0]}:{option[1]}
                   </span>
                 </button>
@@ -118,7 +118,7 @@ const ALIGN_OPTIONS: { value: FrameAlign; label: string }[] = [
 function AlignChooser({ value, onChange }: { value: FrameAlign; onChange: (value: FrameAlign) => void }) {
   return (
     <div className="mt-2">
-      <p className="mb-1 text-[10px] text-stone-400">Căn theo chiều dọc</p>
+      <p className="mb-1 text-[10px] text-faint">Căn theo chiều dọc</p>
       <div className="flex gap-1">
         {ALIGN_OPTIONS.map((option) => {
           const selected = option.value === value;
@@ -129,7 +129,7 @@ function AlignChooser({ value, onChange }: { value: FrameAlign; onChange: (value
               aria-pressed={selected}
               onClick={() => onChange(option.value)}
               className={`flex flex-1 items-center justify-center gap-1 rounded-md border px-1 py-1 text-[10px] ${
-                selected ? "border-emerald-700 bg-emerald-50 text-emerald-800" : "border-stone-300 text-stone-600 hover:border-stone-500"
+                selected ? "border-brand bg-brand-soft text-brand-hover" : "border-line-strong text-ink-soft hover:border-stone-500"
               }`}
             >
               <span
@@ -171,7 +171,7 @@ function GridChooser({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center justify-between rounded-md border border-stone-300 px-2 py-1.5 text-left text-xs text-stone-700 hover:border-stone-500"
+        className="flex w-full items-center justify-between rounded-md border border-line-strong px-2 py-1.5 text-left text-xs text-ink-soft hover:border-stone-500"
       >
         <span className="flex items-center gap-2">
           <GridPreview cols={grid.cols} rows={grid.rows} />
@@ -179,12 +179,12 @@ function GridChooser({
             {grid.cols} cột × {grid.rows} hàng
           </span>
         </span>
-        <span aria-hidden className="text-stone-400">⌄</span>
+        <span aria-hidden className="text-faint">⌄</span>
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-40 mt-1.5 w-40 rounded-md border border-stone-200 bg-white p-2 shadow-lg">
-          <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-stone-400">Chọn khung nội dung</p>
+        <div className="absolute left-0 top-full z-40 mt-1.5 w-40 rounded-md border border-line bg-white p-2 shadow-lg">
+          <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-faint">Chọn khung nội dung</p>
           <div className="grid w-24 grid-cols-2 gap-1">
             {options.map((option, index) => {
               const selected = grid.cols === option.cols && grid.rows === option.rows;
@@ -208,7 +208,7 @@ function GridChooser({
                       ? "border-emerald-800 bg-emerald-600"
                       : included
                         ? "border-emerald-500 bg-emerald-400"
-                        : "border-stone-300 bg-stone-100 hover:border-stone-500"
+                        : "border-line-strong bg-stone-100 hover:border-stone-500"
                   }`}
                 />
               );
@@ -306,8 +306,8 @@ function StructureEditor({
   });
 
   return (
-    <div className="mt-3 border-t border-stone-200 pt-3">
-      <p className="mb-1 text-[10px] text-stone-400">Gộp ô và đổi hàng/cột</p>
+    <div className="mt-3 border-t border-line pt-3">
+      <p className="mb-1 text-[10px] text-faint">Gộp ô và đổi hàng/cột</p>
       <div className="mb-1 ml-5 grid gap-1" style={{ gridTemplateColumns: `repeat(${grid.cols}, minmax(0, 1fr))` }}>
         {Array.from({ length: grid.cols }, (_, index) => (
           <button
@@ -317,7 +317,7 @@ function StructureEditor({
             title={canMoveColumns ? "Kéo để đổi các ô không gộp" : "Không còn ô lẻ để đổi cột"}
             {...track("column", index, canMoveColumns)}
             disabled={!canMoveColumns}
-            className="h-4 cursor-ew-resize text-[10px] text-stone-400 disabled:cursor-not-allowed disabled:opacity-30"
+            className="h-4 cursor-ew-resize text-[10px] text-faint disabled:cursor-not-allowed disabled:opacity-30"
           >
             ↔
           </button>
@@ -333,7 +333,7 @@ function StructureEditor({
               title={canMoveRows ? "Kéo để đổi các ô không gộp" : "Không còn ô lẻ để đổi hàng"}
               {...track("row", index, canMoveRows)}
               disabled={!canMoveRows}
-              className="min-h-10 flex-1 cursor-ns-resize text-[10px] text-stone-400 disabled:cursor-not-allowed disabled:opacity-30"
+              className="min-h-10 flex-1 cursor-ns-resize text-[10px] text-faint disabled:cursor-not-allowed disabled:opacity-30"
             >
               ↕
             </button>
@@ -356,8 +356,8 @@ function StructureEditor({
                 }}
                 className={`min-h-10 rounded border text-[10px] transition-colors ${
                   selectedSet.has(box.id)
-                    ? "border-emerald-600 bg-emerald-100 ring-1 ring-emerald-400"
-                    : "border-stone-300 bg-white text-stone-500 hover:border-stone-500"
+                    ? "border-brand bg-emerald-100 ring-1 ring-emerald-400"
+                    : "border-line-strong bg-white text-muted hover:border-stone-500"
                 }`}
               >
                 {box.fields.length ? `${box.fields.length} prop` : "Ô trống"}
@@ -391,12 +391,12 @@ function StructureEditor({
                   // Keep the merged root selected so its only reversal action, Tách, stays below the grid.
                   setSelected(rootId ? [rootId] : []);
                 }}
-                className="rounded bg-emerald-700 px-2 py-1 text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+                className="rounded bg-brand px-2 py-1 text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:bg-stone-300"
               >
                 Gộp {selected.length} ô
               </button>
               {!canMergeSelection && (
-                <span className="text-right text-stone-500">Chọn 2–3 ô liền nhau; tối đa một ô có property.</span>
+                <span className="text-right text-muted">Chọn 2–3 ô liền nhau; tối đa một ô có property.</span>
               )}
             </div>
           )}

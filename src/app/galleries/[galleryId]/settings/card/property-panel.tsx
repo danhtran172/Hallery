@@ -68,7 +68,7 @@ export function PropertyPanel({
   if (isTitle) {
     return (
       <Frame title="Tiêu đề">
-        <p className="text-xs text-stone-500">
+        <p className="text-xs text-muted">
           Tiêu đề của trang Notion. Luôn in đậm, không có tuỳ chỉnh hiển thị riêng — kéo nó ra khỏi card nếu
           không muốn hiện.
         </p>
@@ -79,7 +79,7 @@ export function PropertyPanel({
   if (!property) {
     return (
       <Frame title="Cấu hình property">
-        <p className="text-xs text-stone-400">Chọn một property trên card để chỉnh cách nó hiển thị.</p>
+        <p className="text-xs text-faint">Chọn một property trên card để chỉnh cách nó hiển thị.</p>
       </Frame>
     );
   }
@@ -98,15 +98,15 @@ export function PropertyPanel({
   return (
     <Frame title="Cấu hình property">
       <div className="mb-3">
-        <p className="truncate text-sm font-medium text-stone-900">{property.notionPropertyName}</p>
-        <p className="font-mono text-[11px] text-stone-400">
+        <p className="truncate text-sm font-medium text-ink">{property.notionPropertyName}</p>
+        <p className="font-mono text-[11px] text-faint">
           {property.notionPropertyType}
           {property.resolvedType ? ` → ${property.resolvedType}` : ""}
         </p>
       </div>
 
       <Section label="Tên hiển thị">
-        <label className="mb-2 flex items-center gap-2 text-xs text-stone-700">
+        <label className="mb-2 flex items-center gap-2 text-xs text-ink-soft">
           <input type="checkbox" checked={showLabel} onChange={onToggleLabel} />
           Hiện tên trên card
         </label>
@@ -116,16 +116,16 @@ export function PropertyPanel({
           onChange={(event) => update({ nameOverride: event.target.value })}
           placeholder={property.notionPropertyName}
           disabled={!showLabel}
-          className="w-full rounded-md border border-stone-300 px-2 py-1.5 text-xs outline-none focus:border-emerald-600 disabled:bg-stone-50 disabled:text-stone-400"
+          className="w-full rounded-md border border-line-strong px-2 py-1.5 text-xs outline-none focus:border-brand disabled:bg-canvas disabled:text-faint"
         />
-        <p className="mt-1 text-[11px] text-stone-400">Đổi tên ở đây không đổi tên trong Notion.</p>
+        <p className="mt-1 text-[11px] text-faint">Đổi tên ở đây không đổi tên trong Notion.</p>
       </Section>
 
       {kinds.length > 0 && (
         <Section label="Kiểu hiển thị">
           <div className="flex flex-col gap-1">
             {kinds.map((option) => (
-              <label key={option.value} className="flex items-center gap-2 text-xs text-stone-700">
+              <label key={option.value} className="flex items-center gap-2 text-xs text-ink-soft">
                 <input
                   type="radio"
                   name="kind"
@@ -143,7 +143,7 @@ export function PropertyPanel({
               max={10}
               value={config.max ?? 5}
               onChange={(event) => update({ max: Number(event.target.value) || 5 })}
-              className="mt-2 w-20 rounded-md border border-stone-300 px-2 py-1 text-xs outline-none focus:border-emerald-600"
+              className="mt-2 w-20 rounded-md border border-line-strong px-2 py-1 text-xs outline-none focus:border-brand"
             />
           )}
           {config.kind === "button" && (
@@ -152,7 +152,7 @@ export function PropertyPanel({
               value={config.label ?? ""}
               onChange={(event) => update({ label: event.target.value })}
               placeholder="Chữ trên nút"
-              className="mt-2 w-full rounded-md border border-stone-300 px-2 py-1.5 text-xs outline-none focus:border-emerald-600"
+              className="mt-2 w-full rounded-md border border-line-strong px-2 py-1.5 text-xs outline-none focus:border-brand"
             />
           )}
         </Section>
@@ -166,20 +166,20 @@ export function PropertyPanel({
               value={config.prefix ?? ""}
               onChange={(event) => update({ prefix: event.target.value })}
               placeholder="Trước"
-              className="min-w-0 flex-1 rounded-md border border-stone-300 px-2 py-1.5 text-xs outline-none focus:border-emerald-600"
+              className="min-w-0 flex-1 rounded-md border border-line-strong px-2 py-1.5 text-xs outline-none focus:border-brand"
             />
             <input
               type="text"
               value={config.suffix ?? ""}
               onChange={(event) => update({ suffix: event.target.value })}
               placeholder="Sau"
-              className="min-w-0 flex-1 rounded-md border border-stone-300 px-2 py-1.5 text-xs outline-none focus:border-emerald-600"
+              className="min-w-0 flex-1 rounded-md border border-line-strong px-2 py-1.5 text-xs outline-none focus:border-brand"
             />
           </div>
         </Section>
       )}
 
-      <div className="mt-4 border-t border-stone-200 pt-3">
+      <div className="mt-4 border-t border-line pt-3">
         <button
           type="button"
           disabled={!dirty}
@@ -187,11 +187,11 @@ export function PropertyPanel({
             onChange(property.notionPropertyId, config);
             setDirty(false);
           }}
-          className="w-full rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800 disabled:bg-stone-200 disabled:text-stone-400"
+          className="w-full rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-hover disabled:bg-stone-200 disabled:text-faint"
         >
           {dirty ? "Lưu cấu hình" : "Đã lưu"}
         </button>
-        <p className="mt-2 text-[11px] text-stone-400">
+        <p className="mt-2 text-[11px] text-faint">
           Cấu hình này dùng chung với Gallery và Card Detail, ghi xuống khi bấm Lưu bố cục.
         </p>
       </div>
@@ -201,8 +201,8 @@ export function PropertyPanel({
 
 function Frame({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <aside className="flex h-full w-full flex-col overflow-y-auto rounded-lg border border-stone-200 bg-white p-4">
-      <h2 className="mb-3 text-[11px] font-medium uppercase tracking-wide text-stone-500">{title}</h2>
+    <aside className="flex h-full w-full flex-col overflow-y-auto rounded-lg border border-line bg-white p-4">
+      <h2 className="mb-3 text-[11px] font-medium uppercase tracking-wide text-muted">{title}</h2>
       {children}
     </aside>
   );
@@ -211,7 +211,7 @@ function Frame({ title, children }: { title: string; children: React.ReactNode }
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mb-4">
-      <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-stone-400">{label}</p>
+      <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-faint">{label}</p>
       {children}
     </div>
   );

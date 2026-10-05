@@ -90,7 +90,7 @@ export function ImageDropZone({
 
   return (
     <div>
-      <span className="mb-0.5 block text-[11px] text-stone-500">Ảnh</span>
+      <span className="mb-0.5 block text-[11px] text-muted">Ảnh</span>
 
       <div
         onDragOver={(event) => {
@@ -115,14 +115,14 @@ export function ImageDropZone({
         aria-label="Thêm ảnh: kéo thả, dán, hoặc bấm để chọn file"
         className={`relative flex cursor-pointer items-center justify-center overflow-hidden border border-dashed bg-cover bg-center text-center ${
           round ? "rounded-full" : "rounded"
-        } ${over ? "border-emerald-600 bg-emerald-50" : "border-stone-300 hover:border-stone-500"}`}
+        } ${over ? "border-brand bg-brand-soft" : "border-line-strong hover:border-stone-500"}`}
         style={{
           aspectRatio: ratio,
           ...(preview ? { backgroundImage: `url(${JSON.stringify(preview)})` } : {}),
         }}
       >
         {!preview && (
-          <span className="px-2 text-[11px] leading-snug text-stone-500">
+          <span className="px-2 text-[11px] leading-snug text-muted">
             Kéo ảnh vào đây, dán (Ctrl+V), hoặc bấm để chọn file
           </span>
         )}
@@ -149,7 +149,7 @@ export function ImageDropZone({
         className="hidden"
       />
 
-      {fileName && <p className="mt-1 truncate text-[11px] text-stone-500">{fileName}</p>}
+      {fileName && <p className="mt-1 truncate text-[11px] text-muted">{fileName}</p>}
       {error && <p className="mt-1 text-[11px] text-red-600">{error}</p>}
     </div>
   );
