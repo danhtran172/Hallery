@@ -93,10 +93,13 @@ export function PropertyValue({
       return <RollupValue rollup={value.rollup as RollupItem} cfg={cfg} />;
     case "formula":
       return <FormulaValue formula={value.formula as RollupItem} cfg={cfg} />;
+    // System timestamps always carry a time nobody typed, so they read as a day.
     case "created_time":
-      return <span>{formatDateByGranularity(value.created_time, cfg.kind)}</span>;
+      return <span title={formatDateByGranularity(value.created_time, "full")}>{formatDay(value.created_time, cfg.kind)}</span>;
     case "last_edited_time":
-      return <span>{formatDateByGranularity(value.last_edited_time, cfg.kind)}</span>;
+      return (
+        <span title={formatDateByGranularity(value.last_edited_time, "full")}>{formatDay(value.last_edited_time, cfg.kind)}</span>
+      );
     case "created_by":
       return <span>{"name" in value.created_by && value.created_by.name ? value.created_by.name : "—"}</span>;
     case "last_edited_by":
@@ -125,6 +128,14 @@ export function PropertyValue({
     default:
       return <Empty />;
   }
+}
+
+/** A timestamp as its local calendar day, in the configured granularity. */
+function formatDay(iso: string, kind: string | undefined): string {
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return iso;
+  const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  return formatDateByGranularity(day, kind);
 }
 
 function withAffixes(text: string, cfg: DisplayConfig) {

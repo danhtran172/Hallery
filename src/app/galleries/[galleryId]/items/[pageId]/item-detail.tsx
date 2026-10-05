@@ -276,7 +276,7 @@ function DetailGridView({
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-3">
-                        <div className="text-sm text-muted">{labelOf(field)}</div>
+                        <div className="min-w-0 text-sm break-words text-muted">{labelOf(field)}</div>
                         <div className="min-w-0 text-sm break-words text-ink sm:col-span-2">
                           <PropertyValue value={field.value} displayConfig={field.displayConfig} context={renderContext} />
                         </div>

@@ -214,12 +214,33 @@ Nút **"+ Thêm item"** cạnh toolbar mở popup, dựng theo `formCard`. `page
 - **Lưu ảnh vào** (`formCoverTarget`): ảnh bìa page · **nội dung page** (image block) · prop Files.
   Đích "nội dung page" khép vòng với nguồn `content_image` của gallery.
 
+### 4.7b Đại tu 06/10/2026 (`0a24813`, `c5289f4`)
+
+- **Snapshot**: phục vụ bản lưu tới **24 giờ** rồi đồng bộ nền; heartbeat tự `router.refresh()` khi có thay đổi.
+  Notion lỗi mà đã có bản lưu → hiện bản lưu + banner; chưa có → màn hướng dẫn sửa (`components/notion-problem`).
+  Lỗi được phân loại ở `lib/notion-errors.ts` (token hỏng / chưa share / rate limit / mất mạng).
+- **Lưu item chỉ gửi field đã đổi**, ghi theo **property id** (không theo tên). Sửa được tiêu đề; date giữ giờ +
+  ngày kết thúc; bỏ tick checkbox được (form có `__fields` manifest).
+- **Render prop** (`components/property-value.tsx`): URL thiếu `https://` được bù; link button hiện tên miền; email/
+  phone là `mailto:`/`tel:`; rich text giữ link + định dạng; Files mở qua `/api/galleries/[id]/files` (ký lại URL
+  hết hạn); Relation hiện tên item và mở item trong Hallery nếu bảng đích là gallery (đã kiểm với relation tự trỏ
+  "Chapters Data"), không thì link sang Notion.
+- **Native button** (Phase 4, phần button): gán hành động cho prop Button của Notion ở Cài đặt hiển thị — chỉ ghi
+  giá trị (set/clear, hôm nay/bây giờ, cộng số, tick, thêm/bỏ option). Lưu ở `displayConfig.button`.
+  ⚠ Đường ghi của nút **chưa chạy thử trên Notion thật** (chỉ "Hentai Gallery" có prop Button, là dữ liệu thật).
+- **Kết nối**: trang `/connect` hướng dẫn từng bước + link tạo integration; dán lại cùng integration không tạo
+  workspace trùng (khớp bot id / token); `/connect?workspace=<id>` kết nối lại; trang chọn database phân trang +
+  tìm kiếm; trang chủ có Kết nối lại / Gỡ workspace (chỉ phía Hallery).
+- **UI**: design tokens trong `globals.css` (`bg-brand`, `text-ink`, `border-line`, `.btn`, `.input`, `.panel`…),
+  font Inter (có subset tiếng Việt), bỏ dark mode hỏng, grid card co cột theo container query, sidebar dính +
+  drawer trên điện thoại, settings dùng chung `SettingsHeader` và giữ `?view=`.
+
 ### 4.8 Data model
 
 ```
 Workspace          → accessToken (⚠ plaintext, xem mục 5)
 Gallery            → notionDatabaseId, notionDataSourceId, displayConfig(JSON), autoAdded, parentGallery
-GalleryNotionCache → dataSourceJson, queryJson, expiresAt   (snapshot 60s)
+GalleryNotionCache → dataSourceJson, queryJson, freshUntil/staleUntil (tươi 60s, phục vụ cũ tới 24h)
 PropertyConfig     → notionPropertyId/Name/Type, resolvedType, displayConfig(JSON),
                      detailDisplayConfig(JSON), sortOrder, disabled, isMissing
 CategoryAxis       → notionPropertyId, sourceType, sortOrder
@@ -240,11 +261,13 @@ CoverPosition      → galleryId + notionPageId, posX, posY
 - **Token Notion lưu plaintext trong SQLite.** Phải xử lý trước khi có người dùng ngoài máy dev.
 - **Trần crawl 2.500 dòng** (`MAX_PAGES × PAGE_SIZE`). DB lớn hơn sẽ bị cắt, `has_more` ở lại true.
   Nâng `MAX_PAGES` lên 100 là lấy lại mức 5.000 — **đang chờ chủ dự án quyết**.
-- **Trục Relation cho Category (Phase 5) và toàn bộ Phase 4 đang bị chặn**: workspace chỉ share đúng một
-  data source ("Game Station") và nó **không có prop relation nào**. Không có gì để dựng, cũng không có gì
-  để verify. Cần share cho integration một DB có relation.
-- **Phase 4 tạm dừng theo yêu cầu.** Nửa "relation gallery" đã commit ở `92a5372` nhưng **chưa chạy lần nào**
-  vì lý do trên. Đừng báo là đã hoạt động.
+- **Relation**: nay đã có DB thật có relation — "Hentai Gallery" (workspace "Vynne's Space") với "Chapters Data"
+  tự trỏ về chính nó; hiển thị relation đã kiểm trên dữ liệu đó. Trục Relation cho Category vẫn chưa làm.
+  Streak (Phase 4) vẫn tạm dừng.
+- **HalleryTest** (workspace "Second Brain") hiện **không còn được share** với integration — mở gallery ra màn
+  "Database chưa được chia sẻ". Không phải bug.
+- **3 workspace "Second Brain" trùng** (cùng token, cùng bot id) — chủ dự án chọn **giữ nguyên** (06/10/2026);
+  chỉ sửa để không phát sinh thêm. Gỡ được từ trang chủ nếu muốn.
 - **Chưa có polling/webhook** — dữ liệu chỉ refresh khi cache 60s hết hạn hoặc sau khi Hallery ghi.
 - **Chưa phát hiện xung đột** khi Notion và Hallery sửa cùng field.
 - **Kéo-thả chưa verify tự động được.** dnd-kit bỏ qua synthetic pointer event. Logic sắp xếp thì tách ra
