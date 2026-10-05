@@ -235,6 +235,30 @@ Nút **"+ Thêm item"** cạnh toolbar mở popup, dựng theo `formCard`. `page
   font Inter (có subset tiếng Việt), bỏ dark mode hỏng, grid card co cột theo container query, sidebar dính +
   drawer trên điện thoại, settings dùng chung `SettingsHeader` và giữ `?view=`.
 
+### 4.7c Giao diện mới + rà soát flow 06/10/2026 (`e5bd425`, `0bf1c23`)
+
+- **Giao diện**: canvas giấy pha màu nhấn, nội dung nằm trên một "sheet" bo tròn; nút pill, tab dạng segmented,
+  card giữ ảnh bìa như ảnh trong khung (`.g-mat`/`.g-pic`). Font **Be Vietnam Pro** (chữ) + **Bricolage Grotesque**
+  (tiêu đề, class `.display`). Icon SVG chung ở `components/icons.tsx` (+ logo `LogoMark`).
+- **Sáng/tối/theo máy + 5 màu nhấn** (Phase 8, phần giao diện): mọi token là cặp `light-dark()` trong `globals.css`;
+  lựa chọn lưu ở cookie `hallery-theme`/`hallery-accent`, layout đọc cookie nên không nháy. Chỉnh ở chân sidebar.
+  Màu palette Tailwind (chip màu Notion, editor) được đảo trong `:root` để tự tối theo.
+- **Tính năng thêm**: Ctrl+K tìm gallery + item toàn bộ (`lib/global-search.ts`, `/api/search`, chỉ đọc snapshot);
+  ‹ › / phím mũi tên chuyển item trong popup (đọc thứ tự từ grid phía sau, không tốn payload); pill trạng thái
+  đồng bộ = nút "đồng bộ ngay"; đổi tên gallery (bấm đúp tiêu đề / menu); dời view trái/phải; xoá hẳn khỏi thùng
+  rác / dọn sạch; dashboard có ảnh ghép bìa + số item + lần đồng bộ.
+- **Flow đã sửa**: "+ Thêm gallery" vào thẳng trang chọn database; settings giữ cả trạng thái gallery qua `?back=`;
+  **bỏ nút "Xoá hết"** (nó xoá luôn bộ lọc đã lưu của view khi chỉ đang tìm kiếm); form không mất chữ khi server
+  báo lỗi (submit thủ công, tránh React reset form); đóng popup / chuyển item khi đang sửa dở thì hỏi
+  (`lib/unsaved-guard.ts`); editor bố cục cảnh báo khi rời trang chưa lưu và báo "Đã lưu"; sau khi thêm item có
+  link "Mở item"; detail dùng nguồn ảnh bìa của view đang mở; gallery trong thùng rác có màn khôi phục; kết nối lại
+  token quay về đúng trang đang lỗi (`?return=`).
+- **Exception**: action tạo/lưu/nút coi mọi bước sau khi Notion đã ghi là phụ (không báo lỗi giả → không tạo
+  trùng); upload ảnh tới 21 MB (`next.config.ts`); `error.tsx` riêng cho gallery và popup item + `global-error.tsx`;
+  property mới đăng ký bằng upsert; cover lookup lỗi trả 503 để card hiện "Thử lại".
+- **Đã bỏ**: ô lọc gallery trong sidebar (Ctrl+K thay), gợi ý "Giữ Ctrl rồi kéo" hiện trên mọi ảnh khi hover
+  (giờ chỉ hiện khi đang giữ Ctrl).
+
 ### 4.8 Data model
 
 ```
@@ -300,12 +324,13 @@ endpoint kích hoạt. Chủ dự án chọn làm **native button** của Haller
 
 **Phase 6** ✅.
 
-**Phase 7 — Nav bar & workspace**
+**Phase 7 — Nav bar & workspace** — phần lớn ✅ (tìm kiếm toàn workspace = Ctrl+K, thùng rác có xoá hẳn, đổi tên)
 Multi-gallery, nhóm, sub-gallery, thùng rác, tìm kiếm toàn workspace, kéo-thả sắp xếp.
 Một phần đã làm trước ở `92a5372`: thêm gallery thì tự kéo theo bảng trong relation, 2 cấp, ẩn khỏi dashboard
 (`Gallery.autoAdded`), vào qua popup "Bảng liên kết". **Chưa verify.**
 
-**Phase 8 — Cá nhân hoá & vận hành**
+**Phase 8 — Cá nhân hoá & vận hành** — sáng/tối, 5 màu nhấn và sync status ✅ (`0bf1c23`); còn lại VN/EN,
+giao diện kính, write queue/retry, backup, mã hoá token.
 VN/EN, sáng/tối, 5 màu prefix (xanh lá `#4B8B60` mặc định, xanh dương `#0055DA`, teal `#76ABAE`,
 hồng `#F5788B`, cam `#F7A00A`), giao diện kính. Cộng: sync status, write queue/retry,
 backup dữ liệu Hallery-only, **mã hoá integration token**.
