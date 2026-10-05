@@ -33,25 +33,28 @@ export function CategoryBar({
   };
 
   return (
-    <div className="mb-5 flex flex-col gap-3">
+    <div className="mb-6 flex flex-col gap-2.5">
       {axes.length > 1 && (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted">Phân loại theo</span>
-          {axes.map((axis) => (
-            <Link
-              key={axis.id}
-              href={hrefFor(axis.id, null)}
-              scroll={false}
-              aria-current={axis.id === activeAxis.id ? "true" : undefined}
-              className={`btn btn-sm ${axis.id === activeAxis.id ? "btn-secondary border-muted text-ink" : "btn-ghost"}`}
-            >
-              {axis.displayLabel ?? axis.notionPropertyName}
-            </Link>
-          ))}
+          <div className="segmented">
+            {axes.map((axis) => (
+              <Link
+                key={axis.id}
+                href={hrefFor(axis.id, null)}
+                scroll={false}
+                aria-current={axis.id === activeAxis.id ? "page" : undefined}
+              >
+                {axis.displayLabel ?? axis.notionPropertyName}
+              </Link>
+            ))}
+          </div>
         </div>
       )}
 
-      <div className="flex flex-wrap gap-1.5">
+      {/* One scrolling row rather than a wrapping wall — a select with forty options would
+          otherwise push the cards off the first screen. */}
+      <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
         <Chip href={hrefFor(activeAxis.id, null)} active={activeValue === null}>
           Tất cả
         </Chip>
@@ -61,7 +64,7 @@ export function CategoryBar({
             // Clicking the active chip clears the filter, so the strip toggles.
             <Chip key={bucket.value} href={hrefFor(activeAxis.id, active ? null : bucket.value)} active={active}>
               {bucket.label}
-              <span className="ml-1.5 text-faint tabular-nums">
+              <span className={`tabular-nums ${active ? "opacity-70" : "text-faint"}`}>
                 {bucket.count}
                 {partialCounts ? "+" : ""}
               </span>
@@ -79,16 +82,7 @@ export function CategoryBar({
 
 function Chip({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
   return (
-    <Link
-      href={href}
-      scroll={false}
-      aria-current={active ? "true" : undefined}
-      className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-        active
-          ? "border-brand bg-brand-soft font-medium text-brand-hover"
-          : "border-line text-ink-soft hover:border-line-strong hover:bg-canvas"
-      }`}
-    >
+    <Link href={href} scroll={false} aria-current={active ? "true" : undefined} className="chip">
       {children}
     </Link>
   );

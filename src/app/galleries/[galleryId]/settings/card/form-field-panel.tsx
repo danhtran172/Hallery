@@ -27,7 +27,7 @@ export function FormFieldPanel({
 }) {
   if (!propertyName || !propertyType) {
     return (
-      <div className="rounded-lg border border-line bg-white p-3">
+      <div className="rounded-2xl border border-line bg-surface p-4">
         <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Field trong form</p>
         <p className="text-xs text-faint">Chọn một field trên form để chỉnh cách nhập.</p>
       </div>
@@ -38,7 +38,7 @@ export function FormFieldPanel({
   const mode: DefaultMode = config.defaultMode ?? "none";
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-line bg-white p-3">
+    <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
       <div>
         <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">Field trong form</p>
         <p className="truncate text-sm font-medium text-ink">{propertyName}</p>

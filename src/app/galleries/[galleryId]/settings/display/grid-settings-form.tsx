@@ -18,16 +18,20 @@ export function GridSettingsForm({
   cardsPerRow: number;
   randomPick: boolean;
 }) {
-  const [state, formAction, pending] = useActionState<{ savedAt: number | null }, FormData>(
+  const [state, formAction, pending] = useActionState<{ savedAt: number | null; error: string | null }, FormData>(
     async (_previous, formData) => {
-      await saveGalleryGridSettings(galleryId, viewId, formData);
-      return { savedAt: Date.now() };
+      try {
+        const result = await saveGalleryGridSettings(galleryId, viewId, formData);
+        return result.error ? { savedAt: null, error: result.error } : { savedAt: Date.now(), error: null };
+      } catch {
+        return { savedAt: null, error: "Không lưu được. Thử lại sau giây lát." };
+      }
     },
-    { savedAt: null },
+    { savedAt: null, error: null },
   );
 
   return (
-    <form action={formAction} className="panel mb-6 flex flex-wrap items-end gap-x-8 gap-y-4 p-4">
+    <form action={formAction} className="panel mb-6 flex flex-wrap items-end gap-x-8 gap-y-4 p-5">
       <div>
         <label htmlFor="cardsPerRow" className="field-label">
           Số card mỗi hàng · view “{viewName}”
@@ -60,8 +64,13 @@ export function GridSettingsForm({
           {pending ? "Đang lưu…" : "Lưu"}
         </button>
         {state.savedAt && !pending && (
-          <span role="status" className="text-xs text-brand">
-            ✓ Đã lưu
+          <span role="status" className="text-xs text-brand-ink">
+            Đã lưu
+          </span>
+        )}
+        {state.error && !pending && (
+          <span role="alert" className="text-xs text-danger">
+            {state.error}
           </span>
         )}
       </div>

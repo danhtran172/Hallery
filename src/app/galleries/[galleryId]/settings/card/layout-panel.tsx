@@ -44,7 +44,7 @@ export function LayoutPanel({
   onSwapTrack: (regionId: string, axis: "row" | "column", from: number, to: number) => void;
 }) {
   return (
-    <aside className="flex h-full w-full flex-col gap-5 overflow-y-auto rounded-lg border border-line bg-white p-4">
+    <aside className="flex h-full w-full flex-col gap-5 overflow-y-auto rounded-3xl border border-line bg-surface p-5">
       <h2 className="text-[11px] font-medium uppercase tracking-wide text-muted">Bố cục khung</h2>
 
       {regions.length === 0 && (
@@ -129,7 +129,7 @@ function AlignChooser({ value, onChange }: { value: FrameAlign; onChange: (value
               aria-pressed={selected}
               onClick={() => onChange(option.value)}
               className={`flex flex-1 items-center justify-center gap-1 rounded-md border px-1 py-1 text-[10px] ${
-                selected ? "border-brand bg-brand-soft text-brand-hover" : "border-line-strong text-ink-soft hover:border-stone-500"
+                selected ? "border-brand bg-brand-soft text-brand-ink" : "border-line-strong text-ink-soft hover:border-stone-500"
               }`}
             >
               <span
@@ -183,7 +183,7 @@ function GridChooser({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-40 mt-1.5 w-40 rounded-md border border-line bg-white p-2 shadow-lg">
+        <div className="absolute left-0 top-full z-40 mt-1.5 w-40 rounded-md border border-line bg-surface p-2 shadow-lg">
           <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-faint">Chọn khung nội dung</p>
           <div className="grid w-24 grid-cols-2 gap-1">
             {options.map((option, index) => {
@@ -227,7 +227,7 @@ function GridPreview({ cols, rows }: { cols: 1 | 2; rows: number }) {
       {Array.from({ length: 6 }, (_, index) => {
         const row = Math.floor(index / 2) + 1;
         const col = (index % 2) + 1;
-        return <span key={index} className={`rounded-[1px] ${row <= rows && col <= cols ? "bg-emerald-500" : "bg-white"}`} />;
+        return <span key={index} className={`rounded-[1px] ${row <= rows && col <= cols ? "bg-emerald-500" : "bg-surface"}`} />;
       })}
     </span>
   );
@@ -357,7 +357,7 @@ function StructureEditor({
                 className={`min-h-10 rounded border text-[10px] transition-colors ${
                   selectedSet.has(box.id)
                     ? "border-brand bg-emerald-100 ring-1 ring-emerald-400"
-                    : "border-line-strong bg-white text-muted hover:border-stone-500"
+                    : "border-line-strong bg-surface text-muted hover:border-stone-500"
                 }`}
               >
                 {box.fields.length ? `${box.fields.length} prop` : "Ô trống"}
@@ -375,7 +375,7 @@ function StructureEditor({
                 onUnmerge(regionId, selected);
                 setSelected([]);
               }}
-              className="rounded bg-stone-800 px-2 py-1 text-white hover:bg-stone-700"
+              className="rounded bg-ink px-2 py-1 text-surface hover:bg-ink-soft"
             >
               Tách
             </button>
@@ -391,7 +391,7 @@ function StructureEditor({
                   // Keep the merged root selected so its only reversal action, Tách, stays below the grid.
                   setSelected(rootId ? [rootId] : []);
                 }}
-                className="rounded bg-brand px-2 py-1 text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:bg-stone-300"
+                className="rounded bg-brand px-2 py-1 text-on-brand hover:bg-brand-hover disabled:cursor-not-allowed disabled:bg-stone-300"
               >
                 Gộp {selected.length} ô
               </button>

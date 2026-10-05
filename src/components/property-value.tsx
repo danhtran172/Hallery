@@ -251,7 +251,7 @@ const PILL_COLORS: Record<string, string> = {
 function Pill({ color, children }: { color: string; children: React.ReactNode }) {
   return (
     <span
-      className={`inline-block max-w-full truncate rounded px-2 py-0.5 align-middle text-xs font-medium ${
+      className={`inline-block max-w-full truncate rounded-full px-2.5 py-0.5 align-middle text-xs font-medium ${
         PILL_COLORS[color] ?? PILL_COLORS.default
       }`}
     >
@@ -289,8 +289,8 @@ function CheckboxValue({ checked }: { checked: boolean }) {
     <span
       role="img"
       aria-label={checked ? "Đã tick" : "Chưa tick"}
-      className={`inline-flex size-4 items-center justify-center rounded border align-middle text-[10px] leading-none ${
-        checked ? "border-brand bg-brand text-white" : "border-line-strong bg-surface"
+      className={`inline-flex size-4 items-center justify-center rounded-[5px] border align-middle text-[10px] leading-none ${
+        checked ? "border-brand bg-brand text-on-brand" : "border-line-strong bg-surface"
       }`}
     >
       {checked ? "✓" : ""}
@@ -369,7 +369,7 @@ function FilesValue({
                 aria-label={nameOf(file)}
                 // A background rather than <img>: an expired or hotlink-blocked URL degrades to
                 // a grey tile instead of a broken-image icon.
-                className={`${INTERACTIVE} block size-20 rounded-lg border border-line bg-stone-100 bg-cover bg-center`}
+                className={`${INTERACTIVE} block size-20 rounded-2xl bg-subtle bg-cover bg-center ring-1 ring-line`}
                 style={{ backgroundImage: `url(${JSON.stringify(href)})` }}
               />
             ) : null;
@@ -401,7 +401,7 @@ function RelationValue({ ids, hasMore, context }: { ids: string[]; hasMore?: boo
     <span className="inline-flex max-w-full flex-wrap items-center gap-1">
       {links.map((link, index) => {
         const label = link.title ?? `Mục ${index + 1}`;
-        const className = `${INTERACTIVE} inline-flex max-w-full items-center gap-1 truncate rounded-md border border-line bg-surface px-1.5 py-0.5 text-xs text-ink-soft hover:border-brand hover:text-brand`;
+        const className = `${INTERACTIVE} inline-flex max-w-full items-center gap-1 truncate rounded-full border border-line bg-surface px-2.5 py-0.5 text-xs text-ink-soft transition-colors hover:border-brand hover:text-brand-ink`;
         return link.internal ? (
           <Link key={index} href={link.href} scroll={false} className={className}>
             <span className="truncate">{label}</span>
@@ -547,7 +547,7 @@ function ButtonValue({ propertyId, context }: { propertyId: string; context?: Re
   return (
     <span
       title="Nút Notion không chạy được qua API. Gán hành động cho nó trong Cài đặt hiển thị."
-      className="inline-flex items-center rounded-md border border-dashed border-line-strong px-2 py-0.5 text-xs text-faint"
+      className="inline-flex items-center rounded-full border border-dashed border-line-strong px-2.5 py-0.5 text-xs text-faint"
     >
       Nút chưa cấu hình
     </span>

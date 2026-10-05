@@ -1,109 +1,337 @@
 @import "tailwindcss";
 
 /*
- * Hallery's design tokens. Components reach for these names (bg-brand, text-ink,
- * border-line …) rather than raw palette steps, so one change here restyles the app —
- * Phase 8's colour presets only have to swap this block.
+ * Hallery's design system.
  *
- * Light only for now: the old dark-mode override flipped the page black while every
- * component still painted dark text, which left whole screens unreadable.
+ * Components reach for token names (bg-brand, text-ink, border-line …) rather than palette
+ * steps, so a theme is a block of variables. The accent comes from <html data-accent>; light
+ * or dark from <html data-theme>, which only sets `color-scheme` — every token is a
+ * light-dark() pair, so "system" follows the OS with no script and no flash. Both attributes
+ * are rendered by the server from a cookie.
+ *
+ * The look: the app frame sits on a paper canvas tinted by the accent, the content on one
+ * rounded sheet, everything else soft-cornered and borderless until it needs an edge.
  */
+
 @theme {
-  --color-brand: #047857;
-  --color-brand-hover: #065f46;
-  --color-brand-soft: #ecfdf5;
-  --color-brand-line: #a7f3d0;
+  /* Accent — the five presets are the ones fixed in the Phase 8 spec. */
+  --color-brand: #4b8b60;
+  --color-on-brand: #ffffff;
+  --color-brand-hover: color-mix(in oklab, var(--color-brand) 86%, #000);
+  --color-brand-ink: color-mix(in oklab, var(--color-brand) 72%, #000);
+  --color-brand-soft: color-mix(in oklab, var(--color-brand) 12%, var(--color-surface));
+  --color-brand-line: color-mix(in oklab, var(--color-brand) 36%, var(--color-surface));
 
-  --color-ink: #1c1917;
-  --color-ink-soft: #44403c;
-  --color-muted: #78716c;
-  --color-faint: #a8a29e;
+  --color-ink: #1a1917;
+  --color-ink-soft: #45423e;
+  --color-muted: #77736c;
+  --color-faint: #a7a39c;
 
-  --color-line: #e7e5e4;
-  --color-line-strong: #d6d3d1;
-  --color-canvas: #fafaf9;
+  --color-line: #ebe9e4;
+  --color-line-strong: #dad7d0;
+  --color-canvas: color-mix(in oklab, var(--color-brand) 7%, #eeede8);
   --color-surface: #ffffff;
+  --color-subtle: #f5f4f0;
+  --color-scrim: rgb(24 22 19 / 0.42);
 
-  --color-danger: #b91c1c;
-  --color-danger-soft: #fef2f2;
+  --color-danger: #c2362b;
+  --color-danger-soft: #fdf0ee;
+  --color-warn: #a15c07;
+  --color-warn-soft: #fdf6e7;
 
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-display-face), var(--font-body), ui-sans-serif, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --radius-card: 1.25rem;
+  --radius-sheet: 1.75rem;
+
+  --shadow-xs: 0 1px 2px rgb(24 22 19 / 0.05);
+  --shadow-card: 0 1px 2px rgb(24 22 19 / 0.04), 0 2px 8px -2px rgb(24 22 19 / 0.05);
+  --shadow-lift: 0 2px 4px rgb(24 22 19 / 0.04), 0 14px 32px -10px rgb(24 22 19 / 0.18);
+  --shadow-pop: 0 4px 12px -2px rgb(24 22 19 / 0.08), 0 18px 48px -12px rgb(24 22 19 / 0.22);
+  --shadow-sheet: 0 1px 3px rgb(24 22 19 / 0.04), 0 8px 30px -12px rgb(24 22 19 / 0.08);
+
+  --animate-pop-in: hallery-pop-in 140ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+  --animate-fade-in: hallery-fade-in 160ms ease-out both;
+  --animate-rise-in: hallery-rise-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
+/* ── Accent presets ─────────────────────────────────────────────────────────── */
+:root[data-accent="blue"] {
+  --color-brand: #0055da;
+}
+:root[data-accent="teal"] {
+  --color-brand: #76abae;
+  --color-on-brand: #0b2223;
+}
+:root[data-accent="pink"] {
+  --color-brand: #f5788b;
+  --color-on-brand: #3d0a14;
+}
+:root[data-accent="orange"] {
+  --color-brand: #f7a00a;
+  --color-on-brand: #2b1a00;
+}
+
+/* ── Light / dark ───────────────────────────────────────────────────────────── */
 :root {
+  color-scheme: light dark;
+}
+:root[data-theme="light"] {
   color-scheme: light;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* Every themed token as light-dark(light, dark). The light halves repeat @theme above,
+   which Tailwind needs to know the names. */
+:root {
+  --color-brand-ink: light-dark(
+    color-mix(in oklab, var(--color-brand) 72%, #000),
+    color-mix(in oklab, var(--color-brand) 66%, #fff)
+  );
+  --color-brand-soft: light-dark(
+    color-mix(in oklab, var(--color-brand) 12%, #fff),
+    color-mix(in oklab, var(--color-brand) 18%, #161615)
+  );
+  --color-brand-line: light-dark(
+    color-mix(in oklab, var(--color-brand) 36%, #fff),
+    color-mix(in oklab, var(--color-brand) 45%, #161615)
+  );
+
+  --color-ink: light-dark(#1a1917, #eeede9);
+  --color-ink-soft: light-dark(#45423e, #cfcdc7);
+  --color-muted: light-dark(#77736c, #9b978f);
+  --color-faint: light-dark(#a7a39c, #6f6b65);
+
+  --color-line: light-dark(#ebe9e4, #292826);
+  --color-line-strong: light-dark(#dad7d0, #383632);
+  --color-canvas: light-dark(
+    color-mix(in oklab, var(--color-brand) 7%, #eeede8),
+    color-mix(in oklab, var(--color-brand) 6%, #0b0b0a)
+  );
+  --color-surface: light-dark(#ffffff, #161615);
+  --color-subtle: light-dark(#f5f4f0, #201f1d);
+  --color-scrim: light-dark(rgb(24 22 19 / 0.42), rgb(0 0 0 / 0.6));
+
+  --color-danger: light-dark(#c2362b, #f28b82);
+  --color-danger-soft: light-dark(#fdf0ee, #3a1715);
+  --color-warn: light-dark(#a15c07, #f0b45a);
+  --color-warn-soft: light-dark(#fdf6e7, #33250f);
+
+  --shadow-xs: 0 1px 2px light-dark(rgb(24 22 19 / 0.05), rgb(0 0 0 / 0.4));
+  --shadow-card: 0 1px 2px light-dark(rgb(24 22 19 / 0.04), rgb(0 0 0 / 0.35)),
+    0 2px 8px -2px light-dark(rgb(24 22 19 / 0.05), rgb(0 0 0 / 0.2));
+  --shadow-lift: 0 2px 4px light-dark(rgb(24 22 19 / 0.04), rgb(0 0 0 / 0.3)),
+    0 14px 32px -10px light-dark(rgb(24 22 19 / 0.18), rgb(0 0 0 / 0.6));
+  --shadow-pop: 0 4px 12px -2px light-dark(rgb(24 22 19 / 0.08), rgb(0 0 0 / 0.4)),
+    0 18px 48px -12px light-dark(rgb(24 22 19 / 0.22), rgb(0 0 0 / 0.7));
+  --shadow-sheet: 0 1px 3px light-dark(rgb(24 22 19 / 0.04), rgb(0 0 0 / 0.4)),
+    0 8px 30px -12px light-dark(rgb(24 22 19 / 0.08), rgb(0 0 0 / 0.3));
+
+  /*
+   * Palette steps still used directly — Notion's colour names on select chips, the card
+   * editor's diagrams, gallery tiles — mirrored in dark so a light tint becomes a dark one
+   * and dark text light.
+   */
+  --color-stone-50: light-dark(oklch(98.5% 0.001 106.423), oklch(14.7% 0.004 49.25));
+  --color-stone-100: light-dark(oklch(97% 0.001 106.424), oklch(21.6% 0.006 56.043));
+  --color-stone-200: light-dark(oklch(92.3% 0.003 48.717), oklch(26.8% 0.007 34.298));
+  --color-stone-300: light-dark(oklch(86.9% 0.005 56.366), oklch(37.4% 0.01 67.558));
+  --color-stone-400: light-dark(oklch(70.9% 0.01 56.259), oklch(44.4% 0.011 73.639));
+  --color-stone-600: light-dark(oklch(44.4% 0.011 73.639), oklch(70.9% 0.01 56.259));
+  --color-stone-700: light-dark(oklch(37.4% 0.01 67.558), oklch(86.9% 0.005 56.366));
+  --color-stone-800: light-dark(oklch(26.8% 0.007 34.298), oklch(92.3% 0.003 48.717));
+
+  --color-red-50: light-dark(oklch(97.1% 0.013 17.38), oklch(25.8% 0.092 26.042));
+  --color-red-100: light-dark(oklch(93.6% 0.032 17.717), oklch(39.6% 0.141 25.723));
+  --color-red-600: light-dark(oklch(57.7% 0.245 27.325), oklch(70.4% 0.191 22.216));
+  --color-red-700: light-dark(oklch(50.5% 0.213 27.518), oklch(80.8% 0.114 19.571));
+  --color-red-800: light-dark(oklch(44.4% 0.177 26.899), oklch(88.5% 0.062 18.334));
+  --color-orange-50: light-dark(oklch(98% 0.016 73.684), oklch(26.6% 0.079 36.259));
+  --color-orange-100: light-dark(oklch(95.4% 0.038 75.164), oklch(40.8% 0.123 38.172));
+  --color-orange-600: light-dark(oklch(64.6% 0.222 41.116), oklch(75% 0.183 55.934));
+  --color-orange-700: light-dark(oklch(55.3% 0.195 38.402), oklch(83.7% 0.128 66.29));
+  --color-orange-800: light-dark(oklch(47% 0.157 37.304), oklch(90.1% 0.076 70.697));
+  --color-amber-50: light-dark(oklch(98.7% 0.022 95.277), oklch(27.9% 0.077 45.635));
+  --color-amber-100: light-dark(oklch(96.2% 0.059 95.617), oklch(41.4% 0.112 45.904));
+  --color-amber-300: light-dark(oklch(87.9% 0.169 91.605), oklch(55.5% 0.163 48.998));
+  --color-amber-400: light-dark(oklch(82.8% 0.189 84.429), oklch(66.6% 0.179 58.318));
+  --color-amber-700: light-dark(oklch(55.5% 0.163 48.998), oklch(87.9% 0.169 91.605));
+  --color-amber-800: light-dark(oklch(47.3% 0.137 46.201), oklch(92.4% 0.12 95.746));
+  --color-amber-900: light-dark(oklch(41.4% 0.112 45.904), oklch(96.2% 0.059 95.617));
+  --color-yellow-50: light-dark(oklch(98.7% 0.026 102.212), oklch(28.6% 0.066 53.813));
+  --color-yellow-100: light-dark(oklch(97.3% 0.071 103.193), oklch(42.1% 0.095 57.708));
+  --color-yellow-600: light-dark(oklch(68.1% 0.162 75.834), oklch(85.2% 0.199 91.936));
+  --color-yellow-700: light-dark(oklch(55.4% 0.135 66.442), oklch(90.5% 0.182 98.111));
+  --color-yellow-800: light-dark(oklch(47.6% 0.114 61.907), oklch(94.5% 0.129 101.54));
+  --color-emerald-50: light-dark(oklch(97.9% 0.021 166.113), oklch(26.2% 0.051 172.552));
+  --color-emerald-100: light-dark(oklch(95% 0.052 163.051), oklch(37.8% 0.077 168.94));
+  --color-emerald-400: light-dark(oklch(76.5% 0.177 163.223), oklch(59.6% 0.145 163.225));
+  --color-emerald-700: light-dark(oklch(50.8% 0.118 165.612), oklch(84.5% 0.143 164.978));
+  --color-emerald-800: light-dark(oklch(43.2% 0.095 166.913), oklch(90.5% 0.093 164.15));
+  --color-green-50: light-dark(oklch(98.2% 0.018 155.826), oklch(26.6% 0.065 152.934));
+  --color-green-100: light-dark(oklch(96.2% 0.044 156.743), oklch(39.3% 0.095 152.535));
+  --color-green-700: light-dark(oklch(52.7% 0.154 150.069), oklch(87.1% 0.15 154.449));
+  --color-green-800: light-dark(oklch(44.8% 0.119 151.328), oklch(92.5% 0.084 155.995));
+  --color-sky-50: light-dark(oklch(97.7% 0.013 236.62), oklch(29.3% 0.066 243.157));
+  --color-sky-100: light-dark(oklch(95.1% 0.026 236.824), oklch(39.1% 0.09 240.876));
+  --color-sky-700: light-dark(oklch(50% 0.134 242.749), oklch(82.8% 0.111 230.318));
+  --color-sky-800: light-dark(oklch(44.3% 0.11 240.79), oklch(90.1% 0.058 230.902));
+  --color-blue-50: light-dark(oklch(97% 0.014 254.604), oklch(28.2% 0.091 267.935));
+  --color-blue-100: light-dark(oklch(93.2% 0.032 255.585), oklch(37.9% 0.146 265.522));
+  --color-blue-700: light-dark(oklch(48.8% 0.243 264.376), oklch(80.9% 0.105 251.813));
+  --color-blue-800: light-dark(oklch(42.4% 0.199 265.638), oklch(88.2% 0.059 254.128));
+  --color-purple-50: light-dark(oklch(97.7% 0.014 308.299), oklch(29.1% 0.149 302.717));
+  --color-purple-100: light-dark(oklch(94.6% 0.033 307.174), oklch(38.1% 0.176 304.987));
+  --color-purple-700: light-dark(oklch(49.6% 0.265 301.924), oklch(82.7% 0.119 306.383));
+  --color-purple-800: light-dark(oklch(43.8% 0.218 303.724), oklch(90.2% 0.063 306.703));
+  --color-pink-50: light-dark(oklch(97.1% 0.014 343.198), oklch(28.4% 0.109 3.907));
+  --color-pink-100: light-dark(oklch(94.8% 0.028 342.258), oklch(40.8% 0.153 2.432));
+  --color-pink-600: light-dark(oklch(59.2% 0.249 0.584), oklch(71.8% 0.202 349.761));
+  --color-pink-700: light-dark(oklch(52.5% 0.223 3.958), oklch(82.3% 0.12 346.018));
+  --color-pink-800: light-dark(oklch(45.9% 0.187 3.815), oklch(89.9% 0.061 343.231));
+}
+
+html {
+  background: var(--color-canvas);
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
-  background: var(--color-surface);
+  background: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-brand) 28%, transparent);
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
 }
 
 @layer components {
+  /* ── The frame ───────────────────────────────────────────────────────── */
+  .sheet {
+    @apply min-h-dvh min-w-0 flex-1 bg-surface;
+    @apply md:min-h-[calc(100dvh-1rem)] md:rounded-sheet md:shadow-sheet md:ring-1 md:ring-line;
+  }
+  .display {
+    @apply font-display font-semibold tracking-[-0.025em];
+    font-variation-settings: "wdth" 96;
+  }
+
   /* ── Buttons ─────────────────────────────────────────────────────────── */
   .btn {
-    @apply inline-flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-3 text-sm font-medium whitespace-nowrap transition-colors select-none;
+    @apply inline-flex h-9 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-full px-4 text-sm font-medium whitespace-nowrap select-none;
+    @apply transition-[background-color,color,box-shadow,transform] duration-150 active:scale-[0.97];
     @apply focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand;
-    @apply disabled:pointer-events-none disabled:opacity-50;
+    @apply disabled:pointer-events-none disabled:opacity-45;
+  }
+  .btn svg {
+    @apply size-4 shrink-0;
   }
   .btn-sm {
-    @apply h-7 px-2.5 text-xs;
+    @apply h-8 gap-1 px-3 text-[13px];
+  }
+  .btn-sm svg {
+    @apply size-[15px];
   }
   .btn-icon {
-    @apply w-8 px-0;
+    @apply w-9 px-0;
   }
   .btn-sm.btn-icon {
-    @apply w-7;
+    @apply w-8;
   }
   .btn-primary {
-    @apply bg-brand text-white hover:bg-brand-hover;
+    @apply bg-brand text-on-brand shadow-xs hover:bg-brand-hover;
   }
   .btn-secondary {
-    @apply border border-line-strong bg-surface text-ink-soft hover:border-muted hover:text-ink;
+    @apply bg-subtle text-ink-soft ring-1 ring-line ring-inset hover:bg-line hover:text-ink;
   }
   .btn-ghost {
-    @apply text-ink-soft hover:bg-stone-100 hover:text-ink;
+    @apply text-ink-soft hover:bg-subtle hover:text-ink;
   }
   .btn-danger {
-    @apply border border-line-strong bg-surface text-danger hover:border-danger hover:bg-danger-soft;
+    @apply bg-danger-soft text-danger hover:bg-danger hover:text-white;
   }
   .btn-active {
-    @apply border-brand bg-brand-soft text-brand-hover hover:border-brand hover:text-brand-hover;
+    @apply bg-brand-soft text-brand-ink ring-brand-line hover:bg-brand-soft hover:text-brand-ink;
+  }
+
+  /* Pill tabs on a track — view tabs, settings sections. */
+  .segmented {
+    @apply inline-flex max-w-full items-center gap-0.5 overflow-x-auto rounded-full bg-subtle p-1 ring-1 ring-line ring-inset;
+    scrollbar-width: none;
+  }
+  .segmented > * {
+    @apply inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium whitespace-nowrap text-muted transition-colors hover:text-ink;
+  }
+  .segmented > [aria-selected="true"],
+  .segmented > [aria-pressed="true"],
+  .segmented > [aria-current="page"] {
+    @apply bg-surface text-ink shadow-xs;
+  }
+
+  /* Filter chips. The active one inverts — the strongest mark the palette has. */
+  .chip {
+    @apply inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-subtle px-3.5 text-[13px] text-ink-soft ring-1 ring-line ring-inset transition-colors hover:bg-line hover:text-ink;
+  }
+  .chip[aria-current="true"] {
+    @apply bg-ink font-medium text-surface ring-ink hover:bg-ink hover:text-surface;
   }
 
   /* ── Form controls ───────────────────────────────────────────────────── */
   .input {
-    @apply h-9 w-full min-w-0 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink transition-colors outline-none;
-    @apply placeholder:text-faint focus:border-brand focus:ring-2 focus:ring-brand/15;
-    @apply disabled:bg-canvas disabled:text-faint;
+    @apply h-10 w-full min-w-0 rounded-xl border border-line-strong bg-surface px-3.5 text-sm text-ink transition-[border-color,box-shadow] outline-none;
+    @apply placeholder:text-faint hover:border-faint focus:border-brand focus:ring-4 focus:ring-brand/15;
+    @apply disabled:bg-subtle disabled:text-faint;
   }
   .input-sm {
-    @apply h-8 px-2.5 text-xs;
+    @apply h-8 rounded-lg px-2.5 text-[13px];
   }
   textarea.input {
-    @apply h-auto py-2 leading-relaxed;
+    @apply h-auto py-2.5 leading-relaxed;
   }
   select.input {
-    @apply pr-8;
+    @apply cursor-pointer pr-8;
   }
   .field-label {
-    @apply mb-1 block text-xs font-medium text-muted;
+    @apply mb-1.5 block text-[13px] font-medium text-ink-soft;
   }
   .field-hint {
-    @apply mt-1 block text-xs text-faint;
+    @apply mt-1.5 block text-xs text-faint;
   }
 
   /* ── Surfaces ────────────────────────────────────────────────────────── */
   .panel {
-    @apply rounded-xl border border-line bg-surface;
+    @apply rounded-3xl bg-surface ring-1 ring-line;
   }
   .popover {
-    @apply rounded-lg border border-line bg-surface shadow-lg shadow-stone-900/5;
+    @apply animate-pop-in rounded-2xl bg-surface shadow-pop ring-1 ring-line;
+  }
+  .menu-item {
+    @apply flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-ink-soft transition-colors hover:bg-subtle hover:text-ink disabled:pointer-events-none disabled:opacity-40;
+  }
+  .menu-item svg {
+    @apply size-4 shrink-0 text-muted;
   }
   .empty-state {
-    @apply rounded-xl border border-dashed border-line-strong px-6 py-12 text-center text-sm text-muted;
+    @apply rounded-3xl border border-dashed border-line-strong bg-subtle/60 px-6 py-14 text-center text-sm text-muted;
+  }
+  .notice {
+    @apply rounded-2xl bg-warn-soft px-4 py-3 text-sm text-warn;
+  }
+  .kbd {
+    @apply inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-surface px-1 font-sans text-[10px] font-medium text-muted ring-1 ring-line-strong;
   }
 
   /*
@@ -112,11 +340,18 @@ body {
    * payload) for up to a hundred cards, so long utility lists added up to kilobytes.
    */
   .g-card {
-    @apply relative flex shrink-0 flex-col overflow-hidden rounded-xl border border-line bg-surface transition-[border-color,box-shadow];
-    @apply hover:border-brand/60 hover:shadow-md hover:shadow-stone-900/5;
+    @apply relative flex shrink-0 flex-col overflow-hidden rounded-card bg-surface shadow-card ring-1 ring-line transition-[box-shadow,transform] duration-200 ease-out;
+    @apply hover:-translate-y-0.5 hover:shadow-lift;
+  }
+  /* The photo sits inside the card like a print in a mat. */
+  .g-mat {
+    @apply relative shrink-0 p-1.5;
+  }
+  .g-pic {
+    @apply relative overflow-hidden rounded-[0.875rem];
   }
   .g-card-link {
-    @apply absolute inset-0 z-10 rounded-xl;
+    @apply absolute inset-0 z-10 rounded-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand;
   }
   .g-body {
     @apply pointer-events-none relative;
@@ -126,7 +361,7 @@ body {
     @apply pointer-events-auto relative z-20;
   }
   .g-a {
-    @apply text-brand underline decoration-brand/30 underline-offset-2 hover:decoration-brand;
+    @apply text-brand-ink underline decoration-brand/35 underline-offset-2 hover:decoration-brand;
   }
   .g-row {
     @apply flex min-w-0 items-baseline gap-2;
@@ -140,16 +375,22 @@ body {
 
   /* ── Small text ──────────────────────────────────────────────────────── */
   .eyebrow {
-    @apply text-xs font-medium tracking-wide text-brand uppercase;
+    @apply text-xs font-medium tracking-wide text-brand-ink uppercase;
   }
   .link {
-    @apply text-brand underline-offset-2 hover:underline;
+    @apply text-brand-ink underline-offset-2 hover:underline;
   }
 }
 
 /* A visible focus ring for keyboard users everywhere, without one on mouse clicks. */
 :focus-visible {
   outline-color: var(--color-brand);
+}
+
+/* Thin, quiet scrollbars that pick up the theme. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
 }
 
 /*
@@ -161,8 +402,10 @@ body {
   container-type: inline-size;
 }
 .gallery-grid {
+  --gap: 1.25rem;
   --cols: var(--cards-per-row, 4);
-  --card-base: calc((100% - (var(--cols) - 1) * 1rem) / var(--cols));
+  --card-base: calc((100% - (var(--cols) - 1) * var(--gap)) / var(--cols));
+  gap: var(--gap);
 }
 @container (max-width: 1099px) {
   .gallery-grid {
@@ -176,6 +419,7 @@ body {
 }
 @container (max-width: 619px) {
   .gallery-grid {
+    --gap: 0.875rem;
     --cols: min(var(--cards-per-row, 4), 2);
   }
 }
@@ -194,6 +438,28 @@ body {
   }
 }
 
+@keyframes hallery-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes hallery-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 @keyframes hallery-shimmer {
   0% {
     background-position: -200% 0;
@@ -204,12 +470,23 @@ body {
 }
 
 .skeleton {
-  background: linear-gradient(90deg, #f5f5f4 25%, #e7e5e4 50%, #f5f5f4 75%);
+  background: linear-gradient(
+    90deg,
+    var(--color-subtle) 25%,
+    var(--color-line) 50%,
+    var(--color-subtle) 75%
+  );
   background-size: 200% 100%;
   animation: hallery-shimmer 1.4s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
   .skeleton {
     animation: none;
   }

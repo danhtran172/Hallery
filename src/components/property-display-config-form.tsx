@@ -13,9 +13,11 @@ export type DisplayConfigProperty = {
   notionPropertyType: string;
   resolvedType: string | null;
   displayConfig: string;
+  /** The Card Detail's own formatting from the card editor; empty when it shares this one. */
+  detailDisplayConfig?: string;
 };
 
-type SaveState = { savedAt: number | null };
+type SaveState = { savedAt: number | null; error: string | null };
 
 /** The display-configuration form: a Hallery-only name, plus formatting for the type. */
 export function PropertyDisplayConfigForm({
@@ -28,10 +30,18 @@ export function PropertyDisplayConfigForm({
   const cfg = parseDisplayConfig(property.displayConfig);
   // Formula and rollup borrow the options of whatever they evaluate to.
   const configType = configTypeOf(property.notionPropertyType, property.resolvedType);
-  const [state, formAction, pending] = useActionState<SaveState, FormData>(async (_previous, formData) => {
-    await saveDisplayConfig(galleryId, property.id, configType, formData);
-    return { savedAt: Date.now() };
-  }, { savedAt: null });
+  const [state, formAction, pending] = useActionState<SaveState, FormData>(
+    async (_previous, formData) => {
+      try {
+        const result = await saveDisplayConfig(galleryId, property.id, configType, formData);
+        return result.error ? { savedAt: null, error: result.error } : { savedAt: Date.now(), error: null };
+      } catch {
+        return { savedAt: null, error: "Không lưu được. Thử lại sau giây lát." };
+      }
+    },
+    { savedAt: null, error: null },
+  );
+  const detailOverride = Boolean(property.detailDisplayConfig && property.detailDisplayConfig !== "{}");
 
   const stranded = isConfigStranded(configType, property.displayConfig);
   const formattable = FORMATTABLE_TYPES.has(configType);
@@ -53,7 +63,7 @@ export function PropertyDisplayConfigForm({
       </div>
 
       {stranded && (
-        <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <p className="notice text-xs">
           Kiểu đầu ra đã đổi thành <b>{property.resolvedType}</b>, nên cấu hình hiển thị cũ không còn dùng được. Chọn
           lại bên dưới rồi lưu.
         </p>
@@ -72,13 +82,28 @@ export function PropertyDisplayConfigForm({
         <p className="text-xs text-faint">Kiểu này hiển thị theo mặc định — không có tuỳ chỉnh định dạng riêng.</p>
       )}
 
+      {detailOverride && (
+        <label className="flex items-start gap-2 rounded-2xl bg-subtle px-3.5 py-3 text-xs text-ink-soft ring-1 ring-line">
+          <input type="checkbox" name="applyToDetail" className="mt-0.5 accent-brand" />
+          <span>
+            Card Detail đang dùng định dạng riêng (đặt ở Bố cục card → Card Detail), nên thay đổi ở đây chưa hiện trong
+            Card Detail. Tick để dùng định dạng này cho cả Card Detail.
+          </span>
+        </label>
+      )}
+
       <div className="flex items-center gap-3">
         <button type="submit" disabled={pending} className="btn btn-primary btn-sm">
           {pending ? "Đang lưu…" : "Lưu"}
         </button>
         {state.savedAt && !pending && (
-          <span role="status" className="text-xs text-brand">
-            ✓ Đã lưu
+          <span role="status" className="text-xs text-brand-ink">
+            Đã lưu
+          </span>
+        )}
+        {state.error && !pending && (
+          <span role="alert" className="text-xs text-danger">
+            {state.error}
           </span>
         )}
       </div>

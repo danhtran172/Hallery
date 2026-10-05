@@ -1,7 +1,10 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import type { PageObjectResponse } from "@notionhq/client";
+import { Icon } from "@/components/icons";
+import { setUnsaved } from "@/lib/unsaved-guard";
 import { PropertyValue } from "@/components/property-value";
 import { getEditableValue } from "@/lib/notion-schema";
 import { formatDuration, type DisplayConfig } from "@/lib/display-config";
@@ -51,21 +54,47 @@ export function ItemDetail({
   renderContext: RenderContext;
 }) {
   const [editing, setEditing] = useState(false);
+  const [dirty, setDirty] = useState(false);
   // A fresh form per edit session, so "Huỷ" really discards what was typed.
   const [session, setSession] = useState(0);
   const action = saveItem.bind(null, galleryId, pageId);
   const [state, formAction, pending] = useActionState<SaveItemState, FormData>(action, { error: null });
+  const [, startTransition] = useTransition();
 
   const wasPending = useRef(false);
   useEffect(() => {
-    if (wasPending.current && !pending && !state.error) setEditing(false);
+    if (wasPending.current && !pending && !state.error) {
+      setEditing(false);
+      setDirty(false);
+    }
     wasPending.current = pending;
   }, [pending, state.error]);
 
+  // Closing the popup or stepping to another item while edits are pending asks first.
+  useEffect(() => {
+    setUnsaved(editing && dirty);
+    return () => setUnsaved(false);
+  }, [editing, dirty]);
+
   const startEditing = () => {
     setSession((value) => value + 1);
+    setDirty(false);
     setEditing(true);
   };
+  const cancel = () => {
+    setEditing(false);
+    setDirty(false);
+  };
+
+  /**
+   * Submitted by hand rather than through `action`: React resets a form after its action
+   * runs, so a save the server refused used to wipe everything that had been typed.
+   */
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    startTransition(() => formAction(data));
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -73,25 +102,39 @@ export function ItemDetail({
         {editing ? (
           <>
             <button type="submit" form={`item-edit-${pageId}`} disabled={pending} className="btn btn-primary">
+              <Icon name="check" />
               {pending ? "Đang lưu…" : "Lưu thay đổi"}
             </button>
-            <button type="button" onClick={() => setEditing(false)} disabled={pending} className="btn btn-secondary">
+            <button type="button" onClick={cancel} disabled={pending} className="btn btn-secondary">
               Huỷ
             </button>
           </>
         ) : (
           <button type="button" onClick={startEditing} className="btn btn-primary">
+            <Icon name="pencil" />
             Sửa
           </button>
         )}
         <a href={notionUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">
-          Mở trong Notion ↗
+          Mở trong Notion
+          <Icon name="external" />
         </a>
-        {!editing && state.savedAt && !state.error && <span className="text-xs text-brand">Đã lưu</span>}
+        {!editing && state.savedAt && !state.error && (
+          <span className="flex items-center gap-1 text-xs text-brand-ink">
+            <Icon name="check" className="size-3.5" />
+            Đã lưu vào Notion
+          </span>
+        )}
       </div>
 
       {editing ? (
-        <form key={session} id={`item-edit-${pageId}`} action={formAction} className="flex flex-col gap-5">
+        <form
+          key={session}
+          id={`item-edit-${pageId}`}
+          onSubmit={submit}
+          onChange={() => setDirty(true)}
+          className="flex flex-col gap-5"
+        >
           {titleField && (
             <div>
               <input type="hidden" name={FORM_FIELD_MANIFEST} value={fieldNameOf(titleField)} />
@@ -117,15 +160,16 @@ export function ItemDetail({
             editing
           />
           {state.error && (
-            <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
+            <p role="alert" className="rounded-xl bg-danger-soft px-3.5 py-2.5 text-sm text-danger">
               {state.error}
             </p>
           )}
           <div className="flex gap-2">
             <button type="submit" disabled={pending} className="btn btn-primary">
+              <Icon name="check" />
               {pending ? "Đang lưu…" : "Lưu thay đổi"}
             </button>
-            <button type="button" onClick={() => setEditing(false)} disabled={pending} className="btn btn-secondary">
+            <button type="button" onClick={cancel} disabled={pending} className="btn btn-secondary">
               Huỷ
             </button>
           </div>
@@ -175,9 +219,16 @@ function DetailLayoutRenderer({
 
   if (!hasFields && layout.cover === "none") {
     return (
-      <p className="empty-state">
-        Chưa có property nào trong bố cục này. Vào Bố cục card → Card Detail để thêm field.
-      </p>
+      <div className="empty-state flex flex-col items-center gap-3">
+        <p>Chưa có property nào trong bố cục Card Detail.</p>
+        <Link
+          href={`/galleries/${renderContext.galleryId}/settings/card?mode=detail`}
+          className="btn btn-secondary btn-sm"
+        >
+          <Icon name="layout" />
+          Chọn field cho Card Detail
+        </Link>
+      </div>
     );
   }
 
@@ -186,8 +237,8 @@ function DetailLayoutRenderer({
       <div
         // self-start matters: a flex child stretches to the row by default, and that
         // definite height overrides aspect-ratio, squashing the crop out of shape.
-        className={`max-w-full shrink-0 self-start overflow-hidden bg-stone-100 bg-cover bg-center ${
-          coverRound ? "rounded-full" : "rounded-xl"
+        className={`max-w-full shrink-0 self-start overflow-hidden bg-subtle bg-cover bg-center ${
+          coverRound ? "rounded-full" : "rounded-3xl"
         }`}
         style={{
           aspectRatio: coverRatio,
@@ -265,9 +316,9 @@ function DetailGridView({
             }}
           >
             {boxFields.length === 0 ? (
-              <div className="h-full min-h-20 rounded-xl border border-dashed border-line" />
+              <div className="h-full min-h-20 rounded-2xl border border-dashed border-line" />
             ) : (
-              <div className="overflow-hidden rounded-xl border border-line">
+              <div className="overflow-hidden rounded-2xl bg-surface ring-1 ring-line">
                 {boxFields.map((field, index) => (
                   <div key={field.propertyId} className={index ? "border-t border-line" : ""}>
                     {editing ? (
@@ -276,7 +327,7 @@ function DetailGridView({
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-3">
-                        <div className="min-w-0 text-sm break-words text-muted">{labelOf(field)}</div>
+                        <div className="min-w-0 text-[13px] break-words text-muted">{labelOf(field)}</div>
                         <div className="min-w-0 text-sm break-words text-ink sm:col-span-2">
                           <PropertyValue value={field.value} displayConfig={field.displayConfig} context={renderContext} />
                         </div>
@@ -678,15 +729,15 @@ function MultiSelectField({
       <div className="mb-2 flex flex-wrap gap-1.5">
         {selected.length === 0 && <span className="text-xs text-faint">Chưa chọn gì</span>}
         {selected.map((v) => (
-          <span key={v} className="inline-flex items-center gap-1 rounded-md bg-stone-100 px-2 py-0.5 text-xs text-ink-soft">
+          <span key={v} className="inline-flex items-center gap-1 rounded-full bg-subtle py-0.5 pr-1 pl-2.5 text-xs text-ink-soft ring-1 ring-line">
             {v}
             <button
               type="button"
               onClick={() => setSelected((s) => s.filter((x) => x !== v))}
-              className="text-faint hover:text-ink"
+              className="rounded-full p-0.5 text-faint hover:bg-line hover:text-ink"
               aria-label={`Bỏ ${v}`}
             >
-              ×
+              <Icon name="x" className="size-3" />
             </button>
             <input type="hidden" name={fieldName} value={v} />
           </span>

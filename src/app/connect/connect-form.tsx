@@ -2,10 +2,11 @@
 
 import { useActionState, useState } from "react";
 import { connectWorkspace, type ConnectState } from "./actions";
+import { Icon } from "@/components/icons";
 
 const TOKEN_SHAPE = /^(ntn_|secret_)[A-Za-z0-9]{20,}$/;
 
-export function ConnectForm({ workspaceId }: { workspaceId: string | null }) {
+export function ConnectForm({ workspaceId, returnTo }: { workspaceId: string | null; returnTo: string | null }) {
   const [state, formAction, pending] = useActionState<ConnectState, FormData>(connectWorkspace, { error: null });
   const [token, setToken] = useState("");
   const [visible, setVisible] = useState(false);
@@ -35,11 +36,13 @@ export function ConnectForm({ workspaceId }: { workspaceId: string | null }) {
   return (
     <form action={formAction} className="flex flex-col gap-3">
       {workspaceId && <input type="hidden" name="workspaceId" value={workspaceId} />}
+      {returnTo && <input type="hidden" name="returnTo" value={returnTo} />}
       <label htmlFor="token" className="field-label mb-0">
         Internal Integration Secret
       </label>
       <div className="flex gap-2">
         <div className="relative min-w-0 flex-1">
+          <Icon name="key" className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-faint" />
           <input
             id="token"
             type={visible ? "text" : "password"}
@@ -51,32 +54,34 @@ export function ConnectForm({ workspaceId }: { workspaceId: string | null }) {
             spellCheck={false}
             required
             aria-describedby="token-hint"
-            className={`input h-10 pr-16 font-mono ${hint ? "border-amber-400" : shapeOk ? "border-brand" : ""}`}
+            className={`input h-11 pr-16 pl-10 font-mono ${hint ? "border-warn" : shapeOk ? "border-brand" : ""}`}
           />
           <button
             type="button"
             onClick={() => setVisible((value) => !value)}
-            className="btn btn-ghost btn-sm absolute top-1/2 right-1 -translate-y-1/2"
+            className="btn btn-ghost btn-sm absolute top-1/2 right-1.5 -translate-y-1/2"
           >
             {visible ? "Ẩn" : "Hiện"}
           </button>
         </div>
-        <button type="button" onClick={paste} className="btn btn-secondary h-10">
+        <button type="button" onClick={paste} className="btn btn-secondary h-11">
+          <Icon name="copy" />
           Dán
         </button>
       </div>
-      <p id="token-hint" className={`text-xs ${hint ? "text-amber-700" : "text-faint"}`}>
+      <p id="token-hint" className={`text-xs ${hint ? "text-warn" : "text-faint"}`}>
         {pasteError ?? hint ?? "Token chỉ lưu trên máy này, dùng để Hallery gọi Notion API thay bạn."}
       </p>
 
       {state.error && (
-        <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
+        <p role="alert" className="rounded-xl bg-danger-soft px-3.5 py-2.5 text-sm text-danger">
           {state.error}
         </p>
       )}
 
-      <button type="submit" disabled={pending || trimmed === ""} className="btn btn-primary h-10">
+      <button type="submit" disabled={pending || trimmed === ""} className="btn btn-primary h-11">
         {pending ? "Đang kiểm tra với Notion…" : workspaceId ? "Kết nối lại" : "Kết nối"}
+        {!pending && <Icon name="chevron-right" />}
       </button>
     </form>
   );

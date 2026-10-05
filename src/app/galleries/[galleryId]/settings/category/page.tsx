@@ -16,8 +16,9 @@ export default async function CategorySettingsPage({
   searchParams,
 }: PageProps<"/galleries/[galleryId]/settings/category">) {
   const { galleryId } = await params;
-  const { view: viewParam } = await searchParams;
+  const { view: viewParam, back } = await searchParams;
   const viewId = typeof viewParam === "string" ? viewParam : undefined;
+  const backQuery = typeof back === "string" ? back : undefined;
   const gallery = await db.gallery.findUnique({
     where: { id: galleryId },
     include: { workspace: true, categoryAxes: { orderBy: { sortOrder: "asc" } } },
@@ -52,19 +53,20 @@ export default async function CategorySettingsPage({
   const orphans = gallery.categoryAxes.filter((axis) => !liveIds.has(axis.notionPropertyId));
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 sm:py-10">
+    <div className="mx-auto w-full max-w-3xl px-5 py-8 sm:px-8 sm:py-10">
       <SettingsHeader
         galleryId={galleryId}
         galleryName={gallery.name}
         viewId={viewId}
+        back={backQuery}
         active="category"
         description="Chọn property dùng để phân loại item. Mỗi property được chọn thành một thanh lọc phía trên Gallery."
       />
 
       {orphans.length > 0 && (
-        <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          {orphans.map((axis) => axis.notionPropertyName).join(", ")} không còn tồn tại trong Notion. Bỏ tích rồi lưu
-          để gỡ khỏi danh sách.
+        <div className="notice mb-6">
+          {orphans.map((axis) => axis.notionPropertyName).join(", ")} không còn tồn tại trong Notion — bấm Lưu để gỡ
+          khỏi thanh phân loại.
         </div>
       )}
 

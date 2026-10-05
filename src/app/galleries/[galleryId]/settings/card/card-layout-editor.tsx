@@ -54,6 +54,7 @@ import { saveCardLayout, type SaveCardLayoutState } from "./actions";
 import { ArrangementGlyph, RatioGlyph } from "./glyphs";
 import { PropertyPanel, type PanelProperty } from "./property-panel";
 import { LayoutPanel } from "./layout-panel";
+import { Icon } from "@/components/icons";
 
 export type EditableCardProperty = PanelProperty & { detailDisplayConfig: string };
 export type CoverShape = { aspect: CoverOrientation; ratio: string };
@@ -107,9 +108,12 @@ export function CardLayoutEditor({
   imageProperties,
   uploadProperties,
   previewItems,
+  initialMode,
 }: {
   galleryId: string;
   viewId: string;
+  /** Which of the three arrangements opens first — links from the form or detail land on theirs. */
+  initialMode?: ViewMode;
   properties: EditableCardProperty[];
   initialShape: CoverShape;
   initialDetailShape: CoverShape;
@@ -125,7 +129,7 @@ export function CardLayoutEditor({
   uploadProperties: string[];
   previewItems: PreviewRecord[];
 }) {
-  const [mode, setMode] = useState<ViewMode>("gallery");
+  const [mode, setMode] = useState<ViewMode>(initialMode ?? "gallery");
 
   // All three arrangements live here at once so switching views costs nothing and one save
   // commits the set — a half-saved screen is worse than a slightly larger form.
@@ -216,6 +220,58 @@ export function CardLayoutEditor({
 
   const action = saveCardLayout.bind(null, galleryId, viewId);
   const [state, formAction, pending] = useActionState<SaveCardLayoutState, FormData>(action, { error: null });
+
+  // Everything the form would submit, as one string: unsaved work is any difference from
+  // the last save. Cheap — the layouts are a few kilobytes at most.
+  const signature = JSON.stringify([
+    galleryLayout,
+    detailLayout,
+    formLayout,
+    galleryShape,
+    detailShape,
+    formShape,
+    detailWidth,
+    coverSource,
+    formCoverTarget,
+    galleryConfigs,
+    detailConfigs,
+    formDefaults,
+  ]);
+  const [savedSignature, setSavedSignature] = useState(signature);
+  const [justSaved, setJustSaved] = useState(false);
+  const [wasPending, setWasPending] = useState(false);
+  const [submitted, setSubmitted] = useState(signature);
+  if (wasPending !== pending) {
+    setWasPending(pending);
+    // A save that just finished without an error makes what was submitted the new baseline.
+    if (!pending && !state.error) {
+      setSavedSignature(submitted);
+      setJustSaved(true);
+    }
+  }
+  const dirty = signature !== savedSignature;
+  if (justSaved && dirty) setJustSaved(false);
+
+  // Leaving with unsaved changes asks first — tabs, the back link and closing the window.
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
+    const onClick = (event: MouseEvent) => {
+      const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (!anchor || anchor.getAttribute("target") === "_blank") return;
+      if (!window.confirm("Bố cục có thay đổi chưa lưu. Rời trang và bỏ các thay đổi đó?")) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, [dirty]);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor),
@@ -405,7 +461,11 @@ export function CardLayoutEditor({
     dragging === TITLE_FIELD_ID ? "Tiêu đề" : dragging ? byId.get(dragging)?.notionPropertyName : null;
 
   return (
-    <form action={formAction} className="flex h-[calc(100vh-13rem)] min-h-[32rem] gap-4 pb-2">
+    <form
+      action={formAction}
+      onSubmit={() => setSubmitted(signature)}
+      className="flex flex-col gap-4 pb-20 lg:h-[calc(100dvh-12rem)] lg:min-h-[32rem] lg:flex-row lg:pb-2"
+    >
       <input type="hidden" name="layout" value={JSON.stringify(galleryLayout)} />
       <input type="hidden" name="detailLayout" value={JSON.stringify(detailLayout)} />
       <input type="hidden" name="coverAspect" value={galleryShape.aspect} />
@@ -430,7 +490,7 @@ export function CardLayoutEditor({
         onDragCancel={() => setDragging(null)}
       >
         {/* 1 + 2 + 3 */}
-        <div className="flex w-80 shrink-0 flex-col gap-3">
+        <div className="flex w-full shrink-0 flex-col gap-3 lg:w-80">
           <ModeSwitch
             mode={mode}
               onChange={(next) => {
@@ -482,13 +542,13 @@ export function CardLayoutEditor({
                 setEditingLayout(true);
                 setSelected(null);
               }}
-              className={`w-9 shrink-0 rounded-lg border text-sm ${
+              className={`flex w-10 shrink-0 items-center justify-center rounded-xl text-sm ring-1 transition-colors ${
                 editingLayout
-                  ? "border-brand bg-emerald-600 text-white"
-                  : "border-line-strong bg-white text-muted hover:border-stone-500"
+                  ? "bg-brand text-on-brand ring-brand"
+                  : "bg-surface text-muted ring-line-strong hover:text-ink"
               }`}
             >
-              ✎
+              <Icon name="grid" />
             </button>
           </div>
           <PropertyList
@@ -501,8 +561,8 @@ export function CardLayoutEditor({
         </div>
 
         {/* 4 */}
-        <div className="flex min-w-0 flex-1 flex-col gap-3">
-          <div className="flex flex-1 flex-col overflow-hidden rounded-lg border border-line bg-canvas">
+        <div className="flex min-h-[28rem] min-w-0 flex-1 flex-col gap-3">
+          <div className="flex flex-1 flex-col overflow-hidden rounded-3xl bg-subtle ring-1 ring-line">
             <div className="flex flex-1 justify-center overflow-auto p-6 pb-24">
               <CardCanvas
                 layout={layout}
@@ -534,7 +594,7 @@ export function CardLayoutEditor({
                 shapeIsRound={isRoundCover(shape.aspect)}
               />
             </div>
-            <div className="flex items-center justify-between gap-3 border-t border-line bg-white px-4 py-2 text-xs text-ink-soft">
+            <div className="flex items-center justify-between gap-3 border-t border-line bg-surface px-4 py-2 text-xs text-ink-soft">
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -558,7 +618,7 @@ export function CardLayoutEditor({
         </div>
 
         {/* 5 */}
-        <div className="w-80 shrink-0">
+        <div className="w-full shrink-0 lg:w-80">
           {formMode && !editingLayout ? (
             <FormFieldPanel
               key={`form:${selected ?? "none"}`}
@@ -595,17 +655,20 @@ export function CardLayoutEditor({
           )}
         </div>
 
-        <button
-          type="submit"
-          disabled={pending}
-          className="fixed bottom-6 right-6 z-40 rounded-md bg-brand px-5 py-2.5 text-sm font-medium text-white shadow-lg hover:bg-brand-hover disabled:opacity-50"
-        >
-          {pending ? "Đang lưu…" : "Lưu bố cục"}
-        </button>
+        <div className="fixed right-6 bottom-6 z-40 flex items-center gap-3 rounded-full bg-surface/90 py-1.5 pr-1.5 pl-4 shadow-pop ring-1 ring-line backdrop-blur">
+          <span className={`flex items-center gap-1.5 text-xs ${dirty ? "text-warn" : "text-muted"}`}>
+            <span aria-hidden className={`size-1.5 rounded-full ${dirty ? "bg-warn" : "bg-brand"}`} />
+            {pending ? "Đang lưu…" : dirty ? "Có thay đổi chưa lưu" : justSaved ? "Đã lưu" : "Không có thay đổi"}
+          </span>
+          <button type="submit" disabled={pending || !dirty} className="btn btn-primary">
+            <Icon name="check" />
+            Lưu bố cục
+          </button>
+        </div>
 
         <DragOverlay>
           {draggingLabel && (
-            <span className="rounded-md border border-brand bg-white px-2.5 py-1 text-sm shadow-lg">
+            <span className="rounded-md border border-brand bg-surface px-2.5 py-1 text-sm shadow-lg">
               {draggingLabel}
             </span>
           )}
@@ -648,7 +711,7 @@ function ModeSwitch({ mode, onChange }: { mode: ViewMode; onChange: (mode: ViewM
   ];
 
   return (
-    <div role="tablist" aria-label="Chỉnh bố cục cho" className="flex rounded-lg border border-line-strong bg-white p-0.5">
+    <div role="tablist" aria-label="Chỉnh bố cục cho" className="segmented w-full">
       {tabs.map((tab) => (
         <button
           key={tab.value}
@@ -656,9 +719,7 @@ function ModeSwitch({ mode, onChange }: { mode: ViewMode; onChange: (mode: ViewM
           role="tab"
           aria-selected={mode === tab.value}
           onClick={() => onChange(tab.value)}
-          className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium ${
-            mode === tab.value ? "bg-emerald-600 text-white" : "text-ink-soft hover:bg-stone-100"
-          }`}
+          className="flex-1 justify-center"
         >
           {tab.label}
         </button>
@@ -678,7 +739,7 @@ function DetailBar({
   onSync: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-line bg-white p-2">
+    <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-2">
       <label className="flex items-center gap-2 text-xs text-ink-soft">
         <span className="shrink-0">Rộng</span>
         <input
@@ -695,7 +756,7 @@ function DetailBar({
       <button
         type="button"
         onClick={onSync}
-        className="rounded-md border border-line-strong px-2 py-1.5 text-xs font-medium text-ink-soft hover:border-brand hover:text-brand"
+        className="rounded-md border border-line-strong px-2 py-1.5 text-xs font-medium text-ink-soft hover:border-brand hover:text-brand-ink"
       >
         Sync từ gallery card
       </button>
@@ -718,7 +779,7 @@ function CoverSourceSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="flex items-center gap-2 rounded-lg border border-line bg-white px-2 py-1.5 text-xs text-ink-soft">
+    <label className="flex items-center gap-2 rounded-xl border border-line bg-surface px-2.5 py-2 text-xs text-ink-soft">
       <span className="shrink-0">Ảnh</span>
       <select
         value={value}
@@ -754,7 +815,7 @@ function CoverTargetSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="flex items-center gap-2 rounded-lg border border-line bg-white px-2 py-1.5 text-xs text-ink-soft">
+    <label className="flex items-center gap-2 rounded-xl border border-line bg-surface px-2.5 py-2 text-xs text-ink-soft">
       <span className="shrink-0">Lưu ảnh vào</span>
       <select
         value={value}
@@ -789,7 +850,7 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
           if (!open) setDraft(shape);
           setOpen((o) => !o);
         }}
-        className={`flex h-24 w-full flex-col items-center justify-center gap-1 rounded-lg border bg-white p-1.5 ${
+        className={`flex h-24 w-full flex-col items-center justify-center gap-1 rounded-2xl border bg-surface p-1.5 ${
           open ? "border-brand" : "border-line-strong hover:border-stone-500"
         }`}
       >
@@ -803,7 +864,7 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
         <div
           role="dialog"
           aria-label="Chiều ảnh"
-          className="absolute left-0 top-full z-30 mt-2 w-72 rounded-lg border border-line-strong bg-white p-3 shadow-lg"
+          className="absolute left-0 top-full z-30 mt-2 w-72 animate-pop-in rounded-2xl border border-line bg-surface p-3 shadow-pop"
         >
           <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Chiều ảnh</p>
           <div className="mb-3 flex gap-1">
@@ -824,7 +885,7 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
                 }
                 className={`flex-1 rounded border px-2 py-1 text-xs ${
                   (option.value === "square" ? isSymmetric(draft.aspect) : draft.aspect === option.value)
-                    ? "border-brand bg-brand-soft font-medium text-brand-hover"
+                    ? "border-brand bg-brand-soft font-medium text-brand-ink"
                     : "border-line-strong text-ink-soft hover:border-stone-500"
                 }`}
               >
@@ -888,7 +949,7 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
                 onChange(draft);
                 setOpen(false);
               }}
-              className="rounded bg-brand px-3 py-1 text-xs font-medium text-white hover:bg-brand-hover"
+              className="rounded bg-brand px-3 py-1 text-xs font-medium text-on-brand hover:bg-brand-hover"
             >
               OK
             </button>
@@ -932,7 +993,7 @@ function ArrangementButton({
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => (open ? setOpen(false) : openPicker())}
-        className={`flex h-24 w-full flex-col items-center justify-center gap-1 rounded-lg border bg-white p-1.5 ${
+        className={`flex h-24 w-full flex-col items-center justify-center gap-1 rounded-2xl border bg-surface p-1.5 ${
           open ? "border-brand" : "border-line-strong hover:border-stone-500"
         }`}
       >
@@ -946,7 +1007,7 @@ function ArrangementButton({
         <div
           role="dialog"
           aria-label="Bố cục ảnh"
-          className="absolute left-0 top-full z-30 mt-2 w-72 rounded-lg border border-line-strong bg-white p-3 shadow-lg"
+          className="absolute left-0 top-full z-30 mt-2 w-72 animate-pop-in rounded-2xl border border-line bg-surface p-3 shadow-pop"
         >
           <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Ảnh nằm ở đâu</p>
           <div className="grid grid-cols-2 gap-2">
@@ -1011,7 +1072,7 @@ function ArrangementButton({
                   onChange(draftArrangement, extendable && draftExtended);
                   setOpen(false);
                 }}
-                className="rounded bg-brand px-3 py-1 text-xs font-medium text-white hover:bg-brand-hover"
+                className="rounded bg-brand px-3 py-1 text-xs font-medium text-on-brand hover:bg-brand-hover"
               >
                 OK
               </button>
@@ -1043,7 +1104,7 @@ function PropertyList({
   return (
     <div
       ref={setNodeRef}
-      className={`flex min-h-0 flex-1 flex-col rounded-lg border bg-white p-2 ${
+      className={`flex min-h-0 flex-1 flex-col rounded-2xl border bg-surface p-2 ${
         isOver ? "border-emerald-500 bg-brand-soft" : "border-line"
       }`}
     >
@@ -1163,7 +1224,7 @@ function CardCanvas(props: CanvasProps) {
 
   return (
     <div className="relative w-full" style={{ maxWidth: previewWidth }}>
-      <div className="overflow-hidden rounded-lg border border-line-strong bg-white shadow-sm">
+      <div className="overflow-hidden rounded-card border border-line bg-surface shadow-card">
         {wide ? (
           <>
             <div className="flex">
@@ -1355,7 +1416,7 @@ function FieldChip({
       ref={setDropRef}
       className={`flex w-full items-center gap-1 rounded border px-1 py-0.5 text-[11px] ${
         selected ? "border-brand ring-1 ring-emerald-400" : isOver ? "border-emerald-500" : dark ? "border-white/25" : "border-line"
-      } ${isDragging ? "opacity-40" : ""} ${dark ? "bg-black/40 text-white" : "bg-white text-ink"}`}
+      } ${isDragging ? "opacity-40" : ""} ${dark ? "bg-black/40 text-white" : "bg-surface text-ink"}`}
     >
       <span
         ref={setNodeRef}
@@ -1385,8 +1446,8 @@ function FieldChip({
                 onClick={(event) => event.stopPropagation()}
                 className={
                   config?.kind === "button"
-                    ? "shrink-0 rounded bg-brand px-2 py-1 font-medium text-white hover:bg-brand-hover"
-                    : "min-w-0 flex-1 truncate text-brand underline"
+                    ? "shrink-0 rounded bg-brand px-2 py-1 font-medium text-on-brand hover:bg-brand-hover"
+                    : "min-w-0 flex-1 truncate text-brand-ink underline"
                 }
               >
                 {config?.kind === "button" ? config.label || "Mở link" : value}

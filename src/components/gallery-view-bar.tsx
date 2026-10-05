@@ -1,13 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   createGalleryView,
   deleteGalleryView,
   duplicateGalleryView,
+  moveGalleryView,
   renameGalleryView,
 } from "@/app/galleries/[galleryId]/view-actions";
+import { Icon, type IconName } from "@/components/icons";
+import { toast } from "@/components/toaster";
+import { useDismiss } from "@/lib/use-dismiss";
 
 export type GalleryViewTab = { id: string; name: string };
 
@@ -25,25 +29,10 @@ export function GalleryViewBar({
   const pathname = usePathname();
   const params = useSearchParams();
   const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [menuOpen]);
+  useDismiss(menuRef, menuOpen, () => setMenuOpen(false));
 
   function go(viewId: string) {
     const next = new URLSearchParams(params.toString());
@@ -53,56 +42,103 @@ export function GalleryViewBar({
   }
 
   function run(change: () => Promise<{ error: string | null; viewId?: string }>) {
-    setError(null);
     setMenuOpen(false);
     startTransition(async () => {
-      const result = await change();
-      if (result.error) setError(result.error);
-      else if (result.viewId) go(result.viewId);
-      else router.refresh();
+      try {
+        const result = await change();
+        if (result.error) toast(result.error, "error");
+        else if (result.viewId) go(result.viewId);
+        else router.refresh();
+      } catch {
+        toast("Không lưu được view. Thử lại sau giây lát.", "error");
+      }
     });
   }
 
-  const current = views.find((view) => view.id === activeViewId);
+  const index = views.findIndex((view) => view.id === activeViewId);
+  const current = views[index];
 
-  function rename() {
-    const name = window.prompt("Tên view", current?.name ?? "");
-    if (name === null) return;
+  function rename(name: string) {
+    setRenaming(false);
+    if (!name.trim() || name.trim() === current?.name) return;
     run(() => renameGalleryView(galleryId, activeViewId, name));
   }
 
   function remove() {
     if (!window.confirm(`Xoá view “${current?.name ?? ""}”? Bộ lọc, sắp xếp và bố cục card riêng của view này sẽ mất.`)) {
+      setMenuOpen(false);
       return;
     }
     run(() => deleteGalleryView(galleryId, activeViewId));
   }
 
+  const items: { label: string; icon: IconName; run: () => void; disabled?: boolean; danger?: boolean }[] = [
+    {
+      label: "Đổi tên",
+      icon: "pencil",
+      run: () => {
+        setMenuOpen(false);
+        setRenaming(true);
+      },
+    },
+    { label: "Nhân bản", icon: "copy", run: () => run(() => duplicateGalleryView(galleryId, activeViewId)) },
+    {
+      label: "Dời sang trái",
+      icon: "chevron-left",
+      run: () => run(() => moveGalleryView(galleryId, activeViewId, -1)),
+      disabled: index <= 0,
+    },
+    {
+      label: "Dời sang phải",
+      icon: "chevron-right",
+      run: () => run(() => moveGalleryView(galleryId, activeViewId, 1)),
+      disabled: index === views.length - 1,
+    },
+    { label: "Xoá view", icon: "trash", run: remove, disabled: views.length <= 1, danger: true },
+  ];
+
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-1.5 border-b border-line pb-2">
-      <div role="tablist" aria-label="View" className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-        {views.map((view) => (
-          <button
-            key={view.id}
-            type="button"
-            role="tab"
-            aria-selected={view.id === activeViewId}
-            onClick={() => go(view.id)}
-            className={`btn btn-sm ${view.id === activeViewId ? "bg-brand-soft text-brand-hover" : "btn-ghost"}`}
-          >
-            {view.name}
-          </button>
-        ))}
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() => run(() => createGalleryView(galleryId, activeViewId))}
-          title="Tạo view mới từ view đang mở"
-          className="btn btn-ghost btn-sm text-muted"
-        >
-          + View
-        </button>
+    <div className={`flex min-w-0 items-center gap-1 ${pending ? "opacity-70" : ""}`}>
+      <div role="tablist" aria-label="View" className="segmented">
+        {views.map((view) =>
+          renaming && view.id === activeViewId ? (
+            <input
+              key={view.id}
+              autoFocus
+              defaultValue={view.name}
+              aria-label="Tên view"
+              onBlur={(event) => rename(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") rename(event.currentTarget.value);
+                if (event.key === "Escape") setRenaming(false);
+              }}
+              className="w-32 bg-surface text-ink shadow-xs outline-none"
+            />
+          ) : (
+            <button
+              key={view.id}
+              type="button"
+              role="tab"
+              aria-selected={view.id === activeViewId}
+              onClick={() => (view.id === activeViewId ? setRenaming(true) : go(view.id))}
+              title={view.id === activeViewId ? "Bấm lần nữa để đổi tên" : undefined}
+            >
+              {view.name}
+            </button>
+          ),
+        )}
       </div>
+
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => run(() => createGalleryView(galleryId, activeViewId))}
+        aria-label="Tạo view mới"
+        title="Tạo view mới từ view đang mở"
+        className="btn btn-ghost btn-sm btn-icon text-muted"
+      >
+        <Icon name="plus" />
+      </button>
 
       <div ref={menuRef} className="relative">
         <button
@@ -110,48 +146,32 @@ export function GalleryViewBar({
           disabled={pending}
           aria-haspopup="menu"
           aria-expanded={menuOpen}
+          aria-label="Tuỳ chọn view"
+          title="Tuỳ chọn view"
           onClick={() => setMenuOpen((open) => !open)}
-          className="btn btn-ghost btn-sm"
+          className="btn btn-ghost btn-sm btn-icon text-muted"
         >
-          {pending ? "Đang lưu…" : "View này ▾"}
+          <Icon name="more" />
         </button>
         {menuOpen && (
-          <div role="menu" className="popover absolute right-0 z-30 mt-1 w-48 py-1">
-            <MenuItem onClick={rename}>Đổi tên</MenuItem>
-            <MenuItem onClick={() => run(() => duplicateGalleryView(galleryId, activeViewId))}>Nhân bản</MenuItem>
-            <MenuItem onClick={remove} danger disabled={views.length <= 1}>
-              Xoá view
-            </MenuItem>
+          <div role="menu" className="popover absolute top-full left-0 z-30 mt-1 w-52 p-1.5">
+            <p className="truncate px-3 pt-1 pb-1.5 text-[11px] font-medium text-faint">View “{current?.name}”</p>
+            {items.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                role="menuitem"
+                disabled={item.disabled}
+                onClick={item.run}
+                className={`menu-item ${item.danger ? "text-danger hover:text-danger [&_svg]:text-danger" : ""}`}
+              >
+                <Icon name={item.icon} />
+                {item.label}
+              </button>
+            ))}
           </div>
         )}
       </div>
-      {error && <p className="basis-full text-xs text-danger">{error}</p>}
     </div>
-  );
-}
-
-function MenuItem({
-  onClick,
-  danger,
-  disabled,
-  children,
-}: {
-  onClick: () => void;
-  danger?: boolean;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      disabled={disabled}
-      className={`block w-full px-3 py-1.5 text-left text-sm hover:bg-canvas disabled:opacity-40 ${
-        danger ? "text-danger" : "text-ink-soft"
-      }`}
-    >
-      {children}
-    </button>
   );
 }

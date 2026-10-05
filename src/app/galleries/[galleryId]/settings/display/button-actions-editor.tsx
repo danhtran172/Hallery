@@ -79,7 +79,7 @@ export function ButtonActionsEditor({
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="rounded-lg bg-canvas px-3 py-2.5 text-xs leading-relaxed text-ink-soft">
+      <p className="rounded-2xl bg-subtle px-3.5 py-3 text-xs leading-relaxed text-ink-soft">
         Notion không cho bấm nút của nó qua API. Gán hành động ở đây để nút <b>{propertyName}</b> chạy được ngay trong
         Hallery. Mọi hành động chỉ ghi <i>giá trị</i> vào chính item đó — không đụng tới cấu trúc database.
       </p>
@@ -203,7 +203,7 @@ export function ButtonActionsEditor({
           {pending ? "Đang lưu…" : "Lưu hành động"}
         </button>
         {status && (
-          <span role="status" className={`text-xs ${status.ok ? "text-brand" : "text-danger"}`}>
+          <span role="status" className={`text-xs ${status.ok ? "text-brand-ink" : "text-danger"}`}>
             {status.message}
           </span>
         )}

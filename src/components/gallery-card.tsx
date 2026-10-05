@@ -60,9 +60,10 @@ export function GalleryCard({
     <div
       // A top cover has no explicit width. It must stretch across the card;
       // `self-start` makes a landscape aspect-ratio box shrink to zero.
-      className={`relative shrink-0 ${layout.sideBySide ? "self-start" : "w-full"}`}
+      className={`g-mat ${layout.sideBySide ? "self-start" : "w-full pb-0"}`}
       style={layout.sideBySide ? { width: `${layout.ratio[0]}%` } : undefined}
     >
+      <div className={`g-pic${cover.round ? " !rounded-full" : ""}`}>
       <CardCover
         key={cover.key}
         ratio={cover.ratio}
@@ -92,6 +93,7 @@ export function GalleryCard({
           />
         </div>
       )}
+      </div>
     </div>
   );
 
@@ -119,7 +121,7 @@ export function GalleryCard({
         <>
           {coverBlock}
           {Object.keys(layout.regions).length > 0 && (
-            <div className="g-body flex flex-col gap-2 p-3.5">
+            <div className={`g-body flex flex-col gap-2 ${cover ? "px-3.5 pt-3 pb-3.5" : "p-4"}`}>
               <CardIcon icon={icon} />
               {Object.keys(layout.regions).map((id) => (
                 <div key={id}>{region(id)}</div>

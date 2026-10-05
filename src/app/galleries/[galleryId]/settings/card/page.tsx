@@ -36,7 +36,8 @@ export default async function CardLayoutSettingsPage({
   searchParams,
 }: PageProps<"/galleries/[galleryId]/settings/card">) {
   const { galleryId } = await params;
-  const { view: viewParam } = await searchParams;
+  const { view: viewParam, back, mode } = await searchParams;
+  const initialMode = mode === "detail" || mode === "form" ? mode : "gallery";
   const gallery = await db.gallery.findUnique({
     where: { id: galleryId },
     include: { workspace: true, propertyConfigs: { orderBy: { sortOrder: "asc" } }, views: { orderBy: { sortOrder: "asc" } } },
@@ -68,7 +69,7 @@ export default async function CardLayoutSettingsPage({
 
   // An untouched detail opens on the card's own arrangement — the same thing the Card
   // Detail is already rendering, so the editor shows the truth rather than a blank.
-  const detailLayout = parseCardLayout(config.detailCard) ?? parseCardLayout(config.card) ?? layout;
+  const detailLayout = parseCardLayout(config.detailCard) ?? layout;
   const detailShape = resolveDetailCoverShape(config);
   const formShape = resolveFormCoverShape(config);
 
@@ -92,8 +93,15 @@ export default async function CardLayoutSettingsPage({
   const preview = snapshot ? loadPreviewItems(snapshot) : EMPTY_PREVIEW;
 
   return (
-    <div className="flex h-screen w-full flex-col px-4 py-5 sm:px-6">
-      <SettingsHeader galleryId={galleryId} galleryName={gallery.name} viewId={view.id} active="card" compact />
+    <div className="flex w-full flex-1 flex-col px-5 py-6 sm:px-8">
+      <SettingsHeader
+        galleryId={galleryId}
+        galleryName={gallery.name}
+        viewId={view.id}
+        back={typeof back === "string" ? back : undefined}
+        active="card"
+        compact
+      />
 
       {properties.length === 0 ? (
         <p className="empty-state">Database này chưa có property nào ngoài tiêu đề để đưa lên card.</p>
@@ -101,6 +109,7 @@ export default async function CardLayoutSettingsPage({
         <CardLayoutEditor
           galleryId={galleryId}
           viewId={view.id}
+          initialMode={initialMode}
           properties={properties.map((p) => ({
             notionPropertyId: p.notionPropertyId,
             notionPropertyName: p.notionPropertyName,

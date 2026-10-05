@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 export type ListedProperty = {
@@ -67,7 +68,7 @@ export function PropertyList({
         ))}
 
         {disabled.length > 0 && (
-          <div className="mt-3 rounded-lg border border-dashed border-line-strong bg-canvas p-1.5">
+          <div className="mt-3 rounded-2xl border border-dashed border-line-strong bg-subtle/60 p-1.5">
             <p className="px-1 pb-1 text-[11px] font-medium tracking-wide text-faint uppercase">
               Không quản lý ({disabled.length})
             </p>
@@ -100,14 +101,17 @@ function PropertyLink({
   property: ListedProperty;
   selected: boolean;
 }) {
-  const params = new URLSearchParams({ view: viewId, prop: property.notionPropertyId });
+  // Everything else on the address — the way back to the Gallery above all — stays.
+  const params = new URLSearchParams(useSearchParams().toString());
+  params.set("view", viewId);
+  params.set("prop", property.notionPropertyId);
   return (
     <Link
       href={`/galleries/${galleryId}/settings/display?${params}`}
       scroll={false}
       aria-current={selected ? "true" : undefined}
-      className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs ${
-        selected ? "border-brand bg-brand-soft text-brand-hover" : "border-transparent hover:bg-stone-100"
+      className={`flex items-center gap-1.5 rounded-xl px-2.5 py-2 text-[13px] transition-colors ${
+        selected ? "bg-brand-soft font-medium text-brand-ink ring-1 ring-brand-line" : "hover:bg-subtle"
       } ${property.disabled ? "text-faint" : "text-ink-soft"}`}
     >
       <span className="min-w-0 flex-1 truncate" title={property.notionPropertyName}>

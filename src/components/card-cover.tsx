@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { saveCoverPosition } from "@/app/galleries/[galleryId]/cover-position-actions";
+import { Icon } from "@/components/icons";
+import { toast } from "@/components/toaster";
 
 // The source URL arrives after the preview API resolves it, so next/image cannot optimize
 // this two-stage load without starting the full image early.
@@ -129,7 +131,11 @@ export function CardCover({
         }
 
         fetch(`/api/galleries/${galleryId}/cover-preview?pageId=${encodeURIComponent(pageId)}&view=${encodeURIComponent(viewId)}`)
-          .then((res) => (res.ok ? res.json() : null))
+          .then((res) => {
+            // 503: the lookup failed, which is worth a retry button. 404 means no picture.
+            if (res.status === 503) throw new Error("Cover lookup unavailable");
+            return res.ok ? res.json() : null;
+          })
           .then((data) => {
             if (cancelled || !data) return;
             const imageUrl = data.cardUrl ?? data.fullUrl ?? null;
@@ -196,7 +202,9 @@ export function CardCover({
         node.removeEventListener("pointermove", onMove);
         node.removeEventListener("pointerup", onUp);
         setDragging(false);
-        void saveCoverPosition(galleryId, pageId, posRef.current.x, posRef.current.y);
+        saveCoverPosition(galleryId, pageId, posRef.current.x, posRef.current.y).catch(() =>
+          toast("Không lưu được vị trí ảnh — sẽ trở lại chỗ cũ khi tải lại trang.", "error"),
+        );
       };
 
       node.addEventListener("pointermove", onMove);
@@ -211,8 +219,8 @@ export function CardCover({
     <div
       ref={ref}
       onPointerDown={onPointerDown}
-      className={`relative w-full shrink-0 overflow-hidden bg-stone-100 ${round ? "rounded-full" : ""} ${
-        armed ? `z-20 ${dragging ? "cursor-grabbing" : "cursor-grab"} ring-2 ring-emerald-500` : "pointer-events-none"
+      className={`relative w-full shrink-0 overflow-hidden bg-subtle ${round ? "rounded-full" : "rounded-[inherit]"} ${
+        armed ? `z-20 ${dragging ? "cursor-grabbing" : "cursor-grab"} ring-2 ring-brand ring-inset` : "pointer-events-none"
       }`}
       style={{
         aspectRatio: ratio,
@@ -239,8 +247,9 @@ export function CardCover({
         />
       )}
       {failed && !resolved && (
-        <div className="pointer-events-auto absolute inset-0 z-30 flex flex-col items-center justify-center gap-1 bg-stone-100 p-2 text-center">
-          <span className="text-[11px] leading-snug text-stone-500">Không tải được ảnh</span>
+        <div className="pointer-events-auto absolute inset-0 z-30 flex flex-col items-center justify-center gap-1.5 bg-subtle p-2 text-center">
+          <Icon name="image" className="size-5 text-faint" />
+          <span className="text-[11px] leading-snug text-muted">Không tải được ảnh</span>
           <button
             type="button"
             onClick={(event) => {
@@ -249,18 +258,17 @@ export function CardCover({
               void retry();
             }}
             disabled={retrying}
-            className="rounded border border-stone-300 bg-white px-1.5 py-0.5 text-[11px] text-stone-600 hover:border-stone-500 disabled:opacity-50"
+            className="rounded-full bg-surface px-2.5 py-1 text-[11px] text-ink-soft ring-1 ring-line-strong hover:text-ink disabled:opacity-50"
           >
             {retrying ? "Đang thử…" : "Thử lại"}
           </button>
         </div>
       )}
 
-      {resolved && (
-        <span
-          className="pointer-events-none absolute top-2 left-2 rounded bg-black/65 px-2 py-1 text-[11px] text-white opacity-0 transition-opacity group-hover:opacity-100"
-        >
-          {armed ? "Kéo để chỉnh vị trí ảnh" : "Giữ Ctrl rồi kéo để chỉnh vị trí ảnh"}
+      {/* Only while Ctrl is held: as a permanent hover hint it sat on every picture. */}
+      {armed && (
+        <span className="pointer-events-none absolute top-2 left-2 rounded-full bg-black/65 px-2.5 py-1 text-[11px] text-white backdrop-blur">
+          Kéo để chỉnh vị trí ảnh
         </span>
       )}
     </div>

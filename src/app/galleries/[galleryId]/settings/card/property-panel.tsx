@@ -187,7 +187,7 @@ export function PropertyPanel({
             onChange(property.notionPropertyId, config);
             setDirty(false);
           }}
-          className="w-full rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-hover disabled:bg-stone-200 disabled:text-faint"
+          className="w-full rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-on-brand hover:bg-brand-hover disabled:bg-stone-200 disabled:text-faint"
         >
           {dirty ? "Lưu cấu hình" : "Đã lưu"}
         </button>
@@ -201,7 +201,7 @@ export function PropertyPanel({
 
 function Frame({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <aside className="flex h-full w-full flex-col overflow-y-auto rounded-lg border border-line bg-white p-4">
+    <aside className="flex h-full w-full flex-col overflow-y-auto rounded-3xl border border-line bg-surface p-5">
       <h2 className="mb-3 text-[11px] font-medium uppercase tracking-wide text-muted">{title}</h2>
       {children}
     </aside>

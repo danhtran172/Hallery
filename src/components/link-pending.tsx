@@ -15,7 +15,7 @@ export function CardPendingOverlay() {
   return (
     <span
       aria-hidden
-      className="pointer-events-none absolute inset-0 flex animate-[hallery-fade-in_150ms_ease-out_100ms_both] items-center justify-center rounded-xl bg-white/50"
+      className="pointer-events-none absolute inset-0 flex animate-[hallery-fade-in_150ms_ease-out_100ms_both] items-center justify-center rounded-card bg-surface/60"
     >
       <Spinner />
     </span>

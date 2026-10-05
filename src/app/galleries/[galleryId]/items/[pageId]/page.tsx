@@ -8,5 +8,6 @@ export default async function ItemDetailPage({
   const { galleryId, pageId } = await params;
   const { [RETURN_PARAM]: back } = await searchParams;
   const galleryHref = galleryHrefFromReturn(galleryId, back);
-  return <ItemDetailView galleryId={galleryId} pageId={pageId} galleryHref={galleryHref} />;
+  const viewId = typeof back === "string" ? new URLSearchParams(back).get("view") : null;
+  return <ItemDetailView galleryId={galleryId} pageId={pageId} galleryHref={galleryHref} viewId={viewId} />;
 }

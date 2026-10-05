@@ -22,7 +22,8 @@ export default async function DisplaySettingsPage({
   searchParams,
 }: PageProps<"/galleries/[galleryId]/settings/display">) {
   const { galleryId } = await params;
-  const { prop, view: viewParam } = await searchParams;
+  const { prop, view: viewParam, back } = await searchParams;
+  const backQuery = typeof back === "string" ? back : undefined;
   const gallery = await db.gallery.findUnique({
     where: { id: galleryId },
     include: {
@@ -89,11 +90,12 @@ export default async function DisplaySettingsPage({
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
+    <div className="mx-auto w-full max-w-5xl px-5 py-8 sm:px-8 sm:py-10">
       <SettingsHeader
         galleryId={galleryId}
         galleryName={gallery.name}
         viewId={view.id}
+        back={backQuery}
         active="display"
         description="Chọn cách mỗi property hiển thị trong Gallery và Card Detail — không đổi gì trong Notion, chỉ đổi cách Hallery trình bày lại giá trị."
       />
@@ -144,6 +146,7 @@ function PropertyEditor({
     notionPropertyType: string;
     resolvedType: string | null;
     displayConfig: string;
+    detailDisplayConfig: string;
     disabled: boolean;
   };
   isFirst: boolean;
@@ -158,7 +161,7 @@ function PropertyEditor({
     <div className="panel p-5">
       <div className="mb-5 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="truncate text-lg font-semibold text-ink">{display.nameOverride?.trim() || property.notionPropertyName}</h2>
+          <h2 className="display truncate text-xl text-ink">{display.nameOverride?.trim() || property.notionPropertyName}</h2>
           <span className="font-mono text-xs text-faint">
             {display.nameOverride?.trim() ? `${property.notionPropertyName} · ` : ""}
             {describePropertyType(property.notionPropertyType, property.resolvedType)}
@@ -177,7 +180,7 @@ function PropertyEditor({
       </div>
 
       {property.disabled ? (
-        <p className="mb-4 rounded-lg border border-dashed border-line-strong bg-canvas px-3 py-4 text-sm text-ink-soft">
+        <p className="mb-4 rounded-2xl border border-dashed border-line-strong bg-subtle px-4 py-4 text-sm text-ink-soft">
           Hallery không quản lý property này. Nó không lên card, không sắp xếp, lọc hay tìm kiếm được — coi như
           không tồn tại. Giá trị trong Notion vẫn nguyên vẹn và Notion vẫn quản lý bình thường.
         </p>

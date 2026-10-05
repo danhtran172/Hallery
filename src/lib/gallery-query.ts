@@ -136,7 +136,7 @@ function stringsOf(value: PropertyValue | undefined): string[] {
 }
 
 /** Case- and accent-insensitive form, so "pokemon" finds "Pokémon" and "do" finds "Đỏ". */
-const fold = (text: string) =>
+export const fold = (text: string) =>
   text
     .trim()
     .toLowerCase()

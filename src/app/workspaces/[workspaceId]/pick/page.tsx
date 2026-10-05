@@ -7,6 +7,9 @@ import { getNotionClient } from "@/lib/notion";
 import { classifyNotionError, NOTION_PROBLEM_COPY, type NotionProblem } from "@/lib/notion-errors";
 import { NOTION_CONNECTIONS_HELP_URL, NOTION_INTEGRATIONS_URL, notionPageUrl } from "@/lib/notion-url";
 import { DataSourcePicker, type PickableDataSource } from "./data-source-picker";
+import { getDataSourceEmoji } from "@/lib/notion-schema";
+import { Icon } from "@/components/icons";
+import { RetryButton } from "@/components/retry-button";
 
 export const metadata: Metadata = { title: "Chọn database" };
 
@@ -34,10 +37,7 @@ async function listSharedDataSources(accessToken: string): Promise<DataSourceObj
   }
 }
 
-function iconOf(source: DataSourceObjectResponse): string | null {
-  const icon = (source as { icon?: { type: string; emoji?: string } | null }).icon;
-  return icon?.type === "emoji" && icon.emoji ? icon.emoji : null;
-}
+const iconOf = getDataSourceEmoji;
 
 export default async function PickDatabasePage({ params, searchParams }: PageProps<"/workspaces/[workspaceId]/pick">) {
   const { workspaceId } = await params;
@@ -75,36 +75,39 @@ export default async function PickDatabasePage({ params, searchParams }: PagePro
           .sort((a, b) => Date.parse(b.editedAt) - Date.parse(a.editedAt));
 
   return (
-    <div className="mx-auto w-full max-w-2xl px-4 py-10 sm:px-6 sm:py-14">
-      <Link href="/" className="text-xs text-muted hover:text-ink hover:underline">
-        ← Trang chủ
+    <div className="mx-auto w-full max-w-3xl px-5 py-8 sm:px-10 sm:py-12">
+      <Link
+        href="/"
+        className="inline-flex items-center gap-1 rounded-full py-1 pr-2 text-[13px] text-muted transition-colors hover:text-ink"
+      >
+        <Icon name="arrow-left" className="size-4" />
+        Trang chủ
       </Link>
-      <p className="eyebrow mt-4">{workspace.name}</p>
-      <h1 className="mt-1 text-2xl font-semibold text-ink">Chọn database làm Gallery</h1>
-      <p className="mt-2 text-sm leading-relaxed text-ink-soft">
+      <p className="eyebrow mt-6">{workspace.name}</p>
+      <h1 className="display mt-2 text-3xl text-ink sm:text-4xl">Chọn database làm Gallery</h1>
+      <p className="mt-3 text-sm leading-relaxed text-ink-soft">
         Danh sách chỉ gồm database đã được chia sẻ với integration. Không thấy database cần dùng? Mở nó trong Notion →{" "}
         <b>•••</b> → <b>Connections</b> → chọn integration, rồi tải lại trang này.
       </p>
 
       {reconnected === "1" && (
-        <p role="status" className="mt-4 rounded-lg border border-brand-line bg-brand-soft px-4 py-3 text-sm text-brand-hover">
-          ✓ Đã cập nhật token. Các gallery của workspace này dùng token mới ngay.
+        <p role="status" className="mt-5 flex items-center gap-2 rounded-2xl bg-brand-soft px-4 py-3 text-sm text-brand-ink">
+          <Icon name="check" />
+          Đã cập nhật token. Các gallery của workspace này dùng token mới ngay.
         </p>
       )}
 
       {typeof result === "string" ? (
-        <div className="mt-8 rounded-xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-900">
+        <div className="notice mt-8 px-5 py-4">
           <p className="font-medium">{NOTION_PROBLEM_COPY[result].title}</p>
           <p className="mt-1">{NOTION_PROBLEM_COPY[result].body}</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {result === "unauthorized" && (
-              <Link href={`/connect?workspace=${workspace.id}`} className="btn btn-primary btn-sm">
+              <Link href={`/connect?workspace=${workspace.id}&return=${encodeURIComponent(`/workspaces/${workspace.id}/pick`)}`} className="btn btn-primary btn-sm">
                 Kết nối lại token
               </Link>
             )}
-            <a href={`/workspaces/${workspace.id}/pick`} className="btn btn-secondary btn-sm">
-              Thử lại
-            </a>
+            <RetryButton className="btn btn-secondary btn-sm" />
           </div>
         </div>
       ) : sources.length === 0 ? (
@@ -115,14 +118,14 @@ export default async function PickDatabasePage({ params, searchParams }: PagePro
             integration để chọn nhiều page một lúc.
           </p>
           <div className="flex flex-wrap justify-center gap-2">
-            <a href={`/workspaces/${workspace.id}/pick`} className="btn btn-primary btn-sm">
-              Tải lại
-            </a>
+            <RetryButton className="btn btn-primary btn-sm" />
             <a href={NOTION_INTEGRATIONS_URL} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">
-              Mở trang integration ↗
+              Mở trang integration
+              <Icon name="external" />
             </a>
             <a href={NOTION_CONNECTIONS_HELP_URL} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
-              Hướng dẫn ↗
+              Hướng dẫn
+              <Icon name="external" />
             </a>
           </div>
         </div>

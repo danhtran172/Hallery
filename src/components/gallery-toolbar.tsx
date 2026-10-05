@@ -24,6 +24,8 @@ import {
   type SortKey,
 } from "@/lib/gallery-query";
 import { saveGalleryViewQuery } from "@/app/galleries/[galleryId]/view-actions";
+import { Icon, type IconName } from "@/components/icons";
+import { useDismiss } from "@/lib/use-dismiss";
 
 export type ToolbarProperty = {
   notionPropertyId: string;
@@ -36,6 +38,8 @@ export type ToolbarProperty = {
 
 /** Operators that take no value, so the input is hidden for them. */
 const VALUELESS = new Set<FilterOperator>(["empty", "not_empty", "is_checked", "is_unchecked"]);
+
+type ViewQuery = Pick<GalleryQuery, "filters" | "sorts" | "groupBy">;
 
 /**
  * Search, filter, sort, group and random pick for a gallery.
@@ -65,40 +69,30 @@ export function GalleryToolbar({
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const [open, setOpen] = useState<"filter" | "sort" | null>(null);
+  const [open, setOpen] = useState<"filter" | "sort" | "group" | null>(null);
   const [draft, setDraft] = useState(query.search);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, startTransition] = useTransition();
-  const incomingViewState = JSON.stringify({ filters: query.filters, sorts: query.sorts, groupBy: query.groupBy });
+  const incoming: ViewQuery = { filters: query.filters, sorts: query.sorts, groupBy: query.groupBy };
+  const incomingViewState = JSON.stringify(incoming);
   const [lastViewState, setLastViewState] = useState(incomingViewState);
-  const [viewQuery, setViewQuery] = useState<Pick<GalleryQuery, "filters" | "sorts" | "groupBy">>({
-    filters: query.filters,
-    sorts: query.sorts,
-    groupBy: query.groupBy,
-  });
+  const [viewQuery, setViewQuery] = useState<ViewQuery>(incoming);
   if (lastViewState !== incomingViewState) {
     setLastViewState(incomingViewState);
-    setViewQuery({ filters: query.filters, sorts: query.sorts, groupBy: query.groupBy });
+    setViewQuery(incoming);
   }
   const activeQuery: GalleryQuery = { ...query, ...viewQuery };
   const wrapRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  useDismiss(wrapRef, open !== null, () => setOpen(null));
 
-  // Adjust the box when the URL changes underneath it — "Xoá hết", or the back button.
-  // Done during render rather than in an effect so no keystroke renders a stale value.
+  // Adjust the box when the URL changes underneath it — a cleared category, or the back
+  // button. Done during render rather than in an effect so no keystroke renders a stale value.
   const [lastSearch, setLastSearch] = useState(query.search);
   if (lastSearch !== query.search) {
     setLastSearch(query.search);
     setDraft(query.search);
   }
-
-  useEffect(() => {
-    if (!open) return;
-    function onDown(event: MouseEvent) {
-      if (!wrapRef.current?.contains(event.target as Node)) setOpen(null);
-    }
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
 
   /** Rewrites transient URL parameters, keeping the active view and category axis intact. */
   function commit(changes: Record<string, string | null>) {
@@ -122,13 +116,28 @@ export function GalleryToolbar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft]);
 
+  // "/" jumps to the search box, as in most apps with one — unless the reader is typing.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest("input, textarea, select, [contenteditable=true], [role=dialog]")) return;
+      // The detail popup and the search palette sit above the grid and own the keyboard.
+      if (document.querySelector("[aria-modal=true]")) return;
+      event.preventDefault();
+      searchRef.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
   const nameOf = (propertyId: string) =>
     properties.find((property) => property.notionPropertyId === propertyId)?.name ?? "?";
 
   const saveTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(saveTimer.current), []);
 
-  function persist(next: Pick<GalleryQuery, "filters" | "sorts" | "groupBy">, immediate = false) {
+  function persist(next: ViewQuery, immediate = false) {
     // Controls can change twice before a Server Component refresh returns. Keep an
     // optimistic query locally, otherwise the second save would overwrite the first.
     setViewQuery(next);
@@ -138,12 +147,15 @@ export function GalleryToolbar({
     window.clearTimeout(saveTimer.current);
     const save = () =>
       startTransition(async () => {
-        const result = await saveGalleryViewQuery(galleryId, viewId, next);
-        if (result.error) {
+        try {
+          const result = await saveGalleryViewQuery(galleryId, viewId, next);
+          if (!result.error) return router.refresh();
           setSaveError(result.error);
-          return;
+        } catch {
+          setSaveError("Không lưu được view. Thử lại sau giây lát.");
         }
-        router.refresh();
+        // Nothing was saved, so the controls go back to what the grid is really showing.
+        setViewQuery(incoming);
       });
     if (immediate) save();
     else saveTimer.current = window.setTimeout(save, 400);
@@ -151,6 +163,7 @@ export function GalleryToolbar({
 
   const setFilters = (filters: Filter[]) => persist({ ...viewQuery, filters });
   const setSorts = (sorts: SortKey[]) => persist({ ...viewQuery, sorts }, true);
+  const setGroup = (groupBy: string | null) => persist({ ...viewQuery, groupBy }, true);
 
   function pickRandom() {
     if (pickTargets.length === 0) return;
@@ -160,43 +173,42 @@ export function GalleryToolbar({
     router.push(`${pathname}/items/${target}${back ? `?${RETURN_PARAM}=${encodeURIComponent(back)}` : ""}`);
   }
 
-  const filtered = matchCount !== totalCount;
+  const toggle = (panel: "filter" | "sort" | "group") => setOpen(open === panel ? null : panel);
+  const filterCount = activeQuery.filters.filter(isFilterComplete).length;
 
   return (
-    <div ref={wrapRef} className="mb-5 flex flex-wrap items-center gap-2">
-      <div className="relative w-full sm:w-64">
-        <span aria-hidden className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-xs text-faint">
-          ⌕
-        </span>
+    <div ref={wrapRef} className="flex flex-wrap items-center gap-1.5">
+      <div className="relative w-full sm:w-52">
+        <Icon name="search" className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-faint" />
         <input
+          ref={searchRef}
           type="search"
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && draft) setDraft("");
+          }}
           placeholder="Tìm trong gallery"
           aria-label="Tìm trong gallery"
-          className="input input-sm pl-7"
+          className="h-8 w-full rounded-full bg-subtle pr-8 pl-9 text-[13px] text-ink ring-1 ring-line outline-none ring-inset transition-shadow placeholder:text-faint focus:bg-surface focus:ring-2 focus:ring-brand/40"
         />
+        {!draft && <kbd className="kbd pointer-events-none absolute top-1/2 right-2 -translate-y-1/2">/</kbd>}
       </div>
 
       <div className="relative">
-        <ToolbarButton active={activeQuery.filters.length > 0} onClick={() => setOpen(open === "filter" ? null : "filter")}>
-          Lọc{activeQuery.filters.length > 0 ? ` (${activeQuery.filters.length})` : ""}
+        <ToolbarButton icon="filter" active={filterCount > 0} expanded={open === "filter"} onClick={() => toggle("filter")}>
+          Lọc{filterCount > 0 ? ` · ${filterCount}` : ""}
         </ToolbarButton>
         {open === "filter" && (
           <Popover>
-            <FilterEditor
-              properties={properties}
-              filters={activeQuery.filters}
-              nameOf={nameOf}
-              onChange={setFilters}
-            />
+            <FilterEditor properties={properties} filters={activeQuery.filters} nameOf={nameOf} onChange={setFilters} />
           </Popover>
         )}
       </div>
 
       <div className="relative">
-        <ToolbarButton active={activeQuery.sorts.length > 0} onClick={() => setOpen(open === "sort" ? null : "sort")}>
-          Sắp xếp{activeQuery.sorts.length > 0 ? ` (${activeQuery.sorts.length})` : ""}
+        <ToolbarButton icon="sort" active={activeQuery.sorts.length > 0} expanded={open === "sort"} onClick={() => toggle("sort")}>
+          Sắp xếp{activeQuery.sorts.length > 0 ? ` · ${activeQuery.sorts.length}` : ""}
         </ToolbarButton>
         {open === "sort" && (
           <Popover>
@@ -205,50 +217,61 @@ export function GalleryToolbar({
         )}
       </div>
 
-      <label className="flex items-center gap-1.5 text-xs text-muted">
-        Nhóm
-        <select
-          value={activeQuery.groupBy ?? ""}
-          onChange={(event) =>
-            persist({ ...viewQuery, groupBy: event.target.value || null }, true)
-          }
-          className={`input input-sm w-auto max-w-44 ${activeQuery.groupBy ? "border-brand" : ""}`}
-        >
-          <option value="">Không</option>
-          {properties.map((property) => (
-            <option key={property.notionPropertyId} value={property.notionPropertyId}>
-              {property.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="relative">
+        <ToolbarButton icon="layers" active={Boolean(activeQuery.groupBy)} expanded={open === "group"} onClick={() => toggle("group")}>
+          {activeQuery.groupBy ? `Nhóm · ${nameOf(activeQuery.groupBy)}` : "Nhóm"}
+        </ToolbarButton>
+        {open === "group" && (
+          <Popover narrow>
+            <div role="listbox" aria-label="Nhóm theo" className="flex max-h-72 flex-col overflow-y-auto">
+              {[{ notionPropertyId: "", name: "Không nhóm" }, ...properties].map((property) => {
+                const selected = (activeQuery.groupBy ?? "") === property.notionPropertyId;
+                return (
+                  <button
+                    key={property.notionPropertyId || "none"}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    onClick={() => {
+                      setGroup(property.notionPropertyId || null);
+                      setOpen(null);
+                    }}
+                    className={`menu-item ${selected ? "font-medium text-ink" : ""}`}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{property.name}</span>
+                    {selected && <Icon name="check" className="size-4 text-brand-ink" />}
+                  </button>
+                );
+              })}
+            </div>
+          </Popover>
+        )}
+      </div>
 
       {randomPickEnabled && (
-        <ToolbarButton onClick={pickRandom} disabled={pickTargets.length === 0}>
-          🎲 Ngẫu nhiên
-        </ToolbarButton>
+        <button
+          type="button"
+          onClick={pickRandom}
+          disabled={pickTargets.length === 0}
+          aria-label="Mở một item ngẫu nhiên"
+          title="Mở một item ngẫu nhiên"
+          className="btn btn-ghost btn-sm btn-icon"
+        >
+          <Icon name="shuffle" />
+        </button>
       )}
 
-      <span className="ml-auto flex items-center gap-3">
-        {saving && <span className="text-xs text-faint">Đang lưu view…</span>}
-        {filtered && (
-          <span className="text-xs text-muted tabular-nums">
-            {matchCount} / {totalCount} item
+      <span className="flex items-center gap-2 pl-1 text-xs text-faint tabular-nums">
+        {saving && (
+          <span className="flex items-center gap-1.5">
+            <span className="size-3 animate-spin rounded-full border-2 border-brand/25 border-t-brand" />
+            Đang lưu view
           </span>
         )}
-        {(filtered || activeQuery.filters.length > 0 || activeQuery.sorts.length > 0 || activeQuery.groupBy) && (
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => {
-              setDraft("");
-              commit({ q: null });
-              persist({ filters: [], sorts: [], groupBy: null }, true);
-            }}
-            className="btn btn-ghost btn-sm"
-          >
-            Xoá hết
-          </button>
+        {!saving && matchCount !== totalCount && (
+          <span>
+            {matchCount} / {totalCount}
+          </span>
         )}
       </span>
       {saveError && <p className="basis-full text-xs text-danger">{saveError}</p>}
@@ -258,30 +281,45 @@ export function GalleryToolbar({
 
 function ToolbarButton({
   children,
+  icon,
   active,
-  disabled,
+  expanded,
   onClick,
 }: {
   children: React.ReactNode;
+  icon: IconName;
   active?: boolean;
-  disabled?: boolean;
+  expanded?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled}
+      aria-expanded={expanded}
       aria-pressed={active}
-      className={`btn btn-secondary btn-sm ${active ? "btn-active" : ""}`}
+      className={`btn btn-sm max-w-56 ${active ? "btn-secondary btn-active" : "btn-ghost"} ${expanded && !active ? "bg-subtle" : ""}`}
     >
-      {children}
+      <Icon name={icon} />
+      <span className="truncate">{children}</span>
     </button>
   );
 }
 
-function Popover({ children }: { children: React.ReactNode }) {
-  return <div className="popover absolute left-0 z-30 mt-1 w-[min(28rem,calc(100vw-2rem))] p-3">{children}</div>;
+function Popover({ children, narrow }: { children: React.ReactNode; narrow?: boolean }) {
+  // On a phone the button may sit anywhere along the row; the panel spans the screen instead
+  // of hanging off its right edge.
+  return (
+    <div
+      // Anchored by its right edge: the toolbar sits at the right of its row, and a panel
+      // hanging rightwards from "Lọc" ran off the screen.
+      className={`popover absolute top-full right-0 z-30 mt-2 p-3 max-sm:fixed max-sm:inset-x-3 max-sm:top-auto max-sm:w-auto ${
+        narrow ? "w-60 p-1.5" : "w-[30rem]"
+      }`}
+    >
+      {children}
+    </div>
+  );
 }
 
 /** One sort level: a drag handle, its rank, the property, and whatever controls follow. */
@@ -302,9 +340,7 @@ function SortRow({
   return (
     <div
       ref={dropRef}
-      className={`flex items-center gap-1.5 rounded-md ${isOver ? "bg-brand-soft" : ""} ${
-        isDragging ? "opacity-40" : ""
-      }`}
+      className={`flex items-center gap-1.5 rounded-xl p-1 ${isOver ? "bg-brand-soft" : ""} ${isDragging ? "opacity-40" : ""}`}
     >
       <button
         ref={dragRef}
@@ -312,13 +348,24 @@ function SortRow({
         {...attributes}
         type="button"
         aria-label={`Đổi thứ tự ${name}`}
-        className="shrink-0 cursor-grab px-0.5 text-faint hover:text-ink active:cursor-grabbing"
+        className="shrink-0 cursor-grab rounded-md p-0.5 text-faint hover:text-ink active:cursor-grabbing"
       >
-        ⠿
+        <Icon name="grip" className="size-4" />
       </button>
-      <span className="w-3 shrink-0 text-center text-[10px] text-faint">{index + 1}</span>
-      <span className="min-w-0 flex-1 truncate text-xs text-ink-soft">{name}</span>
+      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-subtle text-[10px] font-medium text-muted">
+        {index + 1}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-[13px] text-ink-soft">{name}</span>
       {children}
+    </div>
+  );
+}
+
+function PanelTitle({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <div className="mb-2 flex items-center justify-between gap-2 px-1">
+      <p className="text-xs font-medium text-muted">{children}</p>
+      {action}
     </div>
   );
 }
@@ -338,7 +385,18 @@ function FilterEditor({
 
   return (
     <div className="flex flex-col gap-2">
-      {filters.length === 0 && <p className="text-xs text-faint">Chưa có điều kiện nào.</p>}
+      <PanelTitle
+        action={
+          filters.length > 0 && (
+            <button type="button" onClick={() => onChange([])} className="text-xs text-muted hover:text-danger">
+              Xoá tất cả
+            </button>
+          )
+        }
+      >
+        Hiện item thoả mọi điều kiện — lưu vào view này
+      </PanelTitle>
+      {filters.length === 0 && <p className="px-1 text-[13px] text-faint">Chưa có điều kiện nào.</p>}
 
       {filters.map((filter, index) => {
         const property = properties.find((p) => p.notionPropertyId === filter.propertyId);
@@ -348,7 +406,7 @@ function FilterEditor({
         const pendingValue = !isFilterComplete(filter);
 
         return (
-          <div key={index} className="flex items-center gap-1.5">
+          <div key={index} className="flex flex-wrap items-center gap-1.5 sm:flex-nowrap">
             <select
               aria-label="Property"
               value={filter.propertyId}
@@ -360,7 +418,7 @@ function FilterEditor({
                   value: "",
                 });
               }}
-              className="input input-sm min-w-0 flex-1 px-1.5"
+              className="input input-sm min-w-0 flex-1"
             >
               {properties.map((p) => (
                 <option key={p.notionPropertyId} value={p.notionPropertyId}>
@@ -373,7 +431,7 @@ function FilterEditor({
               aria-label="Điều kiện"
               value={filter.operator}
               onChange={(event) => replace({ operator: event.target.value as FilterOperator })}
-              className="input input-sm w-auto shrink-0 px-1.5"
+              className="input input-sm w-auto shrink-0"
             >
               {operators.map((operator) => (
                 <option key={operator} value={operator}>
@@ -389,7 +447,7 @@ function FilterEditor({
                   value={filter.value ?? ""}
                   onChange={(event) => replace({ value: event.target.value })}
                   title={pendingValue ? "Chọn giá trị để áp dụng điều kiện này" : undefined}
-                  className={`input input-sm w-32 shrink-0 px-1.5 ${pendingValue ? "border-amber-400" : ""}`}
+                  className={`input input-sm w-32 shrink-0 ${pendingValue ? "border-warn" : ""}`}
                 >
                   <option value="">— chọn —</option>
                   {property.options.map((option) => (
@@ -407,7 +465,7 @@ function FilterEditor({
                   onChange={(event) => replace({ value: event.target.value })}
                   placeholder="Giá trị"
                   title={pendingValue ? "Nhập giá trị để áp dụng điều kiện này" : undefined}
-                  className={`input input-sm w-32 shrink-0 px-1.5 ${pendingValue ? "border-amber-400" : ""}`}
+                  className={`input input-sm w-32 shrink-0 ${pendingValue ? "border-warn" : ""}`}
                 />
               ))}
 
@@ -417,14 +475,14 @@ function FilterEditor({
               onClick={() => onChange(filters.filter((_, i) => i !== index))}
               className="btn btn-ghost btn-sm btn-icon shrink-0 hover:text-danger"
             >
-              ✕
+              <Icon name="x" />
             </button>
           </div>
         );
       })}
 
       {filters.some((filter) => !isFilterComplete(filter)) && (
-        <p className="text-[11px] text-amber-700">Điều kiện chưa có giá trị thì chưa được áp dụng.</p>
+        <p className="px-1 text-[11px] text-warn">Điều kiện chưa có giá trị thì chưa được áp dụng.</p>
       )}
 
       {first && (
@@ -436,9 +494,10 @@ function FilterEditor({
               { propertyId: first.notionPropertyId, operator: operatorsFor(first.configType)[0], value: "" },
             ])
           }
-          className="btn btn-ghost btn-sm self-start text-brand"
+          className="btn btn-ghost btn-sm self-start text-brand-ink"
         >
-          + Thêm điều kiện
+          <Icon name="plus" />
+          Thêm điều kiện
         </button>
       )}
     </div>
@@ -479,34 +538,45 @@ function SortEditor({
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      {sorts.length === 0 && <p className="text-xs text-faint">Chưa sắp xếp theo gì.</p>}
+    <div className="flex flex-col gap-1.5">
+      <PanelTitle
+        action={
+          sorts.length > 0 && (
+            <button type="button" onClick={() => onChange([])} className="text-xs text-muted hover:text-danger">
+              Bỏ sắp xếp
+            </button>
+          )
+        }
+      >
+        Mức trên quyết định trước — kéo để đổi thứ tự
+      </PanelTitle>
+      {sorts.length === 0 && <p className="px-1 text-[13px] text-faint">Đang theo thứ tự của Notion.</p>}
 
       <DndContext id="sort-levels" sensors={sensors} onDragEnd={handleDragEnd}>
         {sorts.map((sort, index) => (
           <SortRow key={sort.propertyId} sort={sort} index={index} name={nameOf(sort.propertyId)}>
-            <select
-              value={sort.direction}
-              onChange={(event) =>
-                onChange(
-                  sorts.map((entry, i) =>
-                    i === index ? { ...entry, direction: event.target.value as "asc" | "desc" } : entry,
-                  ),
-                )
-              }
-              aria-label={`Chiều sắp xếp ${nameOf(sort.propertyId)}`}
-              className="input input-sm w-auto shrink-0 px-1.5"
-            >
-              <option value="asc">Tăng dần</option>
-              <option value="desc">Giảm dần</option>
-            </select>
+            <div className="segmented shrink-0">
+              {(["asc", "desc"] as const).map((direction) => (
+                <button
+                  key={direction}
+                  type="button"
+                  aria-pressed={sort.direction === direction}
+                  onClick={() =>
+                    onChange(sorts.map((entry, i) => (i === index ? { ...entry, direction } : entry)))
+                  }
+                  aria-label={`${direction === "asc" ? "Tăng dần" : "Giảm dần"} theo ${nameOf(sort.propertyId)}`}
+                >
+                  {direction === "asc" ? "A → Z" : "Z → A"}
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               aria-label={`Bỏ sắp xếp theo ${nameOf(sort.propertyId)}`}
               onClick={() => onChange(sorts.filter((_, i) => i !== index))}
               className="btn btn-ghost btn-sm btn-icon shrink-0 hover:text-danger"
             >
-              ✕
+              <Icon name="x" />
             </button>
           </SortRow>
         ))}
@@ -519,7 +589,7 @@ function SortEditor({
             event.target.value && onChange([...sorts, { propertyId: event.target.value, direction: "asc" }])
           }
           aria-label="Thêm mức sắp xếp"
-          className="input input-sm w-auto self-start"
+          className="input input-sm mt-1 w-auto self-start"
         >
           <option value="">+ Thêm mức sắp xếp</option>
           {unused.map((property) => (

@@ -45,6 +45,12 @@ import { GalleryCard, type CardCoverModel } from "@/components/gallery-card";
 import { buildButtonConfigs, buildRelationLinks } from "@/lib/render-context";
 import { itemHref, type RenderContext } from "@/lib/property-render";
 import { shortHash } from "@/lib/short-hash";
+import { notionPageUrl } from "@/lib/notion-url";
+import { GalleryHeader, type SettingsLink } from "@/components/gallery-header";
+import { TrashedGalleryState } from "@/components/trashed-gallery";
+import { settingsHref } from "@/components/settings-header";
+import { Icon } from "@/components/icons";
+import { requestTime } from "@/lib/relative-time";
 import {
   coverSourceFingerprint,
   storedCoverCardUrl,
@@ -96,9 +102,13 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
       propertyConfigs: { orderBy: { sortOrder: "asc" } },
       categoryAxes: { orderBy: { sortOrder: "asc" } },
       views: { orderBy: { sortOrder: "asc" } },
+      parentGallery: { select: { id: true, name: true, deletedAt: true } },
+      notionCache: { select: { lastDeltaSyncAt: true, updatedAt: true } },
     },
   });
   if (!gallery) notFound();
+  // Trashed: the address still explains itself, but nothing here keeps syncing or writing.
+  if (gallery.deletedAt) return <TrashedGalleryState galleryId={galleryId} name={gallery.name} />;
   const views = await ensureGalleryViews(gallery);
   const problemContext = {
     workspaceId: gallery.workspaceId,
@@ -125,10 +135,11 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
   // Both only write when something changed. What each formula/rollup evaluates to is only
   // visible on a page value, and pages are already here — so it is learnt now rather than
   // with a request in Settings.
+  // Bookkeeping: a failure here costs a stale property list, never the page.
   await Promise.all([
     dataSource ? syncPropertyConfigs(galleryId, gallery.propertyConfigs, dataSource) : null,
     syncResolvedTypes(gallery.propertyConfigs, allPages[0]),
-  ]);
+  ]).catch((error) => console.error("Property config sync failed", error));
 
   // Category axes bucket and filter the pages already in hand — no extra Notion request.
   // Relation axes name other tables rather than values inside this one, so they drive the
@@ -314,7 +325,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
     const eager = list.filter((page) => eagerPageIds.has(page.id));
     const deferred = list.filter((page) => !eagerPageIds.has(page.id));
     return (
-      <div className="gallery-grid flex flex-wrap items-start gap-4" style={gridStyle}>
+      <div className="gallery-grid flex flex-wrap items-start" style={gridStyle}>
         {renderCards(eager)}
         {deferred.length > 0 && <DeferredCards>{renderCards(deferred)}</DeferredCards>}
       </div>
@@ -322,40 +333,108 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
   };
 
   const narrowed = isQueryActive(query) || Boolean(activeValue);
-  const settingsLinks = [
-    { href: `/galleries/${galleryId}/settings/display?view=${activeView.id}`, label: "Hiển thị" },
-    { href: `/galleries/${galleryId}/settings/card?view=${activeView.id}`, label: "Bố cục card" },
-    { href: `/galleries/${galleryId}/settings/category?view=${activeView.id}`, label: "Phân loại" },
+  const settings: SettingsLink[] = [
+    {
+      href: settingsHref(galleryId, "display", activeView.id, returnQuery),
+      label: "Hiển thị",
+      icon: "eye",
+      hint: "Định dạng từng property, số card mỗi hàng",
+    },
+    {
+      href: settingsHref(galleryId, "card", activeView.id, returnQuery),
+      label: "Bố cục card",
+      icon: "layout",
+      hint: "Ảnh bìa, khung card, Card Detail và form thêm",
+    },
+    {
+      href: settingsHref(galleryId, "category", activeView.id, returnQuery),
+      label: "Phân loại",
+      icon: "tag",
+      hint: "Thanh lọc nhanh theo select, tag, checkbox",
+    },
   ];
 
+  /** The current Gallery address minus some state — for "clear this" links in empty states. */
+  const hrefWithout = (...keys: string[]) => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(search)) {
+      if (typeof value === "string" && value !== "" && key !== "cardPage" && !keys.includes(key)) params.set(key, value);
+    }
+    const qs = params.toString();
+    return `/galleries/${galleryId}${qs ? `?${qs}` : ""}`;
+  };
+  const parent = gallery.parentGallery && !gallery.parentGallery.deletedAt ? gallery.parentGallery : null;
+  const syncedAt = gallery.notionCache ? (gallery.notionCache.lastDeltaSyncAt ?? gallery.notionCache.updatedAt) : null;
+
   return (
-    <div className="gallery-area w-full px-4 py-6 sm:px-6 sm:py-8">
-      <GallerySyncHeartbeat galleryId={galleryId} />
+    <div className="gallery-area w-full flex-1 px-5 py-6 sm:px-8 sm:py-8">
       {snapshot.syncProblem && <NotionProblemBanner problem={snapshot.syncProblem} context={problemContext} />}
 
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-        <div className="min-w-0">
-          <Link href="/" className="text-xs text-muted hover:text-ink hover:underline">
-            ← Tất cả gallery
-          </Link>
-          <h1 className="mt-1 truncate text-2xl font-semibold text-ink">{gallery.name}</h1>
-          <p className="text-sm text-muted">
-            {pages.length} item
-            {narrowed && pages.length !== allPages.length && ` · trong tổng ${allPages.length}`}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <nav aria-label="Cài đặt gallery" className="flex max-w-full items-center overflow-x-auto rounded-lg border border-line p-0.5">
-            {settingsLinks.map((link) => (
-              <Link key={link.href} href={link.href} className="btn btn-ghost btn-sm">
-                {link.label}
-              </Link>
-            ))}
+      <GalleryHeader
+        galleryId={galleryId}
+        name={gallery.name}
+        notionUrl={notionPageUrl(gallery.notionDatabaseId)}
+        settings={settings}
+        crumbs={
+          <nav aria-label="Vị trí" className="flex min-w-0 items-center gap-1 text-[13px] text-muted">
+            <Link href="/" className="rounded-md hover:text-ink">
+              Trang chủ
+            </Link>
+            {parent && (
+              <>
+                <Icon name="chevron-right" className="size-3.5 shrink-0 text-faint" />
+                <Link href={`/galleries/${parent.id}`} className="truncate rounded-md hover:text-ink">
+                  {parent.name}
+                </Link>
+              </>
+            )}
+            <Icon name="chevron-right" className="size-3.5 shrink-0 text-faint" />
+            <span className="truncate text-ink-soft">{gallery.workspace.name}</span>
           </nav>
-          <RelationGalleryMenu galleryId={galleryId} entries={relationGalleries} />
-          <CreateItemPopup galleryId={galleryId} fields={formFields} columns={formColumns} cover={formCover} />
-        </div>
-      </header>
+        }
+        meta={
+          <>
+            <span className="tabular-nums">
+              <b className="font-semibold text-ink-soft">{pages.length.toLocaleString("vi-VN")}</b> item
+              {narrowed && pages.length !== allPages.length && ` / ${allPages.length.toLocaleString("vi-VN")}`}
+            </span>
+            <span aria-hidden className="px-1 text-faint">
+              ·
+            </span>
+            <GallerySyncHeartbeat
+              galleryId={galleryId}
+              syncedAt={syncedAt ? syncedAt.getTime() : null}
+              renderedAt={requestTime()}
+            />
+          </>
+        }
+        actions={
+          <>
+            <RelationGalleryMenu galleryId={galleryId} entries={relationGalleries} />
+            <CreateItemPopup galleryId={galleryId} fields={formFields} columns={formColumns} cover={formCover} />
+          </>
+        }
+      />
+
+      {/* Sticky on wider screens so search and filters stay in reach down a long grid; on a
+          phone it would eat a fifth of the screen. */}
+      <div className="z-20 -mx-5 mb-5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-y border-line bg-surface/85 px-5 py-2.5 backdrop-blur-md sm:-mx-8 sm:px-8 md:sticky md:top-0">
+        <GalleryViewBar
+          galleryId={galleryId}
+          views={views.map((view) => ({ id: view.id, name: view.name }))}
+          activeViewId={activeView.id}
+        />
+        <GalleryToolbar
+          galleryId={galleryId}
+          viewId={activeView.id}
+          properties={toolbarProperties}
+          query={query}
+          matchCount={pages.length}
+          totalCount={categoryPages.length}
+          pickTargets={pages.map((page) => page.id)}
+          randomPickEnabled={galleryConfig.randomPick !== false}
+        />
+      </div>
 
       {activeAxis && buckets.length > 0 && (
         <CategoryBar
@@ -371,38 +450,41 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
         />
       )}
 
-      <GalleryViewBar
-        galleryId={galleryId}
-        views={views.map((view) => ({ id: view.id, name: view.name }))}
-        activeViewId={activeView.id}
-      />
-
-      <GalleryToolbar
-        galleryId={galleryId}
-        viewId={activeView.id}
-        properties={toolbarProperties}
-        query={query}
-        matchCount={pages.length}
-        totalCount={categoryPages.length}
-        pickTargets={pages.map((page) => page.id)}
-        randomPickEnabled={galleryConfig.randomPick !== false}
-      />
-
       {pages.length === 0 ? (
-        <p className="empty-state">
-          {allPages.length === 0
-            ? "Database này chưa có item nào. Bấm “+ Thêm item” để tạo item đầu tiên."
-            : isQueryActive(query)
-              ? "Không có item nào khớp tìm kiếm hoặc bộ lọc. Thử bỏ bớt điều kiện."
-              : "Không có item nào trong phân loại này."}
-        </p>
+        <div className="empty-state flex flex-col items-center gap-4">
+          <span className="flex size-12 items-center justify-center rounded-2xl bg-surface text-faint ring-1 ring-line">
+            <Icon name={allPages.length === 0 ? "image" : "search"} className="size-5" />
+          </span>
+          {allPages.length === 0 ? (
+            <p>Database này chưa có item nào — bấm “Thêm item” ở góc trên để tạo item đầu tiên.</p>
+          ) : query.search ? (
+            <>
+              <p>
+                Không có item nào khớp “<b className="text-ink-soft">{query.search}</b>”
+                {activeValue ? " trong phân loại này" : ""}.
+              </p>
+              <Link href={hrefWithout("q", "value")} scroll={false} className="btn btn-secondary btn-sm">
+                Xoá tìm kiếm{activeValue ? " và phân loại" : ""}
+              </Link>
+            </>
+          ) : activeValue && categoryPages.length === 0 ? (
+            <>
+              <p>Không có item nào trong phân loại này.</p>
+              <Link href={hrefWithout("value")} scroll={false} className="btn btn-secondary btn-sm">
+                Xem tất cả
+              </Link>
+            </>
+          ) : (
+            <p>Bộ lọc của view “{activeView.name}” không khớp item nào — chỉnh hoặc xoá điều kiện trong nút Lọc ở trên.</p>
+          )}
+        </div>
       ) : visibleGroups ? (
-        <div className="flex flex-col gap-8">
+        <div className="flex flex-col gap-10">
           {visibleGroups.map((group) => (
             <section key={group.key}>
-              <h2 className="mb-3 flex items-baseline gap-2 text-sm font-semibold text-ink-soft">
-                {group.label}
-                <span className="text-xs font-normal text-faint">
+              <h2 className="mb-4 flex items-baseline gap-2">
+                <span className="display text-lg text-ink">{group.label}</span>
+                <span className="rounded-full bg-subtle px-2 py-0.5 text-xs text-muted tabular-nums">
                   {group.pages.length === group.total ? group.total : `${group.pages.length} / ${group.total}`}
                 </span>
               </h2>
