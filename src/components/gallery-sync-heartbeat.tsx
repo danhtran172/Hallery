@@ -1,11 +1,18 @@
 "use client";
 
 import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 const HEARTBEAT_MS = 60 * 1000;
 
-/** Keeps a visible Gallery's local snapshot current without changing the reader's scroll position. */
+/**
+ * Keeps a visible Gallery's local snapshot current. When the sync reports that Notion had
+ * something new, the screen is refreshed in place — the scroll position and anything typed
+ * into the toolbar survive, because only the server-rendered data changes.
+ */
 export function GallerySyncHeartbeat({ galleryId }: { galleryId: string }) {
+  const router = useRouter();
+
   useEffect(() => {
     let intervalId: number | undefined;
     let inFlight = false;
@@ -15,12 +22,14 @@ export function GallerySyncHeartbeat({ galleryId }: { galleryId: string }) {
       if (disposed || document.visibilityState !== "visible" || inFlight) return;
       inFlight = true;
       try {
-        await fetch(`/api/galleries/${galleryId}/sync`, {
+        const response = await fetch(`/api/galleries/${galleryId}/sync`, {
           method: "POST",
           credentials: "same-origin",
           headers: { Accept: "application/json" },
           cache: "no-store",
         });
+        const result = response.ok ? ((await response.json()) as { changed?: boolean }) : null;
+        if (!disposed && result?.changed) router.refresh();
       } catch {
         // The next minute is the retry. The server has retained the last valid snapshot.
       } finally {
@@ -49,7 +58,7 @@ export function GallerySyncHeartbeat({ galleryId }: { galleryId: string }) {
       stop();
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [galleryId]);
+  }, [galleryId, router]);
 
   return null;
 }

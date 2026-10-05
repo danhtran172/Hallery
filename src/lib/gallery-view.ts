@@ -1,3 +1,4 @@
+import { db } from "@/lib/db";
 import type { GalleryConfig } from "@/lib/notion-cover";
 import { parseGalleryConfig } from "@/lib/notion-cover";
 import { parseGalleryQuery, type GalleryQuery } from "@/lib/gallery-query";
@@ -45,4 +46,33 @@ export function viewLayoutConfig(config: GalleryConfig): string {
 /** A convenient migration/creation seed, intentionally preserving only view-owned keys. */
 export function initialViewLayoutConfig(rawGalleryConfig: string): string {
   return viewLayoutConfig(parseGalleryConfig(rawGalleryConfig));
+}
+
+export const DEFAULT_VIEW_NAME = "Mặc định";
+
+/** The nested `create` that gives a brand-new Gallery its first view. */
+export function defaultViewCreate() {
+  return { create: { name: DEFAULT_VIEW_NAME, sortOrder: 0 } };
+}
+
+/**
+ * A Gallery's views, creating the default one when it has none.
+ *
+ * The views migration gave every Gallery that existed at the time one view, but nothing
+ * gave one to Galleries added afterwards — so a freshly picked database opened on a 404.
+ * Every reader goes through here, which also repairs any Gallery that slipped through.
+ */
+export async function ensureGalleryViews<T extends GalleryViewRecord>(
+  gallery: { id: string; displayConfig: string; views: T[] },
+): Promise<GalleryViewRecord[]> {
+  if (gallery.views.length > 0) return gallery.views;
+  const view = await db.galleryView.create({
+    data: {
+      galleryId: gallery.id,
+      name: DEFAULT_VIEW_NAME,
+      sortOrder: 0,
+      layoutConfig: initialViewLayoutConfig(gallery.displayConfig),
+    },
+  });
+  return [view];
 }

@@ -1,4 +1,5 @@
-import Link from "next/link";
+import type { Metadata } from "next";
+import { SettingsHeader } from "@/components/settings-header";
 import { notFound } from "next/navigation";
 import { isFullDataSource, isFullPage } from "@notionhq/client";
 import { db } from "@/lib/db";
@@ -24,8 +25,11 @@ import {
 } from "@/lib/notion-cover";
 import { plainTextValue } from "@/lib/property-text";
 import { parseFormDefaults } from "@/lib/create-form";
-import { parseViewLayoutConfig } from "@/lib/gallery-view";
+import { ensureGalleryViews, parseViewLayoutConfig } from "@/lib/gallery-view";
+import { isNotionAccessError } from "@/lib/notion-errors";
 import { CardLayoutEditor, type PreviewRecord } from "./card-layout-editor";
+
+export const metadata: Metadata = { title: "Bố cục card" };
 
 export default async function CardLayoutSettingsPage({
   params,
@@ -38,9 +42,9 @@ export default async function CardLayoutSettingsPage({
     include: { workspace: true, propertyConfigs: { orderBy: { sortOrder: "asc" } }, views: { orderBy: { sortOrder: "asc" } } },
   });
   if (!gallery) notFound();
+  const views = await ensureGalleryViews(gallery);
   const requestedViewId = typeof viewParam === "string" ? viewParam : null;
-  const view = gallery.views.find((entry) => entry.id === requestedViewId) ?? gallery.views[0];
-  if (!view) notFound();
+  const view = views.find((entry) => entry.id === requestedViewId) ?? views[0];
 
   const properties = cardEligibleProperties(gallery.propertyConfigs);
   const config = parseGalleryConfig(gallery.displayConfig);
@@ -75,26 +79,24 @@ export default async function CardLayoutSettingsPage({
     arrangement: "no-cover" as const,
   };
 
+  // The editor works without live data — it only loses its preview — so a Notion outage
+  // must not lock someone out of arranging their cards.
   const snapshot = await getGalleryNotionSnapshot({
     galleryId,
     dataSourceId: gallery.notionDataSourceId,
     accessToken: gallery.workspace.accessToken,
+  }).catch((error: unknown) => {
+    if (isNotionAccessError(error)) return null;
+    throw error;
   });
-  const preview = loadPreviewItems(snapshot);
+  const preview = snapshot ? loadPreviewItems(snapshot) : EMPTY_PREVIEW;
 
   return (
-    <div className="flex h-screen w-full flex-col px-6 py-6">
-      <div className="mb-4 shrink-0">
-        <Link href={`/galleries/${galleryId}?view=${view.id}`} className="text-xs text-stone-500 hover:underline">
-          ← {gallery.name}
-        </Link>
-        <h1 className="mt-1 text-xl font-semibold text-stone-900">Bố cục card</h1>
-      </div>
+    <div className="flex h-screen w-full flex-col px-4 py-5 sm:px-6">
+      <SettingsHeader galleryId={galleryId} galleryName={gallery.name} viewId={view.id} active="card" compact />
 
       {properties.length === 0 ? (
-        <p className="rounded-md border border-dashed border-stone-300 px-4 py-8 text-center text-sm text-stone-500">
-          Database này chưa có property nào ngoài tiêu đề để đưa lên card.
-        </p>
+        <p className="empty-state">Database này chưa có property nào ngoài tiêu đề để đưa lên card.</p>
       ) : (
         <CardLayoutEditor
           galleryId={galleryId}

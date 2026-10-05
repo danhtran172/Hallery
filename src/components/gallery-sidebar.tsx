@@ -8,6 +8,7 @@ import {
   KeyboardSensor,
   PointerSensor,
   useDraggable,
+  useDndContext,
   useDroppable,
   useSensor,
   useSensors,
@@ -16,6 +17,7 @@ import {
 } from "@dnd-kit/core";
 import { buildGalleryTree, filterTree, type GalleryNode, type GalleryTreeNode } from "@/lib/gallery-tree";
 import { nestGallery, reorderGallery, restoreGallery, trashGallery } from "@/app/sidebar-actions";
+import { LinkSpinner } from "@/components/link-pending";
 
 /** How long a drag must rest on a gallery before the drop means "put it inside". */
 const NEST_HOLD_MS = 1500;
@@ -69,6 +71,7 @@ export function GallerySidebar({
   );
   const [search, setSearch] = useState("");
   const [showTrash, setShowTrash] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [nestTarget, setNestTarget] = useState<string | null>(null);
   const holdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -115,51 +118,14 @@ export function GallerySidebar({
 
   const tree = filterTree(buildGalleryTree(galleries), search);
 
-  if (collapsed) {
-    return (
-      <aside className="flex w-12 shrink-0 flex-col items-center gap-2 border-r border-stone-200 bg-stone-50 py-3">
-        <button
-          type="button"
-          onClick={toggleCollapsed}
-          aria-label="Mở rộng thanh bên"
-          title="Mở rộng thanh bên"
-          className="rounded border border-stone-300 px-2 py-1 text-xs text-stone-600 hover:border-stone-500"
-        >
-          »
-        </button>
-        {galleries.slice(0, 12).map((gallery) => (
-          <Link
-            key={gallery.id}
-            href={`/galleries/${gallery.id}`}
-            title={gallery.name}
-            className={`flex h-8 w-8 items-center justify-center rounded text-xs ${
-              pathname.startsWith(`/galleries/${gallery.id}`)
-                ? "bg-emerald-600 text-white"
-                : "bg-white text-stone-600 hover:bg-stone-200"
-            }`}
-          >
-            {gallery.icon && !gallery.icon.startsWith("http") ? gallery.icon : gallery.name.slice(0, 1)}
-          </Link>
-        ))}
-      </aside>
-    );
-  }
-
-  return (
-    <aside className="flex w-60 shrink-0 flex-col gap-2 border-r border-stone-200 bg-stone-50 p-3">
+  /** The full list, shared by the desktop sidebar and the phone drawer. */
+  const content = (headerAction: React.ReactNode) => (
+    <>
       <div className="flex items-center justify-between">
-        <Link href="/" className="text-sm font-semibold text-emerald-800 hover:underline">
+        <Link href="/" className="px-1 text-sm font-semibold text-brand hover:underline">
           Hallery
         </Link>
-        <button
-          type="button"
-          onClick={toggleCollapsed}
-          aria-label="Thu gọn thanh bên"
-          title="Thu gọn thanh bên"
-          className="rounded border border-stone-300 px-1.5 py-0.5 text-xs text-stone-500 hover:border-stone-500"
-        >
-          «
-        </button>
+        {headerAction}
       </div>
 
       <input
@@ -167,7 +133,8 @@ export function GallerySidebar({
         value={search}
         onChange={(event) => setSearch(event.target.value)}
         placeholder="Tìm gallery"
-        className="w-full rounded-md border border-stone-300 px-2 py-1 text-xs outline-none focus:border-emerald-600"
+        aria-label="Tìm gallery"
+        className="input input-sm"
       />
 
       {/* The id must be given, not generated: dnd-kit numbers contexts from a counter that
@@ -183,55 +150,162 @@ export function GallerySidebar({
       >
         <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
           {tree.length === 0 && (
-            <p className="px-1 py-2 text-[11px] text-stone-400">
+            <p className="px-1 py-2 text-[11px] text-faint">
               {search ? "Không có gallery nào khớp." : "Chưa có gallery nào."}
             </p>
           )}
           {tree.map((node) => (
-            <SidebarNode
-              key={node.id}
-              node={node}
-              depth={0}
-              pathname={pathname}
-              nestTarget={nestTarget}
-            />
+            <SidebarNode key={node.id} node={node} depth={0} pathname={pathname} nestTarget={nestTarget} />
           ))}
           <RootDropZone active={tree.length > 0} />
         </div>
       </DndContext>
 
-      <div className="border-t border-stone-200 pt-2">
+      <div className="flex flex-col gap-1 border-t border-line pt-2">
+        <Link href="/" className="btn btn-ghost btn-sm justify-start">
+          + Thêm gallery
+        </Link>
+        <Link href="/connect" className="btn btn-ghost btn-sm justify-start">
+          Kết nối Notion
+        </Link>
+      </div>
+
+      <div className="border-t border-line pt-2">
         <button
           type="button"
           onClick={() => setShowTrash((v) => !v)}
           aria-expanded={showTrash}
-          className="flex w-full items-center justify-between text-[11px] font-medium uppercase tracking-wide text-stone-400 hover:text-stone-600"
+          className="flex w-full items-center justify-between px-1 text-[11px] font-medium tracking-wide text-faint uppercase hover:text-ink-soft"
         >
           <span>Thùng rác</span>
           <span>{trashed.length}</span>
         </button>
         {showTrash && (
           <div className="mt-1 flex flex-col gap-1">
-            {trashed.length === 0 && <p className="px-1 text-[11px] text-stone-400">Trống.</p>}
+            {trashed.length === 0 && <p className="px-1 text-[11px] text-faint">Trống.</p>}
             {trashed.map((gallery) => (
-              <div key={gallery.id} className="flex items-center gap-1 px-1 text-xs text-stone-500">
+              <div key={gallery.id} className="flex items-center gap-1 px-1 text-xs text-muted">
                 <span className="min-w-0 flex-1 truncate line-through">{gallery.name}</span>
                 <button
                   type="button"
                   onClick={() => restoreGallery(gallery.id)}
-                  className="shrink-0 text-[11px] text-emerald-700 hover:underline"
+                  className="shrink-0 text-[11px] text-brand hover:underline"
                 >
                   Khôi phục
                 </button>
               </div>
             ))}
-            <p className="px-1 pt-1 text-[10px] leading-snug text-stone-400">
+            <p className="px-1 pt-1 text-[10px] leading-snug text-faint">
               Bỏ vào đây chỉ là Hallery ngừng quản lý. Database trong Notion không hề bị đụng tới.
             </p>
           </div>
         )}
       </div>
-    </aside>
+    </>
+  );
+
+  // Phones get a slim bar and a drawer: a 15rem sidebar left a 375px screen with room for
+  // half a card.
+  const mobile = (
+    <>
+      <div className="sticky top-0 z-30 flex h-12 shrink-0 items-center gap-2 border-b border-line bg-canvas/95 px-3 backdrop-blur md:hidden">
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          aria-label="Mở danh sách gallery"
+          aria-expanded={mobileOpen}
+          className="btn btn-ghost btn-sm btn-icon text-base"
+        >
+          ☰
+        </button>
+        <Link href="/" className="text-sm font-semibold text-brand">
+          Hallery
+        </Link>
+      </div>
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true" aria-label="Danh sách gallery">
+          <div className="absolute inset-0 bg-stone-900/40" onClick={() => setMobileOpen(false)} />
+          <aside
+            className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col gap-2 bg-canvas p-3 shadow-xl"
+            // Following any link inside means the reader is done with the drawer.
+            onClick={(event) => {
+              if ((event.target as HTMLElement).closest("a")) setMobileOpen(false);
+            }}
+          >
+            {content(
+              <button
+                type="button"
+                onClick={() => setMobileOpen(false)}
+                aria-label="Đóng"
+                className="btn btn-ghost btn-sm btn-icon text-base"
+              >
+                ×
+              </button>,
+            )}
+          </aside>
+        </div>
+      )}
+    </>
+  );
+
+  if (!collapsed) {
+    return (
+      <>
+        {mobile}
+        <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col gap-2 border-r border-line bg-canvas p-3 md:flex">
+          {content(
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              aria-label="Thu gọn thanh bên"
+              title="Thu gọn thanh bên"
+              className="btn btn-ghost btn-sm btn-icon"
+            >
+              «
+            </button>,
+          )}
+        </aside>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {mobile}
+      <aside className="sticky top-0 hidden h-screen w-12 shrink-0 flex-col items-center gap-2 border-r border-line bg-canvas py-3 md:flex">
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-label="Mở rộng thanh bên"
+          title="Mở rộng thanh bên"
+          className="btn btn-ghost btn-sm btn-icon"
+        >
+          »
+        </button>
+        <div className="flex min-h-0 flex-1 flex-col items-center gap-1.5 overflow-y-auto">
+          {galleries
+            .filter((gallery) => !gallery.parentGalleryId)
+            .map((gallery) => (
+              <Link
+                key={gallery.id}
+                href={`/galleries/${gallery.id}`}
+                title={gallery.name}
+                aria-label={gallery.name}
+                className={`flex size-8 shrink-0 items-center justify-center rounded-md text-xs font-medium ${
+                  pathname.startsWith(`/galleries/${gallery.id}`)
+                    ? "bg-brand text-white"
+                    : "bg-surface text-ink-soft hover:bg-stone-200"
+                }`}
+              >
+                {gallery.icon && !gallery.icon.startsWith("http") ? gallery.icon : gallery.name.slice(0, 1).toUpperCase()}
+              </Link>
+            ))}
+        </div>
+        <Link href="/connect" title="Kết nối Notion" aria-label="Kết nối Notion" className="btn btn-ghost btn-sm btn-icon">
+          +
+        </Link>
+      </aside>
+    </>
   );
 }
 
@@ -256,8 +330,8 @@ function SidebarNode({
       <div
         ref={dropRef}
         style={{ paddingLeft: depth * 12 }}
-        className={`group flex items-center gap-1 rounded ${
-          willNest ? "bg-emerald-100 ring-1 ring-emerald-500" : isOver ? "bg-stone-200" : ""
+        className={`group flex items-center gap-1 rounded-md ${
+          willNest ? "bg-brand-soft ring-1 ring-brand" : isOver ? "bg-stone-200" : ""
         } ${isDragging ? "opacity-40" : ""}`}
       >
         <button
@@ -266,26 +340,34 @@ function SidebarNode({
           {...attributes}
           type="button"
           aria-label={`Di chuyển ${node.name}`}
-          className="shrink-0 cursor-grab px-0.5 text-stone-300 hover:text-stone-500 active:cursor-grabbing"
+          className="shrink-0 cursor-grab px-0.5 text-line-strong hover:text-muted active:cursor-grabbing"
         >
           ⠿
         </button>
         <Link
           href={`/galleries/${node.id}`}
-          className={`min-w-0 flex-1 truncate rounded px-1 py-1 text-xs ${
-            active ? "bg-emerald-600 font-medium text-white" : "text-stone-700 hover:bg-stone-200"
+          aria-current={active ? "page" : undefined}
+          className={`flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-xs ${
+            active ? "bg-brand font-medium text-white" : "text-ink-soft hover:bg-stone-200"
           }`}
         >
-          {node.icon && !node.icon.startsWith("http") ? `${node.icon} ` : ""}
-          {node.name}
-          {node.autoAdded && <span className="ml-1 text-[10px] opacity-60">liên kết</span>}
+          <span className="min-w-0 flex-1 truncate">
+            {node.icon && !node.icon.startsWith("http") ? `${node.icon} ` : ""}
+            {node.name}
+            {node.autoAdded && <span className="ml-1 text-[10px] opacity-60">liên kết</span>}
+          </span>
+          <LinkSpinner />
         </Link>
         <button
           type="button"
-          onClick={() => trashGallery(node.id)}
+          onClick={() => {
+            if (window.confirm(`Bỏ “${node.name}” vào thùng rác? Có thể khôi phục lại; Notion không bị đụng tới.`)) {
+              void trashGallery(node.id);
+            }
+          }}
           aria-label={`Bỏ ${node.name} vào thùng rác`}
           title="Bỏ vào thùng rác"
-          className="shrink-0 px-1 text-[11px] text-stone-300 opacity-0 hover:text-red-600 group-hover:opacity-100"
+          className="shrink-0 px-1 text-[11px] text-line-strong opacity-0 group-hover:opacity-100 hover:text-danger focus-visible:opacity-100"
         >
           ✕
         </button>
@@ -307,14 +389,16 @@ function SidebarNode({
 /** Somewhere to drop a sub-gallery so it climbs back out to the top level. */
 function RootDropZone({ active }: { active: boolean }) {
   const { setNodeRef, isOver } = useDroppable({ id: "root" });
+  // Only meaningful mid-drag; at rest it was a permanent line of instructions.
+  const { active: dragging } = useDndContext();
   if (!active) return null;
 
   return (
     <div
       ref={setNodeRef}
-      className={`mt-1 rounded border border-dashed px-2 py-1.5 text-center text-[10px] ${
-        isOver ? "border-emerald-600 bg-emerald-50 text-emerald-700" : "border-stone-200 text-stone-400"
-      }`}
+      className={`mt-1 rounded-md border border-dashed px-2 py-1.5 text-center text-[10px] transition-opacity ${
+        dragging ? "opacity-100" : "pointer-events-none opacity-0"
+      } ${isOver ? "border-brand bg-brand-soft text-brand" : "border-line text-faint"}`}
     >
       Thả vào đây để đưa ra ngoài cùng
     </div>

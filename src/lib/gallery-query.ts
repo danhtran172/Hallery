@@ -1,5 +1,6 @@
 import type { PageObjectResponse } from "@notionhq/client";
 import { plainTextValue } from "@/lib/property-text";
+import { propertyById } from "@/lib/page-properties";
 
 /**
  * Filter, sort, search and grouping over the rows a Gallery already holds.
@@ -67,9 +68,7 @@ export const OPERATOR_LABELS: Record<FilterOperator, string> = {
   after: "sau ngày",
 };
 
-function propertyOf(page: PageObjectResponse, propertyId: string): PropertyValue | undefined {
-  return Object.values(page.properties).find((property) => property.id === propertyId);
-}
+const propertyOf = propertyById;
 
 /** Numeric reading of a value, or null when it has none. Formulas and rollups count. */
 function numberOf(value: PropertyValue | undefined): number | null {
@@ -77,28 +76,53 @@ function numberOf(value: PropertyValue | undefined): number | null {
   if (value.type === "number") return value.number;
   if (value.type === "formula" && value.formula.type === "number") return value.formula.number;
   if (value.type === "rollup" && value.rollup.type === "number") return value.rollup.number;
-  const parsed = Number(plainTextValue(value));
-  return Number.isFinite(parsed) && plainTextValue(value).trim() !== "" ? parsed : null;
+  // Only text can still be read as a number; a date or checkbox rendered as text cannot.
+  if (value.type !== "rich_text" && value.type !== "title" && !(value.type === "formula" && value.formula.type === "string")) {
+    return null;
+  }
+  const text = plainTextValue(value).trim();
+  if (text === "") return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isoOf(value: PropertyValue | undefined): string | undefined {
+  if (!value) return undefined;
+  return value.type === "date"
+    ? value.date?.start
+    : value.type === "created_time"
+      ? value.created_time
+      : value.type === "last_edited_time"
+        ? value.last_edited_time
+        : value.type === "formula" && value.formula.type === "date"
+          ? value.formula.date?.start
+          : value.type === "rollup" && value.rollup.type === "date"
+            ? value.rollup.date?.start
+            : undefined;
 }
 
 /** Date reading of a value as a timestamp, or null. */
 function dateOf(value: PropertyValue | undefined): number | null {
-  if (!value) return null;
-  const iso =
-    value.type === "date"
-      ? value.date?.start
-      : value.type === "created_time"
-        ? value.created_time
-        : value.type === "last_edited_time"
-          ? value.last_edited_time
-          : value.type === "formula" && value.formula.type === "date"
-            ? value.formula.date?.start
-            : value.type === "rollup" && value.rollup.type === "date"
-              ? value.rollup.date?.start
-              : undefined;
+  const iso = isoOf(value);
   if (!iso) return null;
   const time = new Date(iso).getTime();
   return Number.isFinite(time) ? time : null;
+}
+
+/**
+ * The calendar day a value falls on, as `yyyy-mm-dd`, in the reader's local time.
+ *
+ * A date-only value already is one. A date-time is converted to local time first: comparing
+ * UTC midnights put anything after 17:00 in Vietnam on the following day, so "đúng ngày"
+ * and "sau ngày" disagreed with what the card showed.
+ */
+export function dayKeyOf(iso: string): string | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return null;
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
 }
 
 /** Comparable strings for a value — several for multi-select, none when empty. */
@@ -111,13 +135,30 @@ function stringsOf(value: PropertyValue | undefined): string[] {
   return text === "" ? [] : [text];
 }
 
-const fold = (text: string) => text.trim().toLowerCase();
+/** Case- and accent-insensitive form, so "pokemon" finds "Pokémon" and "do" finds "Đỏ". */
+const fold = (text: string) =>
+  text
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/đ/g, "d");
 
-/** Whole days, so "đúng ngày" matches a date regardless of the time on it. */
-const DAY_MS = 24 * 60 * 60 * 1000;
-const startOfDay = (time: number) => Math.floor(time / DAY_MS) * DAY_MS;
+const sameText = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** Operators that compare against nothing, so they apply even with no value entered. */
+const VALUELESS_OPERATORS = new Set<FilterOperator>(["empty", "not_empty", "is_checked", "is_unchecked"]);
+
+/**
+ * A condition still being written — a property picked, no value yet — narrows nothing.
+ * Applying it anyway emptied the whole grid the moment "+ Thêm điều kiện" was pressed.
+ */
+export function isFilterComplete(filter: Filter): boolean {
+  return VALUELESS_OPERATORS.has(filter.operator) || (filter.value ?? "").trim() !== "";
+}
 
 export function matchesFilter(page: PageObjectResponse, filter: Filter): boolean {
+  if (!isFilterComplete(filter)) return true;
   const value = propertyOf(page, filter.propertyId);
   const strings = stringsOf(value);
   const needle = fold(filter.value ?? "");
@@ -135,19 +176,23 @@ export function matchesFilter(page: PageObjectResponse, filter: Filter): boolean
       return strings.some((entry) => fold(entry).includes(needle));
     case "not_contains":
       return !strings.some((entry) => fold(entry).includes(needle));
+    // Equality keeps accents: "Xem" and "Xém" are different options, even if a search for
+    // either should find both.
     case "is":
-      return strings.some((entry) => fold(entry) === needle);
+      return strings.some((entry) => sameText(entry, filter.value ?? ""));
     case "is_not":
-      return !strings.some((entry) => fold(entry) === needle);
+      return !strings.some((entry) => sameText(entry, filter.value ?? ""));
     default:
       break;
   }
 
   if (filter.operator === "on" || filter.operator === "before" || filter.operator === "after") {
-    const actual = dateOf(value);
-    const target = filter.value ? new Date(filter.value).getTime() : NaN;
-    if (actual === null || !Number.isFinite(target)) return false;
-    if (filter.operator === "on") return startOfDay(actual) === startOfDay(target);
+    const iso = isoOf(value);
+    const actual = iso ? dayKeyOf(iso) : null;
+    const target = filter.value ? dayKeyOf(filter.value) : null;
+    if (actual === null || target === null) return false;
+    // yyyy-mm-dd strings order the same way the days do.
+    if (filter.operator === "on") return actual === target;
     return filter.operator === "before" ? actual < target : actual > target;
   }
 
@@ -218,34 +263,48 @@ export function moveItem<T>(list: T[], from: number, to: number): T[] {
 export function sortPages(pages: PageObjectResponse[], keys: SortKey[]): PageObjectResponse[] {
   if (keys.length === 0) return pages;
 
-  return [...pages].sort((left, right) => {
-    for (const key of keys) {
-      const a = propertyOf(left, key.propertyId);
-      const b = propertyOf(right, key.propertyId);
+  // Each page's sort values are read once up front rather than on every comparison — a sort
+  // makes n·log n comparisons, and reading a value means formatting it.
+  const rows = pages.map((page) => ({
+    page,
+    values: keys.map((key) => sortValueOf(propertyOf(page, key.propertyId))),
+  }));
 
-      const aNum = numberOf(a) ?? dateOf(a);
-      const bNum = numberOf(b) ?? dateOf(b);
+  rows.sort((left, right) => {
+    for (let index = 0; index < keys.length; index += 1) {
+      const a = left.values[index];
+      const b = right.values[index];
       let comparison: number;
 
-      if (aNum !== null && bNum !== null) {
-        comparison = aNum - bNum;
-      } else if (aNum !== null || bNum !== null) {
+      if (typeof a === "number" && typeof b === "number") {
+        comparison = a - b;
+      } else if (typeof a === "number" || typeof b === "number") {
         // One side has no comparable value: it sorts last in either direction.
-        return aNum === null ? 1 : -1;
+        if (a === "" || b === "") return a === "" ? 1 : -1;
+        comparison = typeof a === "number" ? -1 : 1;
       } else {
-        const aText = stringsOf(a).join(", ");
-        const bText = stringsOf(b).join(", ");
-        if (aText === "" || bText === "") {
-          if (aText === bText) continue;
-          return aText === "" ? 1 : -1;
+        if (a === "" || b === "") {
+          if (a === b) continue;
+          return a === "" ? 1 : -1;
         }
-        comparison = aText.localeCompare(bText, "vi");
+        comparison = collator.compare(a, b);
       }
 
-      if (comparison !== 0) return key.direction === "desc" ? -comparison : comparison;
+      if (comparison !== 0) return keys[index].direction === "desc" ? -comparison : comparison;
     }
     return 0;
   });
+
+  return rows.map((row) => row.page);
+}
+
+const collator = new Intl.Collator("vi", { numeric: true, sensitivity: "base" });
+
+/** What a value sorts by: a number (numbers, dates, ticks) or text, with "" meaning empty. */
+function sortValueOf(value: PropertyValue | undefined): number | string {
+  if (value?.type === "checkbox") return value.checkbox ? 1 : 0;
+  if (value?.type === "formula" && value.formula.type === "boolean") return value.formula.boolean ? 1 : 0;
+  return numberOf(value) ?? dateOf(value) ?? stringsOf(value).join(", ");
 }
 
 /* ── Group ───────────────────────────────────────────────────────────────── */

@@ -15,6 +15,7 @@ import {
 import {
   OPERATOR_LABELS,
   RETURN_PARAM,
+  isFilterComplete,
   moveItem,
   operatorsFor,
   type Filter,
@@ -109,7 +110,8 @@ export function GalleryToolbar({
       else next.set(key, value);
     }
     const search = next.toString();
-    router.push(search ? `${pathname}?${search}` : pathname);
+    // Replace, not push: every pause in typing would otherwise become a Back step.
+    router.replace(search ? `${pathname}?${search}` : pathname, { scroll: false });
   }
 
   // Debounced so the grid does not re-render on every keystroke.
@@ -123,23 +125,32 @@ export function GalleryToolbar({
   const nameOf = (propertyId: string) =>
     properties.find((property) => property.notionPropertyId === propertyId)?.name ?? "?";
 
-  function persist(next: Pick<GalleryQuery, "filters" | "sorts" | "groupBy">) {
+  const saveTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(saveTimer.current), []);
+
+  function persist(next: Pick<GalleryQuery, "filters" | "sorts" | "groupBy">, immediate = false) {
     // Controls can change twice before a Server Component refresh returns. Keep an
     // optimistic query locally, otherwise the second save would overwrite the first.
     setViewQuery(next);
     setSaveError(null);
-    startTransition(async () => {
-      const result = await saveGalleryViewQuery(galleryId, viewId, next);
-      if (result.error) {
-        setSaveError(result.error);
-        return;
-      }
-      router.refresh();
-    });
+    // Typing a filter value used to save the view and re-render the Gallery on every
+    // keystroke. Saves now wait for a pause; picks from a list still land at once.
+    window.clearTimeout(saveTimer.current);
+    const save = () =>
+      startTransition(async () => {
+        const result = await saveGalleryViewQuery(galleryId, viewId, next);
+        if (result.error) {
+          setSaveError(result.error);
+          return;
+        }
+        router.refresh();
+      });
+    if (immediate) save();
+    else saveTimer.current = window.setTimeout(save, 400);
   }
 
   const setFilters = (filters: Filter[]) => persist({ ...viewQuery, filters });
-  const setSorts = (sorts: SortKey[]) => persist({ ...viewQuery, sorts });
+  const setSorts = (sorts: SortKey[]) => persist({ ...viewQuery, sorts }, true);
 
   function pickRandom() {
     if (pickTargets.length === 0) return;
@@ -153,13 +164,19 @@ export function GalleryToolbar({
 
   return (
     <div ref={wrapRef} className="mb-5 flex flex-wrap items-center gap-2">
-      <input
-        type="search"
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        placeholder="Tìm trong gallery"
-        className="w-56 rounded-md border border-stone-300 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-600"
-      />
+      <div className="relative w-full sm:w-64">
+        <span aria-hidden className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-xs text-faint">
+          ⌕
+        </span>
+        <input
+          type="search"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder="Tìm trong gallery"
+          aria-label="Tìm trong gallery"
+          className="input input-sm pl-7"
+        />
+      </div>
 
       <div className="relative">
         <ToolbarButton active={activeQuery.filters.length > 0} onClick={() => setOpen(open === "filter" ? null : "filter")}>
@@ -188,14 +205,14 @@ export function GalleryToolbar({
         )}
       </div>
 
-      <label className="flex items-center gap-1.5 text-xs text-stone-500">
+      <label className="flex items-center gap-1.5 text-xs text-muted">
         Nhóm
         <select
           value={activeQuery.groupBy ?? ""}
           onChange={(event) =>
-            persist({ ...viewQuery, groupBy: event.target.value || null })
+            persist({ ...viewQuery, groupBy: event.target.value || null }, true)
           }
-          className="rounded-md border border-stone-300 px-1.5 py-1 text-xs outline-none focus:border-emerald-600"
+          className={`input input-sm w-auto max-w-44 ${activeQuery.groupBy ? "border-brand" : ""}`}
         >
           <option value="">Không</option>
           {properties.map((property) => (
@@ -212,25 +229,29 @@ export function GalleryToolbar({
         </ToolbarButton>
       )}
 
-      <span className="ml-auto text-xs text-stone-500">
-        {filtered ? `${matchCount} / ${totalCount} item` : `${totalCount} item`}
+      <span className="ml-auto flex items-center gap-3">
+        {saving && <span className="text-xs text-faint">Đang lưu view…</span>}
+        {filtered && (
+          <span className="text-xs text-muted tabular-nums">
+            {matchCount} / {totalCount} item
+          </span>
+        )}
+        {(filtered || activeQuery.filters.length > 0 || activeQuery.sorts.length > 0 || activeQuery.groupBy) && (
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => {
+              setDraft("");
+              commit({ q: null });
+              persist({ filters: [], sorts: [], groupBy: null }, true);
+            }}
+            className="btn btn-ghost btn-sm"
+          >
+            Xoá hết
+          </button>
+        )}
       </span>
-
-      {(filtered || activeQuery.filters.length > 0 || activeQuery.sorts.length > 0 || activeQuery.groupBy) && (
-        <button
-          type="button"
-          disabled={saving}
-          onClick={() => {
-            setDraft("");
-            commit({ q: null });
-            persist({ filters: [], sorts: [], groupBy: null });
-          }}
-          className="text-xs text-stone-500 underline hover:text-stone-800"
-        >
-          Xoá hết
-        </button>
-      )}
-      {saveError && <p className="basis-full text-xs text-red-700">{saveError}</p>}
+      {saveError && <p className="basis-full text-xs text-danger">{saveError}</p>}
     </div>
   );
 }
@@ -251,11 +272,8 @@ function ToolbarButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`rounded-md border px-2.5 py-1.5 text-xs font-medium disabled:opacity-40 ${
-        active
-          ? "border-emerald-600 bg-emerald-50 text-emerald-800"
-          : "border-stone-300 text-stone-700 hover:border-stone-500"
-      }`}
+      aria-pressed={active}
+      className={`btn btn-secondary btn-sm ${active ? "btn-active" : ""}`}
     >
       {children}
     </button>
@@ -263,11 +281,7 @@ function ToolbarButton({
 }
 
 function Popover({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="absolute left-0 z-30 mt-1 w-[26rem] rounded-lg border border-stone-200 bg-white p-3 shadow-lg">
-      {children}
-    </div>
-  );
+  return <div className="popover absolute left-0 z-30 mt-1 w-[min(28rem,calc(100vw-2rem))] p-3">{children}</div>;
 }
 
 /** One sort level: a drag handle, its rank, the property, and whatever controls follow. */
@@ -288,7 +302,7 @@ function SortRow({
   return (
     <div
       ref={dropRef}
-      className={`flex items-center gap-1.5 rounded ${isOver ? "bg-emerald-50" : ""} ${
+      className={`flex items-center gap-1.5 rounded-md ${isOver ? "bg-brand-soft" : ""} ${
         isDragging ? "opacity-40" : ""
       }`}
     >
@@ -298,12 +312,12 @@ function SortRow({
         {...attributes}
         type="button"
         aria-label={`Đổi thứ tự ${name}`}
-        className="shrink-0 cursor-grab px-0.5 text-stone-400 active:cursor-grabbing"
+        className="shrink-0 cursor-grab px-0.5 text-faint hover:text-ink active:cursor-grabbing"
       >
         ⠿
       </button>
-      <span className="w-3 shrink-0 text-center text-[10px] text-stone-400">{index + 1}</span>
-      <span className="min-w-0 flex-1 truncate text-xs text-stone-700">{name}</span>
+      <span className="w-3 shrink-0 text-center text-[10px] text-faint">{index + 1}</span>
+      <span className="min-w-0 flex-1 truncate text-xs text-ink-soft">{name}</span>
       {children}
     </div>
   );
@@ -324,17 +338,19 @@ function FilterEditor({
 
   return (
     <div className="flex flex-col gap-2">
-      {filters.length === 0 && <p className="text-xs text-stone-400">Chưa có điều kiện nào.</p>}
+      {filters.length === 0 && <p className="text-xs text-faint">Chưa có điều kiện nào.</p>}
 
       {filters.map((filter, index) => {
         const property = properties.find((p) => p.notionPropertyId === filter.propertyId);
         const operators = operatorsFor(property?.configType ?? "rich_text");
         const replace = (next: Partial<Filter>) =>
           onChange(filters.map((entry, i) => (i === index ? { ...entry, ...next } : entry)));
+        const pendingValue = !isFilterComplete(filter);
 
         return (
           <div key={index} className="flex items-center gap-1.5">
             <select
+              aria-label="Property"
               value={filter.propertyId}
               onChange={(event) => {
                 const nextProperty = properties.find((p) => p.notionPropertyId === event.target.value);
@@ -344,7 +360,7 @@ function FilterEditor({
                   value: "",
                 });
               }}
-              className="min-w-0 flex-1 rounded border border-stone-300 px-1 py-1 text-xs"
+              className="input input-sm min-w-0 flex-1 px-1.5"
             >
               {properties.map((p) => (
                 <option key={p.notionPropertyId} value={p.notionPropertyId}>
@@ -354,9 +370,10 @@ function FilterEditor({
             </select>
 
             <select
+              aria-label="Điều kiện"
               value={filter.operator}
               onChange={(event) => replace({ operator: event.target.value as FilterOperator })}
-              className="shrink-0 rounded border border-stone-300 px-1 py-1 text-xs"
+              className="input input-sm w-auto shrink-0 px-1.5"
             >
               {operators.map((operator) => (
                 <option key={operator} value={operator}>
@@ -368,11 +385,13 @@ function FilterEditor({
             {!VALUELESS.has(filter.operator) &&
               (property?.options?.length ? (
                 <select
+                  aria-label="Giá trị"
                   value={filter.value ?? ""}
                   onChange={(event) => replace({ value: event.target.value })}
-                  className="w-28 shrink-0 rounded border border-stone-300 px-1 py-1 text-xs"
+                  title={pendingValue ? "Chọn giá trị để áp dụng điều kiện này" : undefined}
+                  className={`input input-sm w-32 shrink-0 px-1.5 ${pendingValue ? "border-amber-400" : ""}`}
                 >
-                  <option value="">—</option>
+                  <option value="">— chọn —</option>
                   {property.options.map((option) => (
                     <option key={option} value={option}>
                       {option}
@@ -381,10 +400,14 @@ function FilterEditor({
                 </select>
               ) : (
                 <input
+                  aria-label="Giá trị"
                   type={property?.configType === "date" ? "date" : "text"}
+                  inputMode={property?.configType === "number" ? "decimal" : undefined}
                   value={filter.value ?? ""}
                   onChange={(event) => replace({ value: event.target.value })}
-                  className="w-28 shrink-0 rounded border border-stone-300 px-1 py-1 text-xs"
+                  placeholder="Giá trị"
+                  title={pendingValue ? "Nhập giá trị để áp dụng điều kiện này" : undefined}
+                  className={`input input-sm w-32 shrink-0 px-1.5 ${pendingValue ? "border-amber-400" : ""}`}
                 />
               ))}
 
@@ -392,13 +415,17 @@ function FilterEditor({
               type="button"
               aria-label={`Bỏ điều kiện ${nameOf(filter.propertyId)}`}
               onClick={() => onChange(filters.filter((_, i) => i !== index))}
-              className="shrink-0 px-1 text-stone-400 hover:text-red-600"
+              className="btn btn-ghost btn-sm btn-icon shrink-0 hover:text-danger"
             >
               ✕
             </button>
           </div>
         );
       })}
+
+      {filters.some((filter) => !isFilterComplete(filter)) && (
+        <p className="text-[11px] text-amber-700">Điều kiện chưa có giá trị thì chưa được áp dụng.</p>
+      )}
 
       {first && (
         <button
@@ -409,7 +436,7 @@ function FilterEditor({
               { propertyId: first.notionPropertyId, operator: operatorsFor(first.configType)[0], value: "" },
             ])
           }
-          className="self-start text-xs text-emerald-700 hover:underline"
+          className="btn btn-ghost btn-sm self-start text-brand"
         >
           + Thêm điều kiện
         </button>
@@ -453,7 +480,7 @@ function SortEditor({
 
   return (
     <div className="flex flex-col gap-2">
-      {sorts.length === 0 && <p className="text-xs text-stone-400">Chưa sắp xếp theo gì.</p>}
+      {sorts.length === 0 && <p className="text-xs text-faint">Chưa sắp xếp theo gì.</p>}
 
       <DndContext id="sort-levels" sensors={sensors} onDragEnd={handleDragEnd}>
         {sorts.map((sort, index) => (
@@ -467,7 +494,8 @@ function SortEditor({
                   ),
                 )
               }
-              className="shrink-0 rounded border border-stone-300 px-1 py-1 text-xs"
+              aria-label={`Chiều sắp xếp ${nameOf(sort.propertyId)}`}
+              className="input input-sm w-auto shrink-0 px-1.5"
             >
               <option value="asc">Tăng dần</option>
               <option value="desc">Giảm dần</option>
@@ -476,7 +504,7 @@ function SortEditor({
               type="button"
               aria-label={`Bỏ sắp xếp theo ${nameOf(sort.propertyId)}`}
               onClick={() => onChange(sorts.filter((_, i) => i !== index))}
-              className="shrink-0 px-1 text-stone-400 hover:text-red-600"
+              className="btn btn-ghost btn-sm btn-icon shrink-0 hover:text-danger"
             >
               ✕
             </button>
@@ -490,7 +518,8 @@ function SortEditor({
           onChange={(event) =>
             event.target.value && onChange([...sorts, { propertyId: event.target.value, direction: "asc" }])
           }
-          className="self-start rounded border border-stone-300 px-1.5 py-1 text-xs"
+          aria-label="Thêm mức sắp xếp"
+          className="input input-sm w-auto self-start"
         >
           <option value="">+ Thêm mức sắp xếp</option>
           {unused.map((property) => (

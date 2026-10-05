@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isFullDataSource, isFullPage } from "@notionhq/client";
 import { db } from "@/lib/db";
-import { getGalleryNotionSnapshot } from "@/lib/gallery-notion-cache";
+import { getGalleryNotionSnapshot, snapshotPage, type GalleryNotionSnapshot } from "@/lib/gallery-notion-cache";
+import { isNotionAccessError } from "@/lib/notion-errors";
+import { NotionProblemState } from "@/components/notion-problem";
 import { getNotionClient } from "@/lib/notion";
 import { getPageIcon, getPageTitle, getTitlePropertyName } from "@/lib/notion-schema";
 import { EDITABLE_PROPERTY_TYPES, READONLY_PROPERTY_TYPES } from "@/lib/notion-write";
@@ -10,6 +12,8 @@ import { parseDisplayConfig } from "@/lib/display-config";
 import { createDefaultCardLayout, isRoundCover, parseCardLayout, resolveCardLayout } from "@/lib/card-layout";
 import { parseGalleryConfig, resolveCoverUrl, resolveDetailCoverShape, resolveDetailWidth } from "@/lib/notion-cover";
 import { coverFileExists, coverSourceFingerprint, storedCoverDetailUrl, storedCoverUrl } from "@/lib/cover-store";
+import { buildButtonConfigs, buildRelationLinks } from "@/lib/render-context";
+import type { RenderContext } from "@/lib/property-render";
 import { ItemDetail, type FieldData } from "./item-detail";
 
 /** The record body shared by its full page and its gallery popup. */
@@ -29,17 +33,31 @@ export async function ItemDetailView({
   });
   if (!gallery) notFound();
 
-  const snapshot = await getGalleryNotionSnapshot({
-    galleryId,
-    dataSourceId: gallery.notionDataSourceId,
-    accessToken: gallery.workspace.accessToken,
-  });
+  const problemContext = {
+    workspaceId: gallery.workspaceId,
+    notionDatabaseId: gallery.notionDatabaseId,
+    retryHref: `/galleries/${galleryId}/items/${pageId}`,
+  };
+  let snapshot: GalleryNotionSnapshot;
+  try {
+    snapshot = await getGalleryNotionSnapshot({
+      galleryId,
+      dataSourceId: gallery.notionDataSourceId,
+      accessToken: gallery.workspace.accessToken,
+    });
+  } catch (error) {
+    if (!isNotionAccessError(error)) throw error;
+    return <NotionProblemState problem={error.problem} title={gallery.name} context={problemContext} />;
+  }
   const dataSourceRes = snapshot.dataSourceRes;
-  const notion = getNotionClient(gallery.workspace.accessToken);
-  const fromSnapshot = snapshot.queryRes.results.find((result) => result.id === pageId);
+  // Nearly always in the snapshot. A page added in Notion moments ago may not be yet, and
+  // costs one request; one that no longer exists is a 404 rather than a crash.
   const pageRes =
-    fromSnapshot && isFullPage(fromSnapshot) ? fromSnapshot : await notion.pages.retrieve({ page_id: pageId });
-  if (!isFullPage(pageRes) || !isFullDataSource(dataSourceRes)) notFound();
+    snapshotPage(snapshot, pageId) ??
+    (await getNotionClient(gallery.workspace.accessToken)
+      .pages.retrieve({ page_id: pageId })
+      .catch(() => null));
+  if (!pageRes || !isFullPage(pageRes) || !isFullDataSource(dataSourceRes)) notFound();
 
   const titlePropertyName = getTitlePropertyName(dataSourceRes.properties);
   const title = getPageTitle(pageRes, titlePropertyName);
@@ -108,27 +126,72 @@ export async function ItemDetailView({
       ? storedCoverDetailUrl(pageId, cached.checkedAt.getTime(), cached.detailFile)
       : null;
 
+  const titleValue = titlePropertyName ? pageRes.properties[titlePropertyName] : undefined;
+  const titleField: FieldData | null =
+    titleValue && titlePropertyName
+      ? {
+          propertyId: titleValue.id,
+          name: titlePropertyName,
+          type: "title",
+          value: titleValue,
+          editable: true,
+          readonly: false,
+          displayConfig: {},
+        }
+      : null;
+
+  const renderContext: RenderContext = {
+    galleryId,
+    pageId: pageRes.id,
+    surface: "detail",
+    relations: await buildRelationLinks({
+      workspaceId: gallery.workspaceId,
+      dataSource: dataSourceRes,
+      pages: [pageRes],
+      crawl: true,
+    }),
+    buttons: buildButtonConfigs(gallery.propertyConfigs),
+  };
+
   return (
-    <div className={galleryHref ? "mx-auto px-6 py-12" : "w-full px-1 py-1"} style={{ maxWidth: resolveDetailWidth(galleryConfig) }}>
+    <div
+      className={galleryHref ? "mx-auto w-full px-4 py-8 sm:px-6 sm:py-12" : "w-full"}
+      style={{ maxWidth: resolveDetailWidth(galleryConfig) }}
+    >
       {galleryHref && (
-        <Link href={galleryHref} className="text-xs text-stone-500 hover:underline">
+        <Link href={galleryHref} className="text-xs text-muted hover:text-ink hover:underline">
           ← {gallery.name}
         </Link>
       )}
-      <div className={galleryHref ? "mt-2 mb-6 flex items-center gap-3" : "mb-6 flex items-center gap-3"}>
-        {icon && <span className="text-3xl leading-none">{icon.length <= 4 ? icon : "📄"}</span>}
-        <h1 className="text-2xl font-semibold text-stone-900">{title}</h1>
+      <div className={`${galleryHref ? "mt-2" : "pr-10"} mb-5 flex items-center gap-3`}>
+        <PageIcon icon={icon} />
+        <h1 className="min-w-0 text-2xl font-semibold break-words text-ink">{title}</h1>
       </div>
       <ItemDetail
         galleryId={galleryId}
-        pageId={pageId}
+        pageId={pageRes.id}
+        titleField={titleField}
         fields={fields}
         layout={layout}
         coverUrl={localDetailUrl ?? coverSourceUrl}
         coverRatio={coverShape.ratio.replace(":", " / ")}
         coverRound={isRoundCover(coverShape.aspect)}
         notionUrl={pageRes.url}
+        renderContext={renderContext}
       />
     </div>
+  );
+}
+
+/** A page's Notion icon: an emoji as text, an uploaded or external image as a picture. */
+function PageIcon({ icon }: { icon: string | null }) {
+  if (!icon) return null;
+  if (!/^https?:\/\//.test(icon)) return <span className="text-3xl leading-none">{icon}</span>;
+  return (
+    <span
+      aria-hidden
+      className="size-8 shrink-0 rounded bg-contain bg-center bg-no-repeat"
+      style={{ backgroundImage: `url(${JSON.stringify(icon)})` }}
+    />
   );
 }

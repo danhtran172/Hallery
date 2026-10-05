@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import type { DisplayConfig } from "@/lib/display-config";
+import { parseDisplayConfig, type DisplayConfig } from "@/lib/display-config";
+import { parseNativeButton, type NativeButtonConfig } from "@/lib/native-button";
 import {
   DEFAULT_CARDS_PER_ROW,
   MAX_CARDS_PER_ROW,
@@ -21,7 +22,12 @@ export async function saveDisplayConfig(
   configType: string,
   formData: FormData,
 ) {
-  const config: DisplayConfig = {};
+  // Only the formatting keys belong to this form. The rest — a rename made in the card
+  // editor, a native button's actions — used to be wiped by every save here.
+  const existing = await db.propertyConfig.findUnique({ where: { id: propertyConfigId }, select: { displayConfig: true } });
+  if (!existing) return;
+  const config: DisplayConfig = parseDisplayConfig(existing.displayConfig);
+  for (const key of ["kind", "max", "prefix", "suffix", "label"] as const) delete config[key];
   const propertyType = configType;
 
   if (propertyType === "rich_text") {
@@ -50,15 +56,45 @@ export async function saveDisplayConfig(
     config.suffix = String(formData.get("suffix") ?? "");
   }
 
+  // The rename travels with every save of this form; an emptied one goes back to Notion's name.
+  if (formData.has("nameOverride")) {
+    const name = String(formData.get("nameOverride") ?? "").trim();
+    if (name) config.nameOverride = name.slice(0, 120);
+    else delete config.nameOverride;
+  }
+
   await db.propertyConfig.update({
     where: { id: propertyConfigId },
     data: { displayConfig: JSON.stringify(config) },
   });
 
-  revalidatePath(`/galleries/${galleryId}`);
-  revalidatePath(`/galleries/${galleryId}/items/[pageId]`, "page");
-  revalidatePath(`/galleries/${galleryId}/settings/display`);
-  revalidatePath(`/galleries/${galleryId}/settings/card`);
+  revalidateProperty(galleryId);
+}
+
+/**
+ * Stores the actions a Notion button property runs in Hallery. Only value writes can be
+ * configured (see lib/native-button), so saving one never reaches Notion at all.
+ */
+export async function saveNativeButton(
+  galleryId: string,
+  propertyConfigId: string,
+  button: NativeButtonConfig | null,
+): Promise<{ error: string | null }> {
+  const existing = await db.propertyConfig.findFirst({
+    where: { id: propertyConfigId, galleryId },
+    select: { displayConfig: true, notionPropertyType: true },
+  });
+  if (!existing) return { error: "Property không còn tồn tại." };
+  if (existing.notionPropertyType !== "button") return { error: "Chỉ gán hành động cho property kiểu Button." };
+
+  const config = parseDisplayConfig(existing.displayConfig);
+  const parsed = button ? parseNativeButton(button) : null;
+  if (parsed) config.button = parsed;
+  else delete config.button;
+
+  await db.propertyConfig.update({ where: { id: propertyConfigId }, data: { displayConfig: JSON.stringify(config) } });
+  revalidateProperty(galleryId);
+  return { error: null };
 }
 
 export async function saveGalleryGridSettings(galleryId: string, viewId: string, formData: FormData) {

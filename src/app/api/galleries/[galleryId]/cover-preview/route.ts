@@ -1,5 +1,4 @@
 import type { NextRequest } from "next/server";
-import { isFullPage } from "@notionhq/client";
 import { resolveContentImage } from "@/lib/content-image-cache";
 import {
   clearHostCooldowns,
@@ -12,7 +11,7 @@ import {
   storedCoverThumbnailUrl,
 } from "@/lib/cover-store";
 import { db } from "@/lib/db";
-import { getGalleryNotionSnapshot } from "@/lib/gallery-notion-cache";
+import { getGalleryNotionSnapshot, snapshotPage } from "@/lib/gallery-notion-cache";
 import { parseGalleryConfig, CONTENT_IMAGE, resolveCoverUrl } from "@/lib/notion-cover";
 import { parseViewLayoutConfig } from "@/lib/gallery-view";
 
@@ -38,9 +37,7 @@ async function resolveCoverSource(galleryId: string, pageId: string, viewId: str
     dataSourceId: gallery.notionDataSourceId,
     accessToken: gallery.workspace.accessToken,
   });
-  const page = snapshot.queryRes.results.find(
-    (result): result is Parameters<typeof resolveCoverUrl>[0] => isFullPage(result) && result.id === pageId,
-  );
+  const page = snapshotPage(snapshot, pageId);
   if (!page) return { fullUrl: null, storedFile: null };
 
   return { fullUrl: resolveCoverUrl(page, config.coverSource), storedFile: null };

@@ -1,26 +1,216 @@
 @import "tailwindcss";
 
+/*
+ * Hallery's design tokens. Components reach for these names (bg-brand, text-ink,
+ * border-line …) rather than raw palette steps, so one change here restyles the app —
+ * Phase 8's colour presets only have to swap this block.
+ *
+ * Light only for now: the old dark-mode override flipped the page black while every
+ * component still painted dark text, which left whole screens unreadable.
+ */
+@theme {
+  --color-brand: #047857;
+  --color-brand-hover: #065f46;
+  --color-brand-soft: #ecfdf5;
+  --color-brand-line: #a7f3d0;
+
+  --color-ink: #1c1917;
+  --color-ink-soft: #44403c;
+  --color-muted: #78716c;
+  --color-faint: #a8a29e;
+
+  --color-line: #e7e5e4;
+  --color-line-strong: #d6d3d1;
+  --color-canvas: #fafaf9;
+  --color-surface: #ffffff;
+
+  --color-danger: #b91c1c;
+  --color-danger-soft: #fef2f2;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  color-scheme: light;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+@layer components {
+  /* ── Buttons ─────────────────────────────────────────────────────────── */
+  .btn {
+    @apply inline-flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-3 text-sm font-medium whitespace-nowrap transition-colors select-none;
+    @apply focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand;
+    @apply disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-sm {
+    @apply h-7 px-2.5 text-xs;
+  }
+  .btn-icon {
+    @apply w-8 px-0;
+  }
+  .btn-sm.btn-icon {
+    @apply w-7;
+  }
+  .btn-primary {
+    @apply bg-brand text-white hover:bg-brand-hover;
+  }
+  .btn-secondary {
+    @apply border border-line-strong bg-surface text-ink-soft hover:border-muted hover:text-ink;
+  }
+  .btn-ghost {
+    @apply text-ink-soft hover:bg-stone-100 hover:text-ink;
+  }
+  .btn-danger {
+    @apply border border-line-strong bg-surface text-danger hover:border-danger hover:bg-danger-soft;
+  }
+  .btn-active {
+    @apply border-brand bg-brand-soft text-brand-hover hover:border-brand hover:text-brand-hover;
+  }
+
+  /* ── Form controls ───────────────────────────────────────────────────── */
+  .input {
+    @apply h-9 w-full min-w-0 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink transition-colors outline-none;
+    @apply placeholder:text-faint focus:border-brand focus:ring-2 focus:ring-brand/15;
+    @apply disabled:bg-canvas disabled:text-faint;
+  }
+  .input-sm {
+    @apply h-8 px-2.5 text-xs;
+  }
+  textarea.input {
+    @apply h-auto py-2 leading-relaxed;
+  }
+  select.input {
+    @apply pr-8;
+  }
+  .field-label {
+    @apply mb-1 block text-xs font-medium text-muted;
+  }
+  .field-hint {
+    @apply mt-1 block text-xs text-faint;
+  }
+
+  /* ── Surfaces ────────────────────────────────────────────────────────── */
+  .panel {
+    @apply rounded-xl border border-line bg-surface;
+  }
+  .popover {
+    @apply rounded-lg border border-line bg-surface shadow-lg shadow-stone-900/5;
+  }
+  .empty-state {
+    @apply rounded-xl border border-dashed border-line-strong px-6 py-12 text-center text-sm text-muted;
+  }
+
+  /*
+   * ── Gallery cards ───────────────────────────────────────────────────────
+   * Short names on purpose: a card's classes are sent twice per card (HTML and the RSC
+   * payload) for up to a hundred cards, so long utility lists added up to kilobytes.
+   */
+  .g-card {
+    @apply relative flex shrink-0 flex-col overflow-hidden rounded-xl border border-line bg-surface transition-[border-color,box-shadow];
+    @apply hover:border-brand/60 hover:shadow-md hover:shadow-stone-900/5;
+  }
+  .g-card-link {
+    @apply absolute inset-0 z-10 rounded-xl;
+  }
+  .g-body {
+    @apply pointer-events-none relative;
+  }
+  /* Anything clickable inside a card rises above the card's whole-surface link. */
+  .g-ia {
+    @apply pointer-events-auto relative z-20;
+  }
+  .g-a {
+    @apply text-brand underline decoration-brand/30 underline-offset-2 hover:decoration-brand;
+  }
+  .g-row {
+    @apply flex min-w-0 items-baseline gap-2;
+  }
+  .g-label {
+    @apply max-w-[45%] shrink-0 truncate text-xs text-faint;
+  }
+  .g-value {
+    @apply min-w-0 flex-1 truncate;
+  }
+
+  /* ── Small text ──────────────────────────────────────────────────────── */
+  .eyebrow {
+    @apply text-xs font-medium tracking-wide text-brand uppercase;
+  }
+  .link {
+    @apply text-brand underline-offset-2 hover:underline;
+  }
+}
+
+/* A visible focus ring for keyboard users everywhere, without one on mouse clicks. */
+:focus-visible {
+  outline-color: var(--color-brand);
+}
+
+/*
+ * The Gallery grid. "Cards per row" is what the owner set for a wide screen; narrower
+ * containers cap it so a card never shrinks below readable. Container queries rather than
+ * media queries, because the sidebar takes a different share of the window when collapsed.
+ */
+.gallery-area {
+  container-type: inline-size;
+}
+.gallery-grid {
+  --cols: var(--cards-per-row, 4);
+  --card-base: calc((100% - (var(--cols) - 1) * 1rem) / var(--cols));
+}
+@container (max-width: 1099px) {
+  .gallery-grid {
+    --cols: min(var(--cards-per-row, 4), 4);
+  }
+}
+@container (max-width: 859px) {
+  .gallery-grid {
+    --cols: min(var(--cards-per-row, 4), 3);
+  }
+}
+@container (max-width: 619px) {
+  .gallery-grid {
+    --cols: min(var(--cards-per-row, 4), 2);
+  }
+}
+@container (max-width: 379px) {
+  .gallery-grid {
+    --cols: 1;
+  }
+}
+
+@keyframes hallery-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes hallery-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #f5f5f4 25%, #e7e5e4 50%, #f5f5f4 75%);
+  background-size: 200% 100%;
+  animation: hallery-shimmer 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
 }

@@ -28,7 +28,7 @@ export function CardCover({
   pageId,
   initialX,
   initialY,
-  sourceUrl,
+  hasSource,
   initialPreviewUrl,
   initialImageUrl,
 }: {
@@ -41,8 +41,12 @@ export function CardCover({
   pageId: string;
   initialX: number;
   initialY: number;
-  /** Known page/property cover source from the Gallery's batch manifest. Undefined means content-image. */
-  sourceUrl?: string | null;
+  /**
+   * Whether the page has a picture at all, from the Gallery's batch manifest. Undefined
+   * means not known yet (a content image nobody has looked for). Only the flag travels:
+   * the signed URL behind it was 1.6 KB per card of payload the browser never used.
+   */
+  hasSource?: boolean;
   /** A source-matched local 64px WebP preview from the same manifest. */
   initialPreviewUrl?: string;
   /** A source-matched local 320px WebP card derivative from the same manifest. */
@@ -114,14 +118,14 @@ export function CardCover({
         if (!entries.some((e) => e.isIntersecting)) return;
         observer.disconnect();
 
-        if (sourceUrl !== undefined) {
-          fullUrlRef.current = initialImageUrl ?? sourceUrl;
+        if (hasSource !== undefined) {
+          fullUrlRef.current = initialImageUrl ?? null;
           if (initialPreviewUrl && fullUrlRef.current) {
             setPreviewUrl(initialPreviewUrl);
             setFailed(false);
             return;
           }
-          if (!sourceUrl) return;
+          if (!hasSource) return;
         }
 
         fetch(`/api/galleries/${galleryId}/cover-preview?pageId=${encodeURIComponent(pageId)}&view=${encodeURIComponent(viewId)}`)
@@ -147,7 +151,7 @@ export function CardCover({
       cancelled = true;
       observer.disconnect();
     };
-  }, [galleryId, initialImageUrl, initialPreviewUrl, pageId, sourceUrl, viewId, loadFullImage]);
+  }, [galleryId, initialImageUrl, initialPreviewUrl, pageId, hasSource, viewId, loadFullImage]);
 
   // Ctrl arms repositioning; without it the cover stays click-through so the card link works.
   useEffect(() => {

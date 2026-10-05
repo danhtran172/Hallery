@@ -1,3 +1,4 @@
+import { connection } from "next/server";
 import { db } from "@/lib/db";
 import { GallerySidebar } from "@/components/gallery-sidebar";
 
@@ -13,6 +14,9 @@ import { GallerySidebar } from "@/components/gallery-sidebar";
  * where everything reachable belongs.
  */
 export async function AppShell({ children }: { children: React.ReactNode }) {
+  // The gallery list lives in SQLite, which Next cannot see changing. Without this the
+  // production build froze the dashboard and sidebar at whatever existed at build time.
+  await connection();
   // Every workspace, not just the first: the sidebar has to list whatever the reader might
   // be looking at, and a gallery missing from it looks deleted.
   const [galleries, trashed] = await Promise.all([
@@ -30,7 +34,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   if (galleries.length === 0 && trashed.length === 0) return <>{children}</>;
 
   return (
-    <div className="flex min-h-full flex-1">
+    <div className="flex min-h-full flex-1 flex-col md:flex-row">
       <GallerySidebar galleries={galleries} trashed={trashed} />
       <div className="min-w-0 flex-1">{children}</div>
     </div>

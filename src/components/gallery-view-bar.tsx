@@ -1,8 +1,13 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { createGalleryView, duplicateGalleryView, renameGalleryView } from "@/app/galleries/[galleryId]/view-actions";
+import {
+  createGalleryView,
+  deleteGalleryView,
+  duplicateGalleryView,
+  renameGalleryView,
+} from "@/app/galleries/[galleryId]/view-actions";
 
 export type GalleryViewTab = { id: string; name: string };
 
@@ -21,78 +26,132 @@ export function GalleryViewBar({
   const params = useSearchParams();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
 
   function go(viewId: string) {
     const next = new URLSearchParams(params.toString());
     next.set("view", viewId);
     next.delete("cardPage");
-    router.push(`${pathname}?${next}`);
+    router.push(`${pathname}?${next}`, { scroll: false });
   }
 
-  function run(create: () => Promise<{ error: string | null; viewId?: string }>) {
+  function run(change: () => Promise<{ error: string | null; viewId?: string }>) {
     setError(null);
+    setMenuOpen(false);
     startTransition(async () => {
-      const result = await create();
+      const result = await change();
       if (result.error) setError(result.error);
       else if (result.viewId) go(result.viewId);
       else router.refresh();
     });
   }
 
+  const current = views.find((view) => view.id === activeViewId);
+
   function rename() {
-    const current = views.find((view) => view.id === activeViewId);
     const name = window.prompt("Tên view", current?.name ?? "");
     if (name === null) return;
     run(() => renameGalleryView(galleryId, activeViewId, name));
   }
 
+  function remove() {
+    if (!window.confirm(`Xoá view “${current?.name ?? ""}”? Bộ lọc, sắp xếp và bố cục card riêng của view này sẽ mất.`)) {
+      return;
+    }
+    run(() => deleteGalleryView(galleryId, activeViewId));
+  }
+
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-1.5 border-b border-stone-200 pb-2">
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+    <div className="mb-3 flex flex-wrap items-center gap-1.5 border-b border-line pb-2">
+      <div role="tablist" aria-label="View" className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
         {views.map((view) => (
           <button
             key={view.id}
             type="button"
+            role="tab"
+            aria-selected={view.id === activeViewId}
             onClick={() => go(view.id)}
-            aria-current={view.id === activeViewId ? "page" : undefined}
-            className={`rounded-md px-2.5 py-1.5 text-sm font-medium ${
-              view.id === activeViewId
-                ? "bg-emerald-50 text-emerald-800"
-                : "text-stone-600 hover:bg-stone-100 hover:text-stone-900"
-            }`}
+            className={`btn btn-sm ${view.id === activeViewId ? "bg-brand-soft text-brand-hover" : "btn-ghost"}`}
           >
             {view.name}
           </button>
         ))}
-      </div>
-
-      <div className="flex items-center gap-1">
         <button
           type="button"
           disabled={pending}
           onClick={() => run(() => createGalleryView(galleryId, activeViewId))}
-          className="rounded border border-stone-300 px-2 py-1 text-xs text-stone-700 hover:border-stone-500 disabled:opacity-50"
+          title="Tạo view mới từ view đang mở"
+          className="btn btn-ghost btn-sm text-muted"
         >
           + View
         </button>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() => run(() => duplicateGalleryView(galleryId, activeViewId))}
-          className="rounded border border-stone-300 px-2 py-1 text-xs text-stone-700 hover:border-stone-500 disabled:opacity-50"
-        >
-          Nhân bản
-        </button>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={rename}
-          className="rounded border border-stone-300 px-2 py-1 text-xs text-stone-700 hover:border-stone-500 disabled:opacity-50"
-        >
-          Đổi tên
-        </button>
       </div>
-      {error && <p className="basis-full text-xs text-red-700">{error}</p>}
+
+      <div ref={menuRef} className="relative">
+        <button
+          type="button"
+          disabled={pending}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((open) => !open)}
+          className="btn btn-ghost btn-sm"
+        >
+          {pending ? "Đang lưu…" : "View này ▾"}
+        </button>
+        {menuOpen && (
+          <div role="menu" className="popover absolute right-0 z-30 mt-1 w-48 py-1">
+            <MenuItem onClick={rename}>Đổi tên</MenuItem>
+            <MenuItem onClick={() => run(() => duplicateGalleryView(galleryId, activeViewId))}>Nhân bản</MenuItem>
+            <MenuItem onClick={remove} danger disabled={views.length <= 1}>
+              Xoá view
+            </MenuItem>
+          </div>
+        )}
+      </div>
+      {error && <p className="basis-full text-xs text-danger">{error}</p>}
     </div>
+  );
+}
+
+function MenuItem({
+  onClick,
+  danger,
+  disabled,
+  children,
+}: {
+  onClick: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      disabled={disabled}
+      className={`block w-full px-3 py-1.5 text-left text-sm hover:bg-canvas disabled:opacity-40 ${
+        danger ? "text-danger" : "text-ink-soft"
+      }`}
+    >
+      {children}
+    </button>
   );
 }

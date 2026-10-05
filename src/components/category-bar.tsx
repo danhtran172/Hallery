@@ -13,6 +13,7 @@ export function CategoryBar({
   buckets,
   activeValue,
   partialCounts,
+  preserved,
 }: {
   galleryId: string;
   axes: CategoryAxisRecord[];
@@ -20,29 +21,29 @@ export function CategoryBar({
   buckets: CategoryBucket[];
   activeValue: string | null;
   partialCounts: boolean;
+  /** The rest of the Gallery's URL state — the view above all — kept across a category change. */
+  preserved: Record<string, string>;
 }) {
   const base = `/galleries/${galleryId}`;
   const hrefFor = (axisId: string, value: string | null) => {
-    const params = new URLSearchParams({ axis: axisId });
+    const params = new URLSearchParams(preserved);
+    params.set("axis", axisId);
     if (value) params.set("value", value);
     return `${base}?${params}`;
   };
 
   return (
-    <div className="mb-6 flex flex-col gap-3">
+    <div className="mb-5 flex flex-col gap-3">
       {axes.length > 1 && (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-stone-500">Phân loại theo</span>
+          <span className="text-xs text-muted">Phân loại theo</span>
           {axes.map((axis) => (
             <Link
               key={axis.id}
               href={hrefFor(axis.id, null)}
+              scroll={false}
               aria-current={axis.id === activeAxis.id ? "true" : undefined}
-              className={`rounded-md border px-2.5 py-1 text-xs ${
-                axis.id === activeAxis.id
-                  ? "border-stone-400 bg-stone-100 font-medium text-stone-800"
-                  : "border-stone-200 text-stone-500 hover:border-stone-300"
-              }`}
+              className={`btn btn-sm ${axis.id === activeAxis.id ? "btn-secondary border-muted text-ink" : "btn-ghost"}`}
             >
               {axis.displayLabel ?? axis.notionPropertyName}
             </Link>
@@ -50,45 +51,45 @@ export function CategoryBar({
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        <Link
-          href={hrefFor(activeAxis.id, null)}
-          className={`rounded-full border px-3 py-1 text-xs ${
-            activeValue === null
-              ? "border-emerald-600 bg-emerald-50 font-medium text-emerald-800"
-              : "border-stone-200 text-stone-600 hover:border-stone-300"
-          }`}
-        >
+      <div className="flex flex-wrap gap-1.5">
+        <Chip href={hrefFor(activeAxis.id, null)} active={activeValue === null}>
           Tất cả
-        </Link>
+        </Chip>
         {buckets.map((bucket) => {
           const active = bucket.value === activeValue;
           return (
-            <Link
-              key={bucket.value}
-              // Clicking the active chip clears the filter, so the strip toggles.
-              href={hrefFor(activeAxis.id, active ? null : bucket.value)}
-              className={`rounded-full border px-3 py-1 text-xs ${
-                active
-                  ? "border-emerald-600 bg-emerald-50 font-medium text-emerald-800"
-                  : "border-stone-200 text-stone-600 hover:border-stone-300"
-              }`}
-            >
+            // Clicking the active chip clears the filter, so the strip toggles.
+            <Chip key={bucket.value} href={hrefFor(activeAxis.id, active ? null : bucket.value)} active={active}>
               {bucket.label}
-              <span className="ml-1.5 tabular-nums text-stone-400">
+              <span className="ml-1.5 text-faint tabular-nums">
                 {bucket.count}
                 {partialCounts ? "+" : ""}
               </span>
-            </Link>
+            </Chip>
           );
         })}
       </div>
 
       {axisAllowsMultiple(activeAxis.sourceType) && (
-        <p className="text-[11px] text-stone-400">
-          Một item có thể thuộc nhiều phân loại, nên tổng các số trên lớn hơn số item.
-        </p>
+        <p className="text-[11px] text-faint">Một item có thể thuộc nhiều phân loại, nên tổng các số trên lớn hơn số item.</p>
       )}
     </div>
+  );
+}
+
+function Chip({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      scroll={false}
+      aria-current={active ? "true" : undefined}
+      className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+        active
+          ? "border-brand bg-brand-soft font-medium text-brand-hover"
+          : "border-line text-ink-soft hover:border-line-strong hover:bg-canvas"
+      }`}
+    >
+      {children}
+    </Link>
   );
 }

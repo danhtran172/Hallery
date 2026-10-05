@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { serializeFilters, serializeSorts, type Filter, type SortKey } from "@/lib/gallery-query";
 import { initialViewLayoutConfig } from "@/lib/gallery-view";
+import { isFullDataSource } from "@notionhq/client";
+import { getNotionClient } from "@/lib/notion";
+import { addRelationGalleries } from "@/lib/relation-galleries";
 
 type ViewQueryInput = { filters: Filter[]; sorts: SortKey[]; groupBy: string | null };
 type ViewActionResult = { error: string | null; viewId?: string };
@@ -88,6 +91,39 @@ export async function duplicateGalleryView(galleryId: string, sourceViewId: stri
   });
   refreshGallery(galleryId);
   return { error: null, viewId: view.id };
+}
+
+/**
+ * Walks the Gallery's relations again — after the owner has shared a linked table with the
+ * integration, this is what turns it into a Gallery they can open.
+ */
+export async function refreshRelationGalleries(galleryId: string): Promise<ViewActionResult> {
+  const gallery = await db.gallery.findUnique({ where: { id: galleryId }, include: { workspace: true } });
+  if (!gallery) return { error: "Gallery không còn tồn tại." };
+  const notion = getNotionClient(gallery.workspace.accessToken);
+  try {
+    const dataSource = await notion.dataSources.retrieve({ data_source_id: gallery.notionDataSourceId });
+    if (!isFullDataSource(dataSource)) return { error: "Không đọc được cấu trúc database." };
+    const walk = await addRelationGalleries(notion, gallery.workspaceId, gallery.notionDataSourceId, dataSource.properties);
+    revalidatePath("/", "layout");
+    return walk.unreachable.length
+      ? { error: `Vẫn còn ${walk.unreachable.length} bảng chưa chia sẻ với integration.` }
+      : { error: null };
+  } catch {
+    return { error: "Không gọi được Notion. Thử lại sau." };
+  }
+}
+
+/** Removes a view. The last one stays: a Gallery always opens on some view. */
+export async function deleteGalleryView(galleryId: string, viewId: string): Promise<ViewActionResult> {
+  const views = await db.galleryView.findMany({ where: { galleryId }, orderBy: { sortOrder: "asc" }, select: { id: true } });
+  if (views.length <= 1) return { error: "Gallery cần ít nhất một view." };
+  const index = views.findIndex((view) => view.id === viewId);
+  if (index === -1) return { error: "View này không còn tồn tại." };
+  await db.galleryView.delete({ where: { id: viewId } });
+  refreshGallery(galleryId);
+  const fallback = views[index === 0 ? 1 : index - 1];
+  return { error: null, viewId: fallback.id };
 }
 
 export async function renameGalleryView(galleryId: string, viewId: string, name: string): Promise<ViewActionResult> {

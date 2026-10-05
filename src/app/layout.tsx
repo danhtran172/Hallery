@@ -1,30 +1,25 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "@/components/app-shell";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+// Geist ships no Vietnamese subset, so every "ệ" or "ữ" fell back to another typeface
+// mid-word. Inter covers the full Vietnamese range.
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin", "vietnamese"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Hallery",
-  description: "Notion-based Gallery workspace",
+  title: { default: "Hallery", template: "%s · Hallery" },
+  description: "Gallery cho dữ liệu Notion — bạn quyết định mỗi property hiển thị ra sao.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">
+    <html lang="vi" className={`${inter.variable} h-full antialiased`}>
+      <body className="flex min-h-full flex-col">
         <AppShell>{children}</AppShell>
       </body>
     </html>

@@ -24,6 +24,20 @@ export const FORM_FIELD_TYPES = new Set([
   "status",
 ]);
 
+/** Notion gives every database's title property the id "title". */
+export const TITLE_PROPERTY_ID = "title";
+
+/** The form's pseudo-id for the title, as the card layout files it. */
+const TITLE_LAYOUT_ID = "__title__";
+
+/**
+ * The input name for a form field: `field:<type>:<Notion property id>`. Ids rather than
+ * names, so a property renamed in Notion after the form was drawn still gets its value.
+ */
+export function createFieldName(type: string, propertyId: string): string {
+  return `field:${type}:${propertyId === TITLE_LAYOUT_ID ? TITLE_PROPERTY_ID : propertyId}`;
+}
+
 export type DefaultMode = "none" | "static" | "today" | "last";
 
 export type FormFieldConfig = {

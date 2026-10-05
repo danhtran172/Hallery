@@ -6,19 +6,21 @@ import { db } from "@/lib/db";
 import { patchGalleryNotionSnapshot } from "@/lib/gallery-notion-cache";
 import { getNotionClient } from "@/lib/notion";
 import { buildPropertyUpdate } from "@/lib/notion-write";
-import { TITLE_FIELD_ID } from "@/lib/card-layout";
+import { TITLE_FIELD_ID, parseCardLayout } from "@/lib/card-layout";
 import { CONTENT_IMAGE, PAGE_COVER, PROPERTY_PREFIX, parseGalleryConfig } from "@/lib/notion-cover";
-import { parseFormDefaults, type FormLastValues } from "@/lib/create-form";
+import { FORM_FIELD_TYPES, TITLE_PROPERTY_ID, createFieldName, parseFormDefaults, type FormLastValues } from "@/lib/create-form";
+import { parseDisplayConfig } from "@/lib/display-config";
+import { NOTION_PROBLEM_COPY, classifyNotionError } from "@/lib/notion-errors";
 import { MAX_UPLOAD_BYTES } from "@/components/image-drop-zone";
 
-export type CreateItemState = { error: string | null; createdPageId?: string };
+export type CreateItemState = { error: string | null; createdPageId?: string; createdAt?: number };
 
 /**
  * Adds a row to the gallery's Notion database from the quick-entry form.
  *
  * This writes values into a new page and nothing else — the database's properties are
- * untouched, which is the line Hallery does not cross. Field names follow the same
- * `field:<type>:<name>` convention the item editor uses, so both share one encoder.
+ * untouched, which is the line Hallery does not cross. Properties are addressed by id, so
+ * a property renamed in Notion since the form was drawn still receives its value.
  */
 export async function createItem(
   galleryId: string,
@@ -33,35 +35,39 @@ export async function createItem(
 
   const config = parseGalleryConfig(gallery.displayConfig);
   const defaults = parseFormDefaults(config.formDefaults);
-  const byName = new Map(gallery.propertyConfigs.map((c) => [c.notionPropertyName, c]));
+  const byId = new Map(gallery.propertyConfigs.map((property) => [property.notionPropertyId, property]));
+  const layout = parseCardLayout(config.formCard);
+
+  // The fields the form was built from, not whatever the browser chose to send: an empty
+  // multi-select or an unticked box sends nothing at all, and "required" still has to hold.
+  const expected = (layout ? Object.values(layout.regions).flatMap((grid) => grid.boxes.flatMap((box) => box.fields)) : [])
+    .flatMap((field) => {
+      if (field.id === TITLE_FIELD_ID) return [{ id: field.id, type: "title", label: "Tiêu đề" }];
+      const property = byId.get(field.id);
+      if (!property || property.disabled || property.isMissing || !FORM_FIELD_TYPES.has(property.notionPropertyType)) {
+        return [];
+      }
+      const label = parseDisplayConfig(property.displayConfig).nameOverride?.trim() || property.notionPropertyName;
+      return [{ id: field.id, type: property.notionPropertyType, label }];
+    });
 
   const properties: Record<string, unknown> = {};
   const lastValues: FormLastValues = {};
 
-  for (const key of new Set(formData.keys())) {
-    if (!key.startsWith("field:")) continue;
-    const rest = key.slice("field:".length);
-    const separator = rest.indexOf(":");
-    if (separator === -1) continue;
-    const propertyType = rest.slice(0, separator);
-    const propertyName = rest.slice(separator + 1);
-
-    // The editor files the title under TITLE_FIELD_ID, not under its Notion property id —
-    // it is a pseudo-property there. Looking it up by Notion id found nothing, so a
-    // required title silently passed and an untitled page went in.
-    const configKey =
-      propertyType === "title" ? TITLE_FIELD_ID : (byName.get(propertyName)?.notionPropertyId ?? "");
-
+  for (const field of expected) {
+    const key = createFieldName(field.type, field.id);
+    const entered = formData.getAll(key).map((v) => String(v).trim()).filter(Boolean);
     // Required is Hallery's own idea — Notion has no such flag — so it is enforced here,
     // before the request rather than by reading a rejection.
-    const entered = formData.getAll(key).map((v) => String(v).trim()).filter(Boolean);
-    if (configKey && defaults[configKey]?.required && entered.length === 0) {
-      return { error: `"${propertyName}" là bắt buộc.` };
+    if (defaults[field.id]?.required && entered.length === 0) {
+      return { error: `"${field.label}" là bắt buộc.` };
     }
+    if (entered.length === 0 && field.type !== "checkbox") continue;
 
-    const update = buildPropertyUpdate(propertyType, formData, key);
-    if (update) properties[propertyName] = update;
-    if (configKey && entered.length) lastValues[configKey] = entered.join(", ");
+    const update = buildPropertyUpdate(field.type, formData, key);
+    if (!update) return { error: `"${field.label}" có giá trị không hợp lệ.` };
+    properties[field.id === TITLE_FIELD_ID ? TITLE_PROPERTY_ID : field.id] = update;
+    if (entered.length) lastValues[field.id] = entered.join(", ");
   }
 
   const notion = getNotionClient(gallery.workspace.accessToken);
@@ -112,9 +118,13 @@ export async function createItem(
         : {}),
     });
     createdPage = isFullPage(created) ? created : await notion.pages.retrieve({ page_id: created.id });
-  } catch {
+  } catch (error) {
+    const problem = classifyNotionError(error);
     return {
-      error: "Notion từ chối request. Có thể một giá trị không khớp kiểu property, hoặc property đã bị đổi.",
+      error:
+        problem === "unavailable"
+          ? "Notion từ chối request. Có thể một giá trị không khớp kiểu property, hoặc property đã bị đổi."
+          : `${NOTION_PROBLEM_COPY[problem].title}. ${NOTION_PROBLEM_COPY[problem].body}`,
     };
   }
 
@@ -124,5 +134,5 @@ export async function createItem(
 
   if (isFullPage(createdPage)) await patchGalleryNotionSnapshot(galleryId, createdPage);
   revalidatePath(`/galleries/${galleryId}`);
-  return { error: null, createdPageId: createdPage.id };
+  return { error: null, createdPageId: createdPage.id, createdAt: Date.now() };
 }

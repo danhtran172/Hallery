@@ -1,6 +1,7 @@
 import type { Client, DataSourceObjectResponse } from "@notionhq/client";
 import { isFullDataSource } from "@notionhq/client";
 import { db } from "@/lib/db";
+import { defaultViewCreate } from "@/lib/gallery-view";
 
 type DataSourceProperties = DataSourceObjectResponse["properties"];
 
@@ -68,6 +69,7 @@ async function upsertGallery(
       notionDataSourceId: dataSource.id,
       name: titleOf(dataSource),
       autoAdded,
+      views: defaultViewCreate(),
       propertyConfigs: {
         create: Object.entries(dataSource.properties).map(([name, config], index) => ({
           notionPropertyId: config.id,
@@ -158,15 +160,17 @@ export async function listRelationGalleries(
   if (targets.length === 0) return [];
 
   const galleries = await db.gallery.findMany({
-    where: { workspaceId, notionDataSourceId: { in: targets.map((t) => t.dataSourceId) } },
+    where: { workspaceId, deletedAt: null, notionDataSourceId: { in: targets.map((t) => t.dataSourceId) } },
     select: { id: true, name: true, icon: true, notionDataSourceId: true },
   });
   const byDataSource = new Map(galleries.map((g) => [g.notionDataSourceId, g]));
 
-  return targets
-    .map((target) => {
-      const gallery = byDataSource.get(target.dataSourceId);
-      return gallery ? { ...target, galleryId: gallery.id, name: gallery.name, icon: gallery.icon } : null;
-    })
-    .filter((entry) => entry !== null);
+  // A target without a Gallery is one the integration cannot read. It is still listed, so
+  // the reader learns the table exists and how to share it, instead of it silently missing.
+  return targets.map((target) => {
+    const gallery = byDataSource.get(target.dataSourceId);
+    return gallery
+      ? { ...target, galleryId: gallery.id, name: gallery.name, icon: gallery.icon }
+      : { ...target, galleryId: null, name: target.propertyName, icon: null };
+  });
 }

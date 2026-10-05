@@ -1,17 +1,21 @@
-import Link from "next/link";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { isFullDataSource } from "@notionhq/client";
 import { db } from "@/lib/db";
 import { PropertyDisplayConfigForm } from "@/components/property-display-config-form";
-import {
-  MAX_CARDS_PER_ROW,
-  MIN_CARDS_PER_ROW,
-  parseGalleryConfig,
-  resolveCardsPerRow,
-} from "@/lib/notion-cover";
+import { SettingsHeader } from "@/components/settings-header";
+import { parseGalleryConfig, resolveCardsPerRow } from "@/lib/notion-cover";
 import { describePropertyType } from "@/lib/property-kind";
-import { parseViewLayoutConfig } from "@/lib/gallery-view";
-import { saveGalleryGridSettings, setPropertyDisabled, updatePropertyPlacement } from "./actions";
+import { ensureGalleryViews, parseViewLayoutConfig } from "@/lib/gallery-view";
+import { parseDisplayConfig } from "@/lib/display-config";
+import { opsFor, parseNativeButton } from "@/lib/native-button";
+import { getGalleryNotionSnapshot } from "@/lib/gallery-notion-cache";
+import { setPropertyDisabled, updatePropertyPlacement } from "./actions";
 import { PropertyList, type ListedProperty } from "./property-list";
+import { GridSettingsForm } from "./grid-settings-form";
+import { ButtonActionsEditor, type WritableProperty } from "./button-actions-editor";
+
+export const metadata: Metadata = { title: "Cài đặt hiển thị" };
 
 export default async function DisplaySettingsPage({
   params,
@@ -21,12 +25,16 @@ export default async function DisplaySettingsPage({
   const { prop, view: viewParam } = await searchParams;
   const gallery = await db.gallery.findUnique({
     where: { id: galleryId },
-    include: { propertyConfigs: { orderBy: { sortOrder: "asc" } }, views: { orderBy: { sortOrder: "asc" } } },
+    include: {
+      workspace: true,
+      propertyConfigs: { orderBy: { sortOrder: "asc" } },
+      views: { orderBy: { sortOrder: "asc" } },
+    },
   });
   if (!gallery) notFound();
+  const views = await ensureGalleryViews(gallery);
   const requestedViewId = typeof viewParam === "string" ? viewParam : null;
-  const view = gallery.views.find((entry) => entry.id === requestedViewId) ?? gallery.views[0];
-  if (!view) notFound();
+  const view = views.find((entry) => entry.id === requestedViewId) ?? views[0];
 
   const properties = gallery.propertyConfigs.filter((p) => p.notionPropertyType !== "title");
   const galleryConfig = parseGalleryConfig(gallery.displayConfig);
@@ -39,6 +47,7 @@ export default async function DisplaySettingsPage({
     id: p.id,
     notionPropertyId: p.notionPropertyId,
     notionPropertyName: p.notionPropertyName,
+    displayName: parseDisplayConfig(p.displayConfig).nameOverride?.trim() || null,
     typeLabel: describePropertyType(p.notionPropertyType, p.resolvedType),
     disabled: p.disabled,
   }));
@@ -47,96 +56,77 @@ export default async function DisplaySettingsPage({
   const managed = properties.filter((p) => !p.disabled);
   const managedIndex = selected ? managed.findIndex((p) => p.id === selected.id) : -1;
 
-  return (
-    <div className="mx-auto max-w-5xl px-6 py-12">
-      <Link href={`/galleries/${galleryId}?view=${view.id}`} className="text-xs text-stone-500 hover:underline">
-        ← {gallery.name}
-      </Link>
-      <h1 className="mt-2 mb-1 text-2xl font-semibold text-stone-900">Cài đặt hiển thị</h1>
-      <p className="mb-8 text-sm text-stone-600">
-        Chọn cách mỗi property hiển thị trong Gallery và Card Detail — không đổi gì trong Notion, chỉ đổi cách
-        Hallery đọc và trình bày lại giá trị.
-      </p>
+  // A native button can write to any managed property of a writable type; select-like ones
+  // offer their options, read from the snapshot (no request when it is warm).
+  let writable: WritableProperty[] = [];
+  if (selected?.notionPropertyType === "button") {
+    const snapshot = await getGalleryNotionSnapshot({
+      galleryId,
+      dataSourceId: gallery.notionDataSourceId,
+      accessToken: gallery.workspace.accessToken,
+    }).catch(() => null);
+    const schema = snapshot && isFullDataSource(snapshot.dataSourceRes) ? snapshot.dataSourceRes.properties : {};
+    const schemaById = new Map(Object.values(schema).map((entry) => [entry.id, entry]));
+    writable = managed
+      .filter((property) => opsFor(property.notionPropertyType).length > 0)
+      .map((property) => {
+        const entry = schemaById.get(property.notionPropertyId);
+        const options =
+          entry?.type === "select"
+            ? entry.select.options.map((option) => option.name)
+            : entry?.type === "status"
+              ? entry.status.options.map((option) => option.name)
+              : entry?.type === "multi_select"
+                ? entry.multi_select.options.map((option) => option.name)
+                : undefined;
+        return {
+          notionPropertyId: property.notionPropertyId,
+          name: parseDisplayConfig(property.displayConfig).nameOverride?.trim() || property.notionPropertyName,
+          type: property.notionPropertyType,
+          options,
+        };
+      });
+  }
 
-      <GalleryGridSettings
+  return (
+    <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
+      <SettingsHeader
+        galleryId={galleryId}
+        galleryName={gallery.name}
+        viewId={view.id}
+        active="display"
+        description="Chọn cách mỗi property hiển thị trong Gallery và Card Detail — không đổi gì trong Notion, chỉ đổi cách Hallery trình bày lại giá trị."
+      />
+
+      <GridSettingsForm
         galleryId={galleryId}
         viewId={view.id}
+        viewName={view.name}
         cardsPerRow={cardsPerRow}
         randomPick={galleryConfig.randomPick !== false}
       />
 
-      <div className="flex gap-6">
-        <div className="max-h-[32rem] w-60 shrink-0">
-          <PropertyList galleryId={galleryId} properties={listed} selectedId={selectedId} />
+      <div className="flex flex-col gap-6 md:flex-row">
+        <div className="max-h-[36rem] w-full shrink-0 md:w-64">
+          <PropertyList galleryId={galleryId} viewId={view.id} properties={listed} selectedId={selectedId} />
         </div>
 
         <div className="min-w-0 flex-1">
           {selected ? (
             <PropertyEditor
+              key={selected.id}
               galleryId={galleryId}
               property={selected}
               isFirst={managedIndex === 0}
               isLast={managedIndex === managed.length - 1}
+              writable={writable}
             />
           ) : (
-            <p className="rounded-lg border border-dashed border-stone-300 px-4 py-16 text-center text-sm text-stone-500">
-              Chọn một property bên trái để chỉnh cách nó hiển thị.
-            </p>
+            <p className="empty-state py-16">Chọn một property bên trái để chỉnh cách nó hiển thị.</p>
           )}
         </div>
       </div>
     </div>
-  );
-}
-
-function GalleryGridSettings({
-  galleryId,
-  viewId,
-  cardsPerRow,
-  randomPick,
-}: {
-  galleryId: string;
-  viewId: string;
-  cardsPerRow: number;
-  randomPick: boolean;
-}) {
-  return (
-    <form action={saveGalleryGridSettings.bind(null, galleryId, viewId)} className="mb-6 rounded-lg border border-stone-200 p-4">
-      <label htmlFor="cardsPerRow" className="block text-sm font-medium text-stone-900">
-        Số card mỗi hàng
-      </label>
-      <p className="mt-1 text-xs text-stone-500">
-        Áp dụng trên desktop. Trên màn hình nhỏ, Gallery tự giảm số cột để card vẫn dễ đọc.
-      </p>
-      <div className="mt-3 flex items-end gap-3">
-        <input
-          id="cardsPerRow"
-          name="cardsPerRow"
-          type="number"
-          inputMode="numeric"
-          min={MIN_CARDS_PER_ROW}
-          max={MAX_CARDS_PER_ROW}
-          defaultValue={cardsPerRow}
-          className="h-10 w-24 rounded-md border border-stone-300 px-3 text-base text-stone-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-100"
-        />
-        <button
-          type="submit"
-          className="h-10 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white hover:bg-emerald-800"
-        >
-          Lưu
-        </button>
-      </div>
-
-      <label className="mt-4 flex items-start gap-2 border-t border-stone-100 pt-4 text-sm text-stone-700">
-        <input type="checkbox" name="randomPick" defaultChecked={randomPick} className="mt-0.5" />
-        <span>
-          Hiện nút chọn ngẫu nhiên
-          <span className="mt-0.5 block text-xs text-stone-500">
-            Bốc một item bất kỳ trong số đang hiện, nên nó tôn trọng bộ lọc và ô tìm kiếm.
-          </span>
-        </span>
-      </label>
-    </form>
   );
 }
 
@@ -145,6 +135,7 @@ function PropertyEditor({
   property,
   isFirst,
   isLast,
+  writable,
 }: {
   galleryId: string;
   property: {
@@ -157,16 +148,19 @@ function PropertyEditor({
   };
   isFirst: boolean;
   isLast: boolean;
+  writable: WritableProperty[];
 }) {
   const place = updatePropertyPlacement.bind(null, galleryId, property.id);
   const toggle = setPropertyDisabled.bind(null, galleryId, property.id, !property.disabled);
+  const display = parseDisplayConfig(property.displayConfig);
 
   return (
-    <div className="rounded-lg border border-stone-200 p-5">
-      <div className="mb-4 flex items-baseline justify-between gap-3">
+    <div className="panel p-5">
+      <div className="mb-5 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="truncate text-lg font-semibold text-stone-900">{property.notionPropertyName}</h2>
-          <span className="font-mono text-xs text-stone-400">
+          <h2 className="truncate text-lg font-semibold text-ink">{display.nameOverride?.trim() || property.notionPropertyName}</h2>
+          <span className="font-mono text-xs text-faint">
+            {display.nameOverride?.trim() ? `${property.notionPropertyName} · ` : ""}
             {describePropertyType(property.notionPropertyType, property.resolvedType)}
           </span>
         </div>
@@ -183,28 +177,35 @@ function PropertyEditor({
       </div>
 
       {property.disabled ? (
-        <p className="mb-4 rounded-md border border-dashed border-stone-300 bg-stone-50 px-3 py-4 text-sm text-stone-600">
+        <p className="mb-4 rounded-lg border border-dashed border-line-strong bg-canvas px-3 py-4 text-sm text-ink-soft">
           Hallery không quản lý property này. Nó không lên card, không sắp xếp, lọc hay tìm kiếm được — coi như
           không tồn tại. Giá trị trong Notion vẫn nguyên vẹn và Notion vẫn quản lý bình thường.
         </p>
       ) : (
-        <PropertyDisplayConfigForm galleryId={galleryId} property={property} />
+        <div className="flex flex-col gap-6">
+          <PropertyDisplayConfigForm galleryId={galleryId} property={property} />
+          {property.notionPropertyType === "button" && (
+            <section className="border-t border-line pt-5">
+              <h3 className="mb-3 text-sm font-semibold text-ink">Hành động khi bấm nút</h3>
+              <ButtonActionsEditor
+                galleryId={galleryId}
+                propertyConfigId={property.id}
+                propertyName={display.nameOverride?.trim() || property.notionPropertyName}
+                initial={parseNativeButton(display.button)}
+                properties={writable}
+              />
+            </section>
+          )}
+        </div>
       )}
 
-      <form action={toggle} className="mt-5 border-t border-stone-100 pt-4">
-        <button
-          type="submit"
-          className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
-            property.disabled
-              ? "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700"
-              : "border-stone-300 text-stone-700 hover:border-red-400 hover:text-red-700"
-          }`}
-        >
+      <form action={toggle} className="mt-6 border-t border-line pt-4">
+        <button type="submit" className={`btn btn-sm ${property.disabled ? "btn-primary" : "btn-danger"}`}>
           {property.disabled ? "Quản lý lại property này" : "Không quản lý nữa"}
         </button>
         {!property.disabled && (
-          <p className="mt-2 text-xs text-stone-500">
-            Để Notion tự quản lý. Bỏ khỏi card, Card Detail, sắp xếp, lọc và tìm kiếm — gỡ lại được bất cứ lúc nào.
+          <p className="mt-2 text-xs text-muted">
+            Để Notion tự quản lý. Bỏ khỏi card, Card Detail, sắp xếp, lọc và tìm kiếm — bật lại được bất cứ lúc nào.
           </p>
         )}
       </form>
@@ -225,13 +226,7 @@ function PlacementButton({
 }) {
   return (
     <form action={action}>
-      <button
-        type="submit"
-        aria-label={label}
-        title={label}
-        disabled={disabled}
-        className="rounded border border-stone-300 px-2 py-1 text-xs text-stone-600 hover:border-stone-500 disabled:opacity-30"
-      >
+      <button type="submit" aria-label={label} title={label} disabled={disabled} className="btn btn-secondary btn-sm btn-icon">
         {children}
       </button>
     </form>
