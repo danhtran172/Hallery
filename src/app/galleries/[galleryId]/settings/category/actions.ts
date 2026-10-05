@@ -9,8 +9,9 @@ import { AXIS_TYPES } from "@/lib/category";
  * user ticked them in. Stores the property name alongside the id so the settings screen
  * can still name an axis whose property has since vanished from Notion.
  */
-export async function saveCategoryAxes(galleryId: string, formData: FormData) {
-  const gallery = await db.gallery.findUniqueOrThrow({ where: { id: galleryId } });
+export async function saveCategoryAxes(galleryId: string, formData: FormData): Promise<{ error: string | null }> {
+  const gallery = await db.gallery.findUnique({ where: { id: galleryId } });
+  if (!gallery) return { error: "Gallery này không còn trong Hallery." };
   const chosen = formData.getAll("axis").map(String);
 
   // `axis` values arrive as `<propertyId>|<type>|<name>`; the name may contain "|", so
@@ -46,4 +47,5 @@ export async function saveCategoryAxes(galleryId: string, formData: FormData) {
 
   revalidatePath(`/galleries/${galleryId}`);
   revalidatePath(`/galleries/${galleryId}/settings/category`);
+  return { error: null };
 }

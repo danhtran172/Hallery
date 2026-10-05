@@ -8,6 +8,7 @@ import { getNotionClient } from "@/lib/notion";
 import { addRelationGalleries } from "@/lib/relation-galleries";
 import { defaultViewCreate } from "@/lib/gallery-view";
 import { NOTION_PROBLEM_COPY, classifyNotionError } from "@/lib/notion-errors";
+import { getDataSourceEmoji } from "@/lib/notion-schema";
 
 export async function addGallery(
   workspaceId: string,
@@ -39,6 +40,7 @@ export async function addGallery(
       notionDatabaseId: databaseId,
       notionDataSourceId: dataSourceId,
       name: title || "Untitled",
+      icon: getDataSourceEmoji(dataSource),
       views: defaultViewCreate(),
       propertyConfigs: {
         create: Object.entries(dataSource.properties).map(([name, config], index) => ({

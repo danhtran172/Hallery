@@ -68,6 +68,10 @@ export async function connectWorkspace(_prevState: ConnectState, formData: FormD
   }
 
   revalidatePath("/", "layout");
+  // A reconnect started from a broken gallery goes back to that gallery — the reader came
+  // to fix it, not to pick another database. Only same-app paths are honoured.
+  const returnTo = String(formData.get("returnTo") ?? "");
+  if (reconnectId && returnTo.startsWith("/") && !returnTo.startsWith("//")) redirect(returnTo);
   redirect(`/workspaces/${workspaceId}/pick${reconnectId ? "?reconnected=1" : ""}`);
 }
 

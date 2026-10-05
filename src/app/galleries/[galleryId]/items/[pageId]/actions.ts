@@ -1,7 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { isFullPage, type PageObjectResponse, type UpdatePageParameters } from "@notionhq/client";
+import {
+  APIErrorCode,
+  isFullPage,
+  isNotionClientError,
+  type PageObjectResponse,
+  type UpdatePageParameters,
+} from "@notionhq/client";
 import { db } from "@/lib/db";
 import { getGalleryNotionSnapshot, patchGalleryNotionSnapshot, snapshotPage } from "@/lib/gallery-notion-cache";
 import { getNotionClient } from "@/lib/notion";
@@ -20,6 +26,51 @@ function parseFieldName(key: string): { type: string; id: string } | null {
   const separatorIndex = rest.indexOf(":");
   if (separatorIndex === -1) return null;
   return { type: rest.slice(0, separatorIndex), id: rest.slice(separatorIndex + 1) };
+}
+
+/** A refused page write, in words the reader can act on. */
+function writeErrorMessage(error: unknown): string {
+  // A page archived in Notion since the last full sync refuses every write with a
+  // validation error; "the property changed type" would send the reader looking in the
+  // wrong place.
+  if (isNotionClientError(error) && error.code === APIErrorCode.ValidationError && /archiv|trash/i.test(error.message)) {
+    return "Item này đã bị xoá trong Notion nên không lưu được. Nó sẽ biến khỏi gallery ở lần đồng bộ tới.";
+  }
+  const problem = classifyNotionError(error);
+  if (problem === "unavailable") {
+    return "Notion từ chối lưu — có thể property đã đổi kiểu, bị xoá, hoặc giá trị không hợp lệ.";
+  }
+  return `${NOTION_PROBLEM_COPY[problem].title}. ${NOTION_PROBLEM_COPY[problem].body}`;
+}
+
+/**
+ * Brings the local snapshot up to the saved page, and drops a cached cover when the save
+ * touched the property a view draws its cover from.
+ */
+async function refreshLocalCopies(
+  galleryId: string,
+  pageId: string,
+  updatedPage: PageObjectResponse,
+  written: Record<string, unknown>,
+  gallery: { displayConfig: string; views: { layoutConfig: string }[] },
+) {
+  await patchGalleryNotionSnapshot(galleryId, updatedPage);
+
+  // A cover-property change needs a new thumbnail, but an ordinary title or tag edit
+  // should not evict a content-image cache for the entire card. Any view may draw its
+  // cover from its own property, so each one counts.
+  const legacy = parseGalleryConfig(gallery.displayConfig);
+  const coverSources = [legacy, ...gallery.views.map((view) => parseViewLayoutConfig(view.layoutConfig, legacy))]
+    .map((config) => config.coverSource)
+    .filter((source): source is string => Boolean(source?.startsWith(PROPERTY_PREFIX)));
+  const writtenNames = new Set(
+    Object.entries(updatedPage.properties)
+      .filter(([, value]) => Object.hasOwn(written, value.id))
+      .map(([name]) => name),
+  );
+  if (coverSources.some((source) => writtenNames.has(source.slice(PROPERTY_PREFIX.length)))) {
+    await db.pageImageCache.deleteMany({ where: { notionPageId: pageId } });
+  }
 }
 
 export async function saveItem(
@@ -74,39 +125,23 @@ export async function saveItem(
   // Nothing differs from what Notion already holds: no request, nothing to roll back.
   if (Object.keys(properties).length === 0) return { error: null, savedAt: Date.now() };
 
-  let updatedPage: PageObjectResponse;
+  let updated: Awaited<ReturnType<typeof notion.pages.update>>;
   try {
-    const updated = await notion.pages.update({
+    updated = await notion.pages.update({
       page_id: pageId,
       properties: properties as UpdatePageParameters["properties"],
     });
-    const full = isFullPage(updated) ? updated : await notion.pages.retrieve({ page_id: pageId });
-    if (!isFullPage(full)) throw new Error("Notion returned a partial page");
-    updatedPage = full;
   } catch (error) {
-    const problem = classifyNotionError(error);
-    if (problem === "unavailable") {
-      return { error: "Notion từ chối lưu — có thể property đã đổi kiểu, bị xoá, hoặc giá trị không hợp lệ." };
-    }
-    return { error: `${NOTION_PROBLEM_COPY[problem].title}. ${NOTION_PROBLEM_COPY[problem].body}` };
+    return { error: writeErrorMessage(error) };
   }
 
-  await patchGalleryNotionSnapshot(galleryId, updatedPage);
-
-  // A cover-property change needs a new thumbnail, but an ordinary title or tag edit
-  // should not evict a content-image cache for the entire card. Any view may draw its
-  // cover from its own property, so each one counts.
-  const legacy = parseGalleryConfig(gallery.displayConfig);
-  const coverSources = [legacy, ...gallery.views.map((view) => parseViewLayoutConfig(view.layoutConfig, legacy))]
-    .map((config) => config.coverSource)
-    .filter((source): source is string => Boolean(source?.startsWith(PROPERTY_PREFIX)));
-  const writtenNames = new Set(
-    Object.entries(updatedPage.properties)
-      .filter(([, value]) => Object.hasOwn(properties, value.id))
-      .map(([name]) => name),
-  );
-  if (coverSources.some((source) => writtenNames.has(source.slice(PROPERTY_PREFIX.length)))) {
-    await db.pageImageCache.deleteMany({ where: { notionPageId: pageId } });
+  // Saved in Notion from here on. Local bookkeeping that fails now must not report the
+  // save as failed — the reader would retry a write that already landed.
+  try {
+    const full = isFullPage(updated) ? updated : await notion.pages.retrieve({ page_id: pageId });
+    if (isFullPage(full)) await refreshLocalCopies(galleryId, pageId, full, properties, gallery);
+  } catch (error) {
+    console.error("Post-save bookkeeping failed", error);
   }
   revalidatePath(`/galleries/${galleryId}/items/${pageId}`);
   revalidatePath(`/galleries/${galleryId}`);

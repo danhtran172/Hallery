@@ -27,6 +27,15 @@ export function getPageIcon(page: PageObjectResponse): string | null {
   return null;
 }
 
+/**
+ * A database's emoji, for the gallery tile. Only emoji: an uploaded icon is a signed URL that
+ * expires within the hour, which a stored icon would outlive.
+ */
+export function getDataSourceEmoji(source: DataSourceObjectResponse): string | null {
+  const icon = (source as { icon?: { type: string; emoji?: string } | null }).icon;
+  return icon?.type === "emoji" && icon.emoji ? icon.emoji : null;
+}
+
 type PropertyValue = PageObjectResponse["properties"][string];
 
 /** Plain string/boolean form of a property value, for pre-filling an edit input. Empty string if empty. */

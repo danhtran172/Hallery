@@ -103,9 +103,9 @@ export async function createItem(
     };
   }
 
-  let createdPage: Awaited<ReturnType<typeof notion.pages.retrieve>>;
+  let created: Awaited<ReturnType<typeof notion.pages.create>>;
   try {
-    const created = await notion.pages.create({
+    created = await notion.pages.create({
       parent: { data_source_id: gallery.notionDataSourceId },
       properties: properties as CreatePageParameters["properties"],
       ...(uploadId && target === PAGE_COVER
@@ -117,7 +117,6 @@ export async function createItem(
         ? { children: [{ type: "image" as const, image: { file_upload: { id: uploadId } } }] }
         : {}),
     });
-    createdPage = isFullPage(created) ? created : await notion.pages.retrieve({ page_id: created.id });
   } catch (error) {
     const problem = classifyNotionError(error);
     return {
@@ -128,11 +127,24 @@ export async function createItem(
     };
   }
 
-  // Remembered so the copy-from-last default has something to copy next time.
-  config.formLastValues = { ...config.formLastValues, ...lastValues };
-  await db.gallery.update({ where: { id: galleryId }, data: { displayConfig: JSON.stringify(config) } });
-
-  if (isFullPage(createdPage)) await patchGalleryNotionSnapshot(galleryId, createdPage);
+  // The item exists in Notion from here on. Nothing below may turn that into an error —
+  // a "failed" message after a successful create is how a retry makes a duplicate.
+  try {
+    // Remembered so the copy-from-last default has something to copy next time. Re-read
+    // first: the upload above can take seconds, and form settings saved meanwhile in
+    // another tab must not be overwritten with the copy read at the start.
+    const fresh = await db.gallery.findUnique({ where: { id: galleryId }, select: { displayConfig: true } });
+    if (fresh) {
+      const latest = parseGalleryConfig(fresh.displayConfig);
+      latest.formLastValues = { ...latest.formLastValues, ...lastValues };
+      await db.gallery.update({ where: { id: galleryId }, data: { displayConfig: JSON.stringify(latest) } });
+    }
+    const page = isFullPage(created) ? created : await notion.pages.retrieve({ page_id: created.id });
+    if (isFullPage(page)) await patchGalleryNotionSnapshot(galleryId, page);
+  } catch (error) {
+    // The next sync brings the new card in; the reader only loses the remembered values.
+    console.error("Post-create bookkeeping failed", error);
+  }
   revalidatePath(`/galleries/${galleryId}`);
-  return { error: null, createdPageId: createdPage.id, createdAt: Date.now() };
+  return { error: null, createdPageId: created.id, createdAt: Date.now() };
 }

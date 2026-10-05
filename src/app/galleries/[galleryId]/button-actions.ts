@@ -158,8 +158,14 @@ export async function runNativeButton(
       page_id: pageId,
       properties: properties as UpdatePageParameters["properties"],
     });
-    const full = isFullPage(updated) ? updated : await notion.pages.retrieve({ page_id: pageId });
-    if (isFullPage(full)) await patchGalleryNotionSnapshot(galleryId, full);
+    // The press has landed. A failure refreshing the local copy must not read as a failed
+    // press — pressing again would count twice.
+    try {
+      const full = isFullPage(updated) ? updated : await notion.pages.retrieve({ page_id: pageId });
+      if (isFullPage(full)) await patchGalleryNotionSnapshot(galleryId, full);
+    } catch (error) {
+      console.error("Post-button bookkeeping failed", error);
+    }
   } catch (error) {
     const problem = classifyNotionError(error);
     return {

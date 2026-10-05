@@ -21,11 +21,11 @@ export async function saveDisplayConfig(
   propertyConfigId: string,
   configType: string,
   formData: FormData,
-) {
+): Promise<{ error: string | null }> {
   // Only the formatting keys belong to this form. The rest — a rename made in the card
   // editor, a native button's actions — used to be wiped by every save here.
   const existing = await db.propertyConfig.findUnique({ where: { id: propertyConfigId }, select: { displayConfig: true } });
-  if (!existing) return;
+  if (!existing) return { error: "Property này không còn trong Hallery — tải lại trang." };
   const config: DisplayConfig = parseDisplayConfig(existing.displayConfig);
   for (const key of ["kind", "max", "prefix", "suffix", "label"] as const) delete config[key];
   const propertyType = configType;
@@ -63,12 +63,17 @@ export async function saveDisplayConfig(
     else delete config.nameOverride;
   }
 
+  // A Card Detail with formatting of its own (set in the card editor) ignored this form
+  // without a word. Ticking the box hands the detail back to this formatting.
+  const useForDetail = formData.get("applyToDetail") !== null;
+
   await db.propertyConfig.update({
     where: { id: propertyConfigId },
-    data: { displayConfig: JSON.stringify(config) },
+    data: { displayConfig: JSON.stringify(config), ...(useForDetail ? { detailDisplayConfig: "" } : {}) },
   });
 
   revalidateProperty(galleryId);
+  return { error: null };
 }
 
 /**
@@ -97,10 +102,15 @@ export async function saveNativeButton(
   return { error: null };
 }
 
-export async function saveGalleryGridSettings(galleryId: string, viewId: string, formData: FormData) {
-  const gallery = await db.gallery.findUniqueOrThrow({ where: { id: galleryId } });
+export async function saveGalleryGridSettings(
+  galleryId: string,
+  viewId: string,
+  formData: FormData,
+): Promise<{ error: string | null }> {
+  const gallery = await db.gallery.findUnique({ where: { id: galleryId } });
+  if (!gallery) return { error: "Gallery này không còn trong Hallery." };
   const view = await db.galleryView.findFirst({ where: { id: viewId, galleryId } });
-  if (!view) return;
+  if (!view) return { error: "View này đã bị xoá — chọn lại view từ Gallery." };
   const config = parseGalleryConfig(gallery.displayConfig);
   const viewConfig = parseViewLayoutConfig(view.layoutConfig, config);
   const cardsPerRow = Number(formData.get("cardsPerRow"));
@@ -119,6 +129,7 @@ export async function saveGalleryGridSettings(galleryId: string, viewId: string,
 
   revalidatePath(`/galleries/${galleryId}`);
   revalidatePath(`/galleries/${galleryId}/settings/display`);
+  return { error: null };
 }
 
 /**

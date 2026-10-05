@@ -126,6 +126,21 @@ export async function deleteGalleryView(galleryId: string, viewId: string): Prom
   return { error: null, viewId: fallback.id };
 }
 
+/** Moves a view one place left or right among the tabs. */
+export async function moveGalleryView(galleryId: string, viewId: string, direction: -1 | 1): Promise<ViewActionResult> {
+  const views = await db.galleryView.findMany({ where: { galleryId }, orderBy: { sortOrder: "asc" }, select: { id: true } });
+  const from = views.findIndex((view) => view.id === viewId);
+  if (from === -1) return { error: "View này không còn tồn tại." };
+  const to = from + direction;
+  if (to < 0 || to >= views.length) return { error: null };
+  const order = views.map((view) => view.id);
+  [order[from], order[to]] = [order[to], order[from]];
+  // Rewritten from positions: stored sortOrder can carry ties, which a swap would keep.
+  await db.$transaction(order.map((id, sortOrder) => db.galleryView.updateMany({ where: { id, galleryId }, data: { sortOrder } })));
+  refreshGallery(galleryId);
+  return { error: null };
+}
+
 export async function renameGalleryView(galleryId: string, viewId: string, name: string): Promise<ViewActionResult> {
   const trimmed = name.trim();
   if (!trimmed) return { error: "Tên view không được để trống." };

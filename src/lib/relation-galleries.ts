@@ -160,17 +160,19 @@ export async function listRelationGalleries(
   if (targets.length === 0) return [];
 
   const galleries = await db.gallery.findMany({
-    where: { workspaceId, deletedAt: null, notionDataSourceId: { in: targets.map((t) => t.dataSourceId) } },
-    select: { id: true, name: true, icon: true, notionDataSourceId: true },
+    where: { workspaceId, notionDataSourceId: { in: targets.map((t) => t.dataSourceId) } },
+    select: { id: true, name: true, icon: true, notionDataSourceId: true, deletedAt: true },
   });
   const byDataSource = new Map(galleries.map((g) => [g.notionDataSourceId, g]));
 
   // A target without a Gallery is one the integration cannot read. It is still listed, so
   // the reader learns the table exists and how to share it, instead of it silently missing.
+  // A trashed one is listed as such — it used to read as "not shared", which no amount of
+  // sharing in Notion could fix.
   return targets.map((target) => {
     const gallery = byDataSource.get(target.dataSourceId);
     return gallery
-      ? { ...target, galleryId: gallery.id, name: gallery.name, icon: gallery.icon }
-      : { ...target, galleryId: null, name: target.propertyName, icon: null };
+      ? { ...target, galleryId: gallery.id, name: gallery.name, icon: gallery.icon, trashed: Boolean(gallery.deletedAt) }
+      : { ...target, galleryId: null, name: target.propertyName, icon: null, trashed: false };
   });
 }

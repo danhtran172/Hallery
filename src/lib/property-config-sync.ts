@@ -46,9 +46,14 @@ export async function syncPropertyConfigs(
   let nextSortOrder = Math.max(-1, ...existing.map((property) => property.sortOrder)) + 1;
   for (const property of live) {
     if (knownIds.has(property.id)) continue;
+    // Upsert, not create: two renders of the same Gallery (a reload during a slow first
+    // load) can both see the new property, and the second create hit the unique key and
+    // took the whole page down.
     operations.push(
-      db.propertyConfig.create({
-        data: {
+      db.propertyConfig.upsert({
+        where: { galleryId_notionPropertyId: { galleryId, notionPropertyId: property.id } },
+        update: {},
+        create: {
           galleryId,
           notionPropertyId: property.id,
           notionPropertyName: property.name,

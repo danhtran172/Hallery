@@ -105,7 +105,9 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/api/gallerie
   try {
     source = await resolveCoverSource(galleryId, pageId, viewId);
   } catch {
-    return Response.json({ previewUrl: null, cardUrl: null, fullUrl: null });
+    // Not "no picture": the lookup itself failed, and the card should offer "Thử lại"
+    // rather than settle into a blank grey block.
+    return Response.json({ previewUrl: null, cardUrl: null, fullUrl: null }, { status: 503 });
   }
   if (!source) return Response.json({ previewUrl: null, cardUrl: null, fullUrl: null }, { status: 404 });
 
