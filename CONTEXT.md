@@ -108,6 +108,7 @@ Route hiện có — **chỉ còn bấy nhiêu**, `settings/cover` và `settings
 /galleries/[id]/settings/card      Bố cục 3 view mode (xem 4.5)
 /galleries/[id]/settings/category  Trục phân loại
 /galleries/[id]/settings/display   Danh sách prop + cấu hình hiển thị
+/galleries/[id]/settings/table     Cột của view dạng Bảng (xem 4.7d)
 ```
 
 ### 4.1 Phase 0 — Nền móng ✅
@@ -259,6 +260,38 @@ Nút **"+ Thêm item"** cạnh toolbar mở popup, dựng theo `formCard`. `page
 - **Đã bỏ**: ô lọc gallery trong sidebar (Ctrl+K thay), gợi ý "Giữ Ctrl rồi kéo" hiện trên mọi ảnh khi hover
   (giờ chỉ hiện khi đang giữ Ctrl).
 
+### 4.7d View dạng Bảng 06/10/2026
+
+Mỗi view chọn **Gallery** hoặc **Bảng** ở đầu menu **Tuỳ chỉnh** (`layoutConfig.viewType`, mặc định gallery).
+Đổi dạng thì danh sách cài đặt bên dưới đổi ngay (trước cả khi server trả lời), và tab trong `SettingsHeader` đổi theo:
+
+| | Gallery | Bảng |
+|---|---|---|
+| Hiển thị | định dạng prop + số card mỗi hàng | định dạng prop, **ẩn số card mỗi hàng** (lưu form không reset nó) |
+| Tab thứ 2 | Bố cục card | **Cột bảng** (`settings/table`) |
+| Card editor | 3 tab | tab **Card Detail & form** — bỏ tab Gallery card |
+| Phân loại | như cũ | như cũ |
+
+- **Cột bảng** (`layoutConfig.table`, `lib/table-layout.ts`, editor `settings/table/table-columns-editor.tsx`) — dựng
+  trên **bảng xem trước** bằng 5 item thật (dòng xem trước `inert`, nút native không chạy được):
+  - **Kéo-thả** (dnd-kit): kéo chip từ khay "Chưa có trong bảng" lên tiêu đề để thêm cột, kéo tiêu đề để đổi thứ tự, thả về
+    khay để ẩn. Mỗi thao tác có nút thay thế (bấm chip = thêm cuối; ‹ › và "Ẩn cột" trong panel). Đã kiểm kéo bằng bàn phím.
+  - **Từng cột**: tên cột riêng cho bảng, độ rộng 80–640px, căn trái/giữa/phải, nội dung dài theo bảng/ngắt dòng/một dòng,
+    **cách hiển thị riêng cho bảng** (`column.display`; trống = dùng `displayConfig` ở Hiển thị). Tiêu đề không ẩn được
+    nhưng đặt ở đâu cũng được.
+  - **Ảnh**: vị trí không hiện / trong ô tiêu đề / **cột riêng** (pseudo-cột `__cover__`, kéo được như prop), hình
+    vuông/tròn/ngang 16:9/dọc 3:4, cỡ 24/36/56px, nguồn ảnh (= `coverSource` chung của view).
+  - **Cả bảng**: độ cao dòng gọn/vừa/thoáng, ngắt dòng mặc định, **cố định các cột tới cột tiêu đề** khi cuộn ngang,
+    số thứ tự (đếm lại mỗi nhóm), kẻ sọc.
+  - Độ rộng đi qua biến CSS `--w0…` đặt trên bảng nên kéo mép cột không render lại dòng; ô cố định lặp `--row-bg`.
+  - Chưa cấu hình → tiêu đề + các prop đang nằm trên card của view (không có thì 6 prop đầu). Dữ liệu cũ `thumbnail` vẫn đọc được.
+  - Danh sách kiểu hiển thị nay ở `lib/display-kinds.ts`; `card/property-panel.tsx` vẫn giữ bản sao riêng (chưa gộp).
+- **Trên bảng**: kéo mép tiêu đề cột để đổi độ rộng (hoặc focus tay cầm + ←/→, Shift = bước lớn), lưu ngay;
+  **bấm tiêu đề cột** = đưa cột lên đầu sort tăng → giảm → bỏ, các mức sort khác giữ nguyên (cùng `sortConfig` của toolbar).
+- Dòng dùng chung link `g-card-link` nên popup ‹ › đi theo thứ tự dòng; nhóm → mỗi nhóm một bảng; "Xem thêm" như card.
+- Tab view dạng bảng có icon bảng. View nhân bản/tạo mới từ view bảng giữ dạng bảng.
+- ⚠ Dev server đang chạy sẽ báo `reading 'apply'` khi gọi server action mới thêm — restart `next dev` (cùng họ bẫy 4).
+
 ### 4.8 Data model
 
 ```
@@ -273,7 +306,7 @@ CoverPosition      → galleryId + notionPageId, posX, posY
 ```
 
 `Gallery.displayConfig` chứa: `coverAspect`, `coverRatio`, `coverSource`, `cardsPerRow`, `randomPick`,
-`card`, `detailCard`, `detailWidth`, `detailCoverAspect/Ratio`,
+`card`, `detailCard`, `detailWidth`, `detailCoverAspect/Ratio`, `viewType`, `table`,
 `formCard`, `formDefaults`, `formLastValues`, `formCoverTarget`, `formCoverAspect/Ratio`.
 
 **Đã xoá:** `Gallery.detailLayout`, model `LayoutTemplate`, `PropertyConfig.hidden` (đổi tên thành `disabled`).

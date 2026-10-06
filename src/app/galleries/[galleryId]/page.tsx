@@ -33,7 +33,7 @@ import {
   parseGalleryQuery,
   returnQueryString,
 } from "@/lib/gallery-query";
-import { ensureGalleryViews, parseViewLayoutConfig, parseViewQuery } from "@/lib/gallery-view";
+import { ensureGalleryViews, parseViewLayoutConfig, parseViewQuery, viewTypeOf } from "@/lib/gallery-view";
 import { configTypeOf } from "@/lib/property-kind";
 import { parseDisplayConfig } from "@/lib/display-config";
 import { RelationGalleryMenu } from "@/components/relation-gallery-menu";
@@ -47,6 +47,17 @@ import { itemHref, type RenderContext } from "@/lib/property-render";
 import { shortHash } from "@/lib/short-hash";
 import { notionPageUrl } from "@/lib/notion-url";
 import { GalleryHeader, type SettingsLink } from "@/components/gallery-header";
+import { GalleryTableRow, buildTableCells, type TableThumb } from "@/components/gallery-table";
+import { TableFrame, type TableHeaderColumn, type TableLook } from "@/components/table-frame";
+import {
+  createDefaultTableLayout,
+  parseTableLayout,
+  parseViewType,
+  resolveTableColumns,
+  stickyColumnCount,
+  thumbBox,
+  type ViewType,
+} from "@/lib/table-layout";
 import { TrashedGalleryState } from "@/components/trashed-gallery";
 import { settingsHref } from "@/components/settings-header";
 import { Icon } from "@/components/icons";
@@ -194,7 +205,17 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
   const cardsPerRow = resolveCardsPerRow(viewConfig);
   const coverRatio = resolveCoverRatio(viewConfig);
   const cardKind = cardKindOf(cardLayout.arrangement, cardKindOrientation, cardLayout.extended);
-  const showCover = cardLayout.cover !== "none" && Boolean(coverRatio);
+  const viewType = parseViewType(viewConfig.viewType);
+  const isTable = viewType === "table";
+  const tableLayout = isTable
+    ? (parseTableLayout(viewConfig.table) ?? createDefaultTableLayout(gallery.propertyConfigs, parseCardLayout(viewConfig.card)))
+    : null;
+  const tableColumns = tableLayout ? resolveTableColumns(tableLayout, gallery.propertyConfigs) : [];
+  // A table's picture has its own shape and size, whatever the cards use.
+  const tableThumbBox = tableLayout && tableLayout.cover.placement !== "none" ? thumbBox(tableLayout.cover) : null;
+  const coverFrame = tableLayout ? (tableThumbBox?.ratio ?? null) : cardLayout.cover !== "none" ? coverRatio : null;
+  const coverRound = tableLayout ? tableLayout.cover.shape === "circle" : isRoundCover(viewConfig.coverAspect);
+  const showCover = Boolean(coverFrame);
   const visibleIds = visiblePages.map((page) => page.id);
 
   // Everything per-card the grid needs, in one round of parallel local reads. The cover
@@ -210,7 +231,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
   const positions = new Map(positionRows.map((position) => [position.notionPageId, position]));
 
   const coverModelOf = (page: PageObjectResponse): CardCoverModel | null => {
-    if (!showCover || !coverRatio) return null;
+    if (!coverFrame) return null;
     const cached = cachedCoversByPageId.get(page.id);
     // undefined: a content image nobody has looked for yet.
     const sourceUrl =
@@ -228,8 +249,8 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
           }
         : null;
     return {
-      ratio: coverRatio,
-      round: isRoundCover(viewConfig.coverAspect),
+      ratio: coverFrame,
+      round: coverRound,
       key: variants ? `v${shortHash(variants.imageUrl)}` : sourceKey ? `s${shortHash(sourceKey)}` : "none",
       hasSource: sourceUrl === undefined && viewConfig.coverSource === CONTENT_IMAGE ? undefined : Boolean(sourceUrl),
       previewUrl: variants?.previewUrl,
@@ -280,6 +301,7 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
       ? {
           ratio: formCoverShape.ratio.replace(":", " / "),
           round: isRoundCover(formCoverShape.aspect),
+          target: formCoverTarget,
           targetLabel: formCoverTarget.startsWith(PROPERTY_PREFIX)
             ? `prop "${formCoverTarget.slice(PROPERTY_PREFIX.length)}"`
             : formCoverTarget === CONTENT_IMAGE
@@ -332,27 +354,107 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
     );
   };
 
+  const titleConfig = managed.find((config) => config.notionPropertyType === "title");
+  const stickyCount = tableLayout ? stickyColumnCount(tableLayout, tableColumns) : 0;
+  const tableCells = tableLayout ? buildTableCells(tableColumns, tableLayout, stickyCount) : [];
+  const tableHeader: TableHeaderColumn[] = tableColumns.map((column, index) => {
+    const config = column.isTitle ? titleConfig : column.property;
+    const name = column.isCover
+      ? "Ảnh"
+      : (config && parseDisplayConfig(config.displayConfig).nameOverride?.trim()) ||
+        (config?.notionPropertyName ?? titlePropertyName ?? "Tên");
+    return {
+      id: column.id,
+      label: column.label || name,
+      width: column.width,
+      sortId: column.isCover ? null : (config?.notionPropertyId ?? null),
+      resizable: !column.isCover,
+      align: tableCells[index].align,
+      left: tableCells[index].left,
+    };
+  });
+  const tableLook: TableLook = {
+    density: tableLayout?.density ?? "normal",
+    stripes: tableLayout?.stripes === true,
+    rowNumbers: tableLayout?.rowNumbers === true,
+    numberSticky: stickyCount > 0,
+  };
+  const tableThumb: TableThumb | null =
+    tableLayout && tableThumbBox
+      ? { ...tableThumbBox, round: coverRound, inTitle: tableLayout.cover.placement === "title" }
+      : null;
+  const renderTable = (list: PageObjectResponse[]) => (
+    <TableFrame
+      galleryId={galleryId}
+      viewId={activeView.id}
+      columns={tableHeader}
+      query={{ filters: query.filters, sorts: query.sorts, groupBy: query.groupBy }}
+      look={tableLook}
+    >
+      {list.map((page, index) => (
+        <GalleryTableRow
+          key={page.id}
+          page={page}
+          title={getPageTitle(page, titlePropertyName)}
+          icon={getPageIcon(page)}
+          href={`${itemHref(galleryId, page.id)}${itemSuffix}`}
+          cells={tableCells}
+          cover={coverModelOf(page)}
+          thumb={tableThumb}
+          rowNumber={tableLook.rowNumbers ? index + 1 : null}
+          numberSticky={tableLook.numberSticky}
+          galleryId={galleryId}
+          viewId={activeView.id}
+          context={{ galleryId, pageId: page.id, surface: "card", relations: relationLinks, buttons }}
+        />
+      ))}
+    </TableFrame>
+  );
+  const renderItems = isTable ? renderTable : renderPrioritizedGrid;
+
   const narrowed = isQueryActive(query) || Boolean(activeValue);
-  const settings: SettingsLink[] = [
-    {
-      href: settingsHref(galleryId, "display", activeView.id, returnQuery),
-      label: "Hiển thị",
-      icon: "eye",
-      hint: "Định dạng từng property, số card mỗi hàng",
-    },
-    {
-      href: settingsHref(galleryId, "card", activeView.id, returnQuery),
-      label: "Bố cục card",
-      icon: "layout",
-      hint: "Ảnh bìa, khung card, Card Detail và form thêm",
-    },
-    {
-      href: settingsHref(galleryId, "category", activeView.id, returnQuery),
-      label: "Phân loại",
-      icon: "tag",
-      hint: "Thanh lọc nhanh theo select, tag, checkbox",
-    },
-  ];
+  const displayLink = (hint: string): SettingsLink => ({
+    href: settingsHref(galleryId, "display", activeView.id, returnQuery),
+    label: "Hiển thị",
+    icon: "eye",
+    hint,
+  });
+  const categoryLink: SettingsLink = {
+    href: settingsHref(galleryId, "category", activeView.id, returnQuery),
+    label: "Phân loại",
+    icon: "tag",
+    hint: "Thanh lọc nhanh theo select, tag, checkbox",
+  };
+  // What the Tuỳ chỉnh menu offers depends on the view's type; both lists travel so the menu
+  // can switch them the moment the type is picked, before the server answers.
+  const settingsByType: Record<ViewType, SettingsLink[]> = {
+    gallery: [
+      displayLink("Định dạng từng property, số card mỗi hàng"),
+      {
+        href: settingsHref(galleryId, "card", activeView.id, returnQuery),
+        label: "Bố cục card",
+        icon: "layout",
+        hint: "Ảnh bìa, khung card, Card Detail và form thêm",
+      },
+      categoryLink,
+    ],
+    table: [
+      displayLink("Định dạng giá trị trong từng ô"),
+      {
+        href: settingsHref(galleryId, "table", activeView.id, returnQuery),
+        label: "Cột bảng",
+        icon: "table",
+        hint: "Chọn cột, thứ tự, độ rộng, ảnh nhỏ, ngắt dòng",
+      },
+      {
+        href: settingsHref(galleryId, "card", activeView.id, returnQuery, { mode: "detail" }),
+        label: "Card Detail & form",
+        icon: "layout",
+        hint: "Bố cục khi mở một dòng, và form thêm item",
+      },
+      categoryLink,
+    ],
+  };
 
   /** The current Gallery address minus some state — for "clear this" links in empty states. */
   const hrefWithout = (...keys: string[]) => {
@@ -364,6 +466,28 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
     return `/galleries/${galleryId}${qs ? `?${qs}` : ""}`;
   };
   const parent = gallery.parentGallery && !gallery.parentGallery.deletedAt ? gallery.parentGallery : null;
+
+  // Galleries nested together read as one set of tabs: the parent, then siblings in sidebar
+  // order around this gallery's own views, then its children. See GalleryViewBar.
+  const groupRows = await db.gallery.findMany({
+    where: {
+      workspaceId: gallery.workspaceId,
+      deletedAt: null,
+      id: { not: galleryId },
+      OR: [...(parent ? [{ id: parent.id }, { parentGalleryId: parent.id }] : []), { parentGalleryId: galleryId }],
+    },
+    select: { id: true, name: true, icon: true, parentGalleryId: true, sortOrder: true },
+  });
+  const bySidebarOrder = (a: { sortOrder: number; name: string }, b: { sortOrder: number; name: string }) =>
+    a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, "vi");
+  const siblings = parent ? groupRows.filter((row) => row.parentGalleryId === parent.id).sort(bySidebarOrder) : [];
+  const parentTab = groupRows.filter((row) => row.id === parent?.id);
+  const linkedBefore = [...parentTab, ...siblings.filter((row) => bySidebarOrder(row, gallery) < 0)];
+  const linkedAfter = [
+    ...siblings.filter((row) => bySidebarOrder(row, gallery) >= 0),
+    ...groupRows.filter((row) => row.parentGalleryId === galleryId).sort(bySidebarOrder),
+  ];
+  const linkedTab = (row: { id: string; name: string; icon: string | null }) => ({ id: row.id, name: row.name, icon: row.icon });
   const syncedAt = gallery.notionCache ? (gallery.notionCache.lastDeltaSyncAt ?? gallery.notionCache.updatedAt) : null;
 
   return (
@@ -374,7 +498,9 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
         galleryId={galleryId}
         name={gallery.name}
         notionUrl={notionPageUrl(gallery.notionDatabaseId)}
-        settings={settings}
+        viewId={activeView.id}
+        viewType={viewType}
+        settingsByType={settingsByType}
         crumbs={
           <nav aria-label="Vị trí" className="flex min-w-0 items-center gap-1 text-[13px] text-muted">
             <Link href="/" className="rounded-md hover:text-ink">
@@ -418,11 +544,15 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
 
       {/* Sticky on wider screens so search and filters stay in reach down a long grid; on a
           phone it would eat a fifth of the screen. */}
-      <div className="z-20 -mx-5 mb-5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-y border-line bg-surface/85 px-5 py-2.5 backdrop-blur-md sm:-mx-8 sm:px-8 md:sticky md:top-0">
+      <div className="relative z-20 -mx-5 mb-5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-y border-line bg-surface/85 px-5 py-2.5 backdrop-blur-md sm:-mx-8 sm:px-8 md:sticky md:top-0">
         <GalleryViewBar
+          workspaceId={gallery.workspaceId}
           galleryId={galleryId}
-          views={views.map((view) => ({ id: view.id, name: view.name }))}
+          galleryName={gallery.name}
+          views={views.map((view) => ({ id: view.id, name: view.name, type: viewTypeOf(view) }))}
           activeViewId={activeView.id}
+          linkedBefore={linkedBefore.map(linkedTab)}
+          linkedAfter={linkedAfter.map(linkedTab)}
         />
         <GalleryToolbar
           galleryId={galleryId}
@@ -488,12 +618,12 @@ export default async function GalleryPage({ params, searchParams }: PageProps<"/
                   {group.pages.length === group.total ? group.total : `${group.pages.length} / ${group.total}`}
                 </span>
               </h2>
-              {renderPrioritizedGrid(group.pages)}
+              {renderItems(group.pages)}
             </section>
           ))}
         </div>
       ) : (
-        renderPrioritizedGrid(visiblePages)
+        renderItems(visiblePages)
       )}
 
       {visiblePages.length < pages.length && (

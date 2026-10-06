@@ -7,6 +7,7 @@ import { isNotionAccessError } from "@/lib/notion-errors";
 import { NotionProblemState } from "@/components/notion-problem";
 import { SettingsHeader } from "@/components/settings-header";
 import { SELECT_AXIS_TYPES, listAxisCandidates } from "@/lib/category";
+import { viewTypeOf } from "@/lib/gallery-view";
 import { CategoryForm } from "./category-form";
 
 export const metadata: Metadata = { title: "Phân loại" };
@@ -21,7 +22,11 @@ export default async function CategorySettingsPage({
   const backQuery = typeof back === "string" ? back : undefined;
   const gallery = await db.gallery.findUnique({
     where: { id: galleryId },
-    include: { workspace: true, categoryAxes: { orderBy: { sortOrder: "asc" } } },
+    include: {
+      workspace: true,
+      categoryAxes: { orderBy: { sortOrder: "asc" } },
+      views: { orderBy: { sortOrder: "asc" }, select: { id: true, layoutConfig: true } },
+    },
   });
   if (!gallery) notFound();
 
@@ -58,6 +63,7 @@ export default async function CategorySettingsPage({
         galleryId={galleryId}
         galleryName={gallery.name}
         viewId={viewId}
+        viewType={viewTypeOf(gallery.views.find((view) => view.id === viewId) ?? gallery.views[0])}
         back={backQuery}
         active="category"
         description="Chọn property dùng để phân loại item. Mỗi property được chọn thành một thanh lọc phía trên Gallery."

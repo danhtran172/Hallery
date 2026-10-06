@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createItem, type CreateItemState } from "@/app/galleries/[galleryId]/create-item-actions";
-import { ImageDropZone } from "@/components/image-drop-zone";
+import { ImagePicker } from "@/components/image-picker";
 import { createFieldName } from "@/lib/create-form";
 import { Icon } from "@/components/icons";
 import { settingsHref } from "@/components/settings-header";
@@ -40,7 +40,7 @@ export function CreateItemPopup({
   fields: CreateFormField[];
   columns: 1 | 2;
   /** Present when the form's layout includes a cover; null when it does not. */
-  cover: { ratio: string; round: boolean; targetLabel: string } | null;
+  cover: { ratio: string; round: boolean; target: string; targetLabel: string } | null;
 }) {
   const [open, setOpen] = useState(false);
   const [created, setCreated] = useState<string | null>(null);
@@ -134,7 +134,13 @@ export function CreateItemPopup({
             <form onSubmit={submit} className="flex flex-col gap-3.5">
               {cover && (
                 <div>
-                  <ImageDropZone name="coverImage" ratio={cover.ratio} round={cover.round} active={open} />
+                  {/* The create form's targets are all places an upload can live. */}
+                  <ImagePicker
+                    slot={{ target: cover.target, acceptsUpload: true, targetLabel: cover.targetLabel }}
+                    ratio={cover.ratio}
+                    round={cover.round}
+                    active={open}
+                  />
                   <p className="mt-1 text-[11px] text-faint">Lưu vào: {cover.targetLabel}</p>
                 </div>
               )}

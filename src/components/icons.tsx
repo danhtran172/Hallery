@@ -18,6 +18,8 @@ const PATHS = {
   "chevron-right": <path d="m9.5 18 6-6-6-6" />,
   "chevron-down": <path d="m6 9.5 6 6 6-6" />,
   "arrow-left": <path d="M19 12H5m6 6-6-6 6-6" />,
+  "arrow-up": <path d="M12 19V5m-6 6 6-6 6 6" />,
+  "arrow-down": <path d="M12 5v14m6-6-6 6-6-6" />,
   menu: <path d="M4 7h16M4 12h16M4 17h10" />,
   "panel-left": (
     <>
@@ -100,6 +102,12 @@ const PATHS = {
       <rect x="13" y="4" width="7" height="7" rx="2" />
       <rect x="4" y="13" width="7" height="7" rx="2" />
       <rect x="13" y="13" width="7" height="7" rx="2" />
+    </>
+  ),
+  table: (
+    <>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="3" />
+      <path d="M3.5 9.5h17m-17 5h17m-11-5v10" />
     </>
   ),
   layout: (

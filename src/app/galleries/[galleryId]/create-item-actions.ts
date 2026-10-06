@@ -11,7 +11,15 @@ import { CONTENT_IMAGE, PAGE_COVER, PROPERTY_PREFIX, parseGalleryConfig } from "
 import { FORM_FIELD_TYPES, TITLE_PROPERTY_ID, createFieldName, parseFormDefaults, type FormLastValues } from "@/lib/create-form";
 import { parseDisplayConfig } from "@/lib/display-config";
 import { NOTION_PROBLEM_COPY, classifyNotionError } from "@/lib/notion-errors";
-import { MAX_UPLOAD_BYTES } from "@/components/image-drop-zone";
+import {
+  ImageError,
+  coverPayload,
+  imageBlock,
+  propertyPayload,
+  readPickedImage,
+  toNotionImage,
+  type NotionImage,
+} from "@/lib/cover-write";
 
 export type CreateItemState = { error: string | null; createdPageId?: string; createdAt?: number };
 
@@ -36,6 +44,8 @@ export async function createItem(
   const config = parseGalleryConfig(gallery.displayConfig);
   const defaults = parseFormDefaults(config.formDefaults);
   const byId = new Map(gallery.propertyConfigs.map((property) => [property.notionPropertyId, property]));
+  // Image targets name their property; its type decides whether it holds a file or a link.
+  const propertyTypes = new Map(gallery.propertyConfigs.map((property) => [property.notionPropertyName, property.notionPropertyType]));
   const layout = parseCardLayout(config.formCard);
 
   // The fields the form was built from, not whatever the browser chose to send: an empty
@@ -73,34 +83,21 @@ export async function createItem(
   const notion = getNotionClient(gallery.workspace.accessToken);
 
   // The image is uploaded before the page exists, so its id can be attached in the same
-  // create call rather than costing a second write.
-  const picked = formData.get("coverImage");
-  let uploadId: string | null = null;
-  if (picked instanceof File && picked.size > 0) {
-    if (picked.size > MAX_UPLOAD_BYTES) {
-      return { error: "Ảnh vượt quá 20MB — Notion không nhận trong một lần tải." };
-    }
-    try {
-      const upload = await notion.fileUploads.create({
-        mode: "single_part",
-        filename: picked.name || "cover",
-        content_type: picked.type || "image/png",
-      });
-      await notion.fileUploads.send({
-        file_upload_id: upload.id,
-        file: { filename: picked.name || "cover", data: picked },
-      });
-      uploadId = upload.id;
-    } catch {
-      return { error: "Không tải được ảnh lên Notion. Item chưa được tạo — thử lại hoặc bỏ ảnh ra." };
-    }
-  }
-
+  // create call rather than costing a second write. A pasted link needs no upload at all.
+  const picked = readPickedImage(formData);
   const target = config.formCoverTarget ?? PAGE_COVER;
-  if (uploadId && target.startsWith(PROPERTY_PREFIX)) {
-    properties[target.slice(PROPERTY_PREFIX.length)] = {
-      files: [{ type: "file_upload", file_upload: { id: uploadId }, name: picked instanceof File ? picked.name : "cover" }],
-    };
+  let image: NotionImage | null = null;
+  if (picked) {
+    try {
+      image = await toNotionImage(notion, picked);
+      if (target.startsWith(PROPERTY_PREFIX)) {
+        const name = target.slice(PROPERTY_PREFIX.length);
+        properties[name] = propertyPayload(propertyTypes.get(name) ?? "files", image);
+      }
+    } catch (error) {
+      const reason = error instanceof ImageError ? error.message : "Không xử lý được ảnh.";
+      return { error: `${reason} Item chưa được tạo.` };
+    }
   }
 
   let created: Awaited<ReturnType<typeof notion.pages.create>>;
@@ -108,14 +105,10 @@ export async function createItem(
     created = await notion.pages.create({
       parent: { data_source_id: gallery.notionDataSourceId },
       properties: properties as CreatePageParameters["properties"],
-      ...(uploadId && target === PAGE_COVER
-        ? { cover: { type: "file_upload" as const, file_upload: { id: uploadId } } }
-        : {}),
+      ...(image && target === PAGE_COVER ? { cover: coverPayload(image) } : {}),
       // Into the body as an image block. This is the one target the gallery can read back
       // as a cover through its own content_image source, closing that loop.
-      ...(uploadId && target === CONTENT_IMAGE
-        ? { children: [{ type: "image" as const, image: { file_upload: { id: uploadId } } }] }
-        : {}),
+      ...(image && target === CONTENT_IMAGE ? { children: [imageBlock(image)] } : {}),
     });
   } catch (error) {
     const problem = classifyNotionError(error);

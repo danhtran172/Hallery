@@ -266,17 +266,42 @@ function NumberValue({ value, cfg }: { value: number | null; cfg: DisplayConfig 
   if (value === null) return <Empty />;
   if (cfg.kind === "rate") {
     const max = cfg.max && cfg.max > 0 ? Math.min(Math.round(cfg.max), 10) : 5;
-    const filled = Math.max(0, Math.min(max, Math.round(value)));
+    // Snap to the nearest half so 3.5 reads as three and a half stars, not four.
+    const score = Math.max(0, Math.min(max, Math.round(value * 2) / 2));
+    // Exactly one point over the top (6 on a 5-star scale) is a peak score: every star
+    // plus a special one.
+    const peak = value === max + 1;
+    const label = `${formatNumber(value)}/${max}${peak ? " · Điểm đỉnh" : ""}`;
     return (
-      <span role="img" aria-label={`${value}/${max}`} title={`${value}/${max}`} className="tracking-tight text-amber-500">
-        {"★".repeat(filled)}
-        <span className="text-stone-300">{"★".repeat(max - filled)}</span>
+      <span role="img" aria-label={label} title={label} className="inline-flex tracking-tight">
+        {Array.from({ length: max }, (_, i) => (
+          <Star key={i} fill={Math.max(0, Math.min(1, score - i))} />
+        ))}
+        {peak && (
+          <span aria-hidden className="star-peak ml-0.5">
+            ★
+          </span>
+        )}
       </span>
     );
   }
   if (cfg.kind === "duration") return <span>{formatDuration(value)}</span>;
   if (cfg.kind === "with_text") return <span>{withAffixes(formatNumber(value), cfg)}</span>;
   return <span className="tabular-nums">{formatNumber(value)}</span>;
+}
+
+/** One rating star: an empty star with the filled one clipped over it (0, ½ or a whole). */
+function Star({ fill }: { fill: number }) {
+  return (
+    <span aria-hidden className="relative inline-block text-stone-300">
+      ★
+      {fill > 0 && (
+        <span className="absolute inset-y-0 left-0 overflow-hidden whitespace-nowrap text-amber-500" style={{ width: `${fill * 100}%` }}>
+          ★
+        </span>
+      )}
+    </span>
+  );
 }
 
 /** Thousands grouped the Vietnamese way (1.234,5), without inventing decimals. */
@@ -538,15 +563,17 @@ function ButtonValue({ propertyId, context }: { propertyId: string; context?: Re
         pageId={context.pageId}
         propertyId={propertyId}
         label={config.label || "Chạy"}
+        icon={config.icon}
+        color={config.color}
         confirm={config.confirm}
         compact={context.surface === "card"}
       />
     );
   }
-  // Notion exposes no way to press its own buttons, so an unconfigured one is honest about it.
+  // A button with no steps yet says so rather than pretending to be pressable.
   return (
     <span
-      title="Nút Notion không chạy được qua API. Gán hành động cho nó trong Cài đặt hiển thị."
+      title="Nút này chưa có bước nào. Cấu hình ở Bố cục card → chọn nút → Cấu hình nút."
       className="inline-flex items-center rounded-full border border-dashed border-line-strong px-2.5 py-0.5 text-xs text-faint"
     >
       Nút chưa cấu hình

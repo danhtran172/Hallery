@@ -1,14 +1,30 @@
 import Link from "next/link";
 import { RETURN_PARAM, galleryHrefFromReturn } from "@/lib/gallery-query";
 import { Icon, type IconName } from "@/components/icons";
+import type { ViewType } from "@/lib/table-layout";
 
-export type SettingsSection = "display" | "card" | "category";
+export type SettingsSection = "display" | "card" | "table" | "category";
 
-const SECTIONS: { id: SettingsSection; label: string; path: string; icon: IconName }[] = [
-  { id: "display", label: "Hiển thị", path: "display", icon: "eye" },
-  { id: "card", label: "Bố cục card", path: "card", icon: "layout" },
-  { id: "category", label: "Phân loại", path: "category", icon: "tag" },
-];
+type Section = { id: SettingsSection; label: string; icon: IconName; extra?: Record<string, string> };
+
+/**
+ * The sections follow the view's type. A table has no card to arrange, so "Bố cục card"
+ * gives way to its columns, and what is left of the card editor — the Card Detail a row
+ * opens and the add form — keeps a tab of its own.
+ */
+const SECTIONS: Record<ViewType, Section[]> = {
+  gallery: [
+    { id: "display", label: "Hiển thị", icon: "eye" },
+    { id: "card", label: "Bố cục card", icon: "layout" },
+    { id: "category", label: "Phân loại", icon: "tag" },
+  ],
+  table: [
+    { id: "display", label: "Hiển thị", icon: "eye" },
+    { id: "table", label: "Cột bảng", icon: "table" },
+    { id: "card", label: "Card Detail & form", icon: "layout", extra: { mode: "detail" } },
+    { id: "category", label: "Phân loại", icon: "tag" },
+  ],
+};
 
 /** The query a settings screen carries: the view being edited and the way back to the grid. */
 export function settingsQuery(viewId: string | undefined, back: string | undefined, extra?: Record<string, string>) {
@@ -26,7 +42,7 @@ export function settingsHref(galleryId: string, section: SettingsSection, viewId
 }
 
 /**
- * One header for a Gallery's three settings screens: the way back, and tabs between them.
+ * One header for a Gallery's settings screens: the way back, and tabs between them.
  * The view travels along, so whatever view the reader came from is the one being edited, and
  * "back" returns to the Gallery exactly as it was — search, category and all.
  */
@@ -34,6 +50,7 @@ export function SettingsHeader({
   galleryId,
   galleryName,
   viewId,
+  viewType = "gallery",
   back,
   active,
   description,
@@ -42,6 +59,8 @@ export function SettingsHeader({
   galleryId: string;
   galleryName: string;
   viewId?: string;
+  /** Which kind of view is being set up — it decides the tabs. */
+  viewType?: ViewType;
   /** The Gallery's own query string when the reader came from it. */
   back?: string;
   active: SettingsSection;
@@ -49,6 +68,7 @@ export function SettingsHeader({
   /** Tighter spacing for full-height editors. */
   compact?: boolean;
 }) {
+  const sections = SECTIONS[viewType];
   const backHref = back ? galleryHrefFromReturn(galleryId, back) : `/galleries/${galleryId}${viewId ? `?view=${viewId}` : ""}`;
   return (
     <header className={compact ? "mb-4 shrink-0" : "mb-8"}>
@@ -61,13 +81,13 @@ export function SettingsHeader({
       </Link>
       <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
         <h1 className={`display ${compact ? "text-2xl" : "text-3xl"} text-ink`}>
-          {SECTIONS.find((section) => section.id === active)?.label}
+          {sections.find((section) => section.id === active)?.label}
         </h1>
         <nav aria-label="Cài đặt gallery" className="segmented">
-          {SECTIONS.map((section) => (
+          {sections.map((section) => (
             <Link
               key={section.id}
-              href={settingsHref(galleryId, section.id, viewId, back)}
+              href={settingsHref(galleryId, section.id, viewId, back, section.extra)}
               aria-current={section.id === active ? "page" : undefined}
             >
               <Icon name={section.icon} className="size-3.5" />

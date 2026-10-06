@@ -4,30 +4,43 @@ import Link from "next/link";
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { renameGallery } from "@/app/sidebar-actions";
+import { setGalleryViewType } from "@/app/galleries/[galleryId]/view-actions";
 import { Icon, type IconName } from "@/components/icons";
 import { toast } from "@/components/toaster";
 import { useDismiss } from "@/lib/use-dismiss";
+import type { ViewType } from "@/lib/table-layout";
+
+const VIEW_TYPES: { value: ViewType; label: string; icon: IconName }[] = [
+  { value: "gallery", label: "Gallery", icon: "grid" },
+  { value: "table", label: "Bảng", icon: "table" },
+];
 
 export type SettingsLink = { href: string; label: string; icon: IconName; hint: string };
 
 /**
  * The Gallery's title row. The title renames in place; everything about how the Gallery
  * looks sits behind one "Tuỳ chỉnh" menu, so the header stays a title and two actions.
+ * The menu opens on the view's type — cards or a table — and the settings under it follow
+ * that type, switching the moment another is picked.
  */
 export function GalleryHeader({
   galleryId,
+  viewId,
+  viewType,
   name,
   crumbs,
   meta,
-  settings,
+  settingsByType,
   notionUrl,
   actions,
 }: {
   galleryId: string;
+  viewId: string;
+  viewType: ViewType;
   name: string;
   crumbs: React.ReactNode;
   meta: React.ReactNode;
-  settings: SettingsLink[];
+  settingsByType: Record<ViewType, SettingsLink[]>;
   notionUrl: string;
   actions: React.ReactNode;
 }) {
@@ -43,6 +56,32 @@ export function GalleryHeader({
   if (lastName !== name) {
     setLastName(name);
     setShown(name);
+  }
+  // The picked type shows at once; the server's answer (or a failure) settles it.
+  const [type, setType] = useState(viewType);
+  const [lastType, setLastType] = useState(`${viewId}:${viewType}`);
+  if (lastType !== `${viewId}:${viewType}`) {
+    setLastType(`${viewId}:${viewType}`);
+    setType(viewType);
+  }
+  const [switching, startSwitch] = useTransition();
+  const settings = settingsByType[type];
+
+  function switchType(next: ViewType) {
+    if (next === type) return;
+    setType(next);
+    startSwitch(async () => {
+      try {
+        const result = await setGalleryViewType(galleryId, viewId, next);
+        if (result.error) {
+          setType(viewType);
+          toast(result.error, "error");
+        } else router.refresh();
+      } catch {
+        setType(viewType);
+        toast("Không đổi được dạng hiển thị. Thử lại sau giây lát.", "error");
+      }
+    });
   }
 
   function rename(next: string) {
@@ -102,6 +141,25 @@ export function GalleryHeader({
           </button>
           {open && (
             <div role="menu" className="popover absolute top-full right-0 z-40 mt-2 w-72 p-1.5 max-sm:right-auto max-sm:left-0">
+              <div className="px-2 pt-1.5 pb-2">
+                <p className="mb-1.5 text-[11px] font-medium text-faint">Dạng hiển thị của view này</p>
+                <div role="radiogroup" aria-label="Dạng hiển thị" className={`segmented w-full ${switching ? "opacity-70" : ""}`}>
+                  {VIEW_TYPES.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={type === option.value}
+                      onClick={() => switchType(option.value)}
+                      className="flex-1 justify-center"
+                    >
+                      <Icon name={option.icon} className="size-3.5" />
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="mb-1 h-px bg-line" />
               {settings.map((link) => (
                 <Link
                   key={link.href}

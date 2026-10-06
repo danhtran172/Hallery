@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { parseDisplayConfig, type DisplayConfig } from "@/lib/display-config";
-import { configTypeOf } from "@/lib/property-kind";
+import { configTypeOf, isConfigStranded } from "@/lib/property-kind";
 import { TITLE_FIELD_ID } from "@/lib/card-layout";
+import { AFFIX_TYPES, KIND_OPTIONS, allowsAffix } from "@/lib/display-kinds";
 
 export type PanelProperty = {
   notionPropertyId: string;
@@ -12,33 +13,6 @@ export type PanelProperty = {
   resolvedType: string | null;
   displayConfig: string;
 };
-
-const KIND_OPTIONS: Record<string, { value: string; label: string }[]> = {
-  number: [
-    { value: "plain", label: "Số thường" },
-    { value: "rate", label: "Sao đánh giá" },
-    { value: "duration", label: "Giờ : phút" },
-    { value: "with_text", label: "Kèm chữ trước/sau" },
-  ],
-  url: [
-    { value: "link", label: "Link" },
-    { value: "button", label: "Nút bấm" },
-  ],
-  date: [
-    { value: "full", label: "Ngày/tháng/năm" },
-    { value: "month_only", label: "Chỉ tháng" },
-    { value: "year_only", label: "Chỉ năm" },
-  ],
-  select: [
-    { value: "pill", label: "Pill có màu" },
-    { value: "text", label: "Chữ thường" },
-  ],
-};
-KIND_OPTIONS.status = KIND_OPTIONS.select;
-KIND_OPTIONS.multi_select = KIND_OPTIONS.select;
-
-/** Types where a prefix or suffix reads as sensible rather than noise. */
-const AFFIX_TYPES = new Set(["number", "select", "status", "multi_select", "rich_text"]);
 
 /**
  * Config for whichever property is selected on the canvas. Edits land on the view being
@@ -51,12 +25,15 @@ export function PropertyPanel({
   onToggleLabel,
   onChange,
   isTitle,
+  onConfigureButton,
 }: {
   property: PanelProperty | null;
   showLabel: boolean;
   onToggleLabel: () => void;
   onChange: (propertyId: string, config: DisplayConfig) => void;
   isTitle: boolean;
+  /** For a button: opens the popup where its look, confirmation and steps are set. */
+  onConfigureButton?: () => void;
 }) {
   // Seeded once per property: the caller remounts this panel when the selection changes,
   // which keeps the draft out of an effect that would cascade renders.
@@ -86,7 +63,8 @@ export function PropertyPanel({
 
   const configType = configTypeOf(property.notionPropertyType, property.resolvedType);
   const kinds = KIND_OPTIONS[configType] ?? [];
-  const allowAffix = AFFIX_TYPES.has(configType);
+  const allowAffix = allowsAffix(configType, config.kind);
+  const stranded = isConfigStranded(configType, property.displayConfig);
 
   // Edits stay local until confirmed, so a half-typed name never lands in the draft the
   // form is about to submit.
@@ -115,11 +93,37 @@ export function PropertyPanel({
           value={config.nameOverride ?? ""}
           onChange={(event) => update({ nameOverride: event.target.value })}
           placeholder={property.notionPropertyName}
-          disabled={!showLabel}
-          className="w-full rounded-md border border-line-strong px-2 py-1.5 text-xs outline-none focus:border-brand disabled:bg-canvas disabled:text-faint"
+          className="w-full rounded-md border border-line-strong px-2 py-1.5 text-xs outline-none focus:border-brand"
         />
-        <p className="mt-1 text-[11px] text-faint">Đổi tên ở đây không đổi tên trong Notion.</p>
+        <p className="mt-1 text-[11px] text-faint">
+          Chỉ đổi trong Hallery — tên trong Notion giữ nguyên. Để trống để dùng tên gốc.
+        </p>
       </Section>
+
+      {stranded && (
+        <p className="notice mb-4 text-xs">
+          Kiểu đầu ra đã đổi thành <b>{property.resolvedType}</b>, nên kiểu hiển thị cũ không còn dùng được. Chọn lại
+          bên dưới rồi lưu.
+        </p>
+      )}
+      {configType === "unknown" && (
+        <p className="mb-4 text-xs text-faint">
+          Chưa xác định được kiểu đầu ra của công thức. Mở Gallery một lần (cần ít nhất một item) rồi quay lại đây.
+        </p>
+      )}
+      {onConfigureButton && (
+        <Section label="Nút bấm">
+          <p className="mb-2 text-xs text-ink-soft">
+            Chữ, biểu tượng, màu, hộp hỏi lại và các bước của nút được đặt một lần, dùng chung cho mọi view.
+          </p>
+          <button type="button" onClick={onConfigureButton} className="btn btn-secondary btn-sm">
+            Cấu hình nút
+          </button>
+        </Section>
+      )}
+      {!onConfigureButton && kinds.length === 0 && !AFFIX_TYPES.has(configType) && configType !== "unknown" && (
+        <p className="mb-4 text-xs text-faint">Kiểu này hiển thị theo mặc định — không có tuỳ chỉnh định dạng riêng.</p>
+      )}
 
       {kinds.length > 0 && (
         <Section label="Kiểu hiển thị">
@@ -192,7 +196,8 @@ export function PropertyPanel({
           {dirty ? "Lưu cấu hình" : "Đã lưu"}
         </button>
         <p className="mt-2 text-[11px] text-faint">
-          Cấu hình này dùng chung với Gallery và Card Detail, ghi xuống khi bấm Lưu bố cục.
+          Áp dụng cho mọi view của Gallery. Card và Card Detail định dạng riêng — chỉnh ở tab nào thì tab đó đổi. Ghi
+          xuống khi bấm Lưu bố cục.
         </p>
       </div>
     </Frame>

@@ -60,7 +60,7 @@ export function GalleryCard({
     <div
       // A top cover has no explicit width. It must stretch across the card;
       // `self-start` makes a landscape aspect-ratio box shrink to zero.
-      className={`g-mat ${layout.sideBySide ? "self-start" : "w-full pb-0"}`}
+      className={`g-mat ${layout.sideBySide ? "self-start" : "w-full"}`}
       style={layout.sideBySide ? { width: `${layout.ratio[0]}%` } : undefined}
     >
       <div className={`g-pic${cover.round ? " !rounded-full" : ""}`}>

@@ -1,19 +1,17 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { isFullDataSource } from "@notionhq/client";
 import { db } from "@/lib/db";
-import { PropertyDisplayConfigForm } from "@/components/property-display-config-form";
-import { SettingsHeader } from "@/components/settings-header";
+import Link from "next/link";
+import { SettingsHeader, settingsHref } from "@/components/settings-header";
 import { parseGalleryConfig, resolveCardsPerRow } from "@/lib/notion-cover";
 import { describePropertyType } from "@/lib/property-kind";
-import { ensureGalleryViews, parseViewLayoutConfig } from "@/lib/gallery-view";
+import { ensureGalleryViews, parseViewLayoutConfig, viewTypeOf } from "@/lib/gallery-view";
 import { parseDisplayConfig } from "@/lib/display-config";
-import { opsFor, parseNativeButton } from "@/lib/native-button";
-import { getGalleryNotionSnapshot } from "@/lib/gallery-notion-cache";
+import { parseNativeButton } from "@/lib/native-button";
+import { ButtonEditor } from "@/components/button-editor";
 import { setPropertyDisabled, updatePropertyPlacement } from "./actions";
 import { PropertyList, type ListedProperty } from "./property-list";
 import { GridSettingsForm } from "./grid-settings-form";
-import { ButtonActionsEditor, type WritableProperty } from "./button-actions-editor";
 
 export const metadata: Metadata = { title: "Cài đặt hiển thị" };
 
@@ -40,6 +38,7 @@ export default async function DisplaySettingsPage({
   const properties = gallery.propertyConfigs.filter((p) => p.notionPropertyType !== "title");
   const galleryConfig = parseGalleryConfig(gallery.displayConfig);
   const cardsPerRow = resolveCardsPerRow(parseViewLayoutConfig(view.layoutConfig, galleryConfig));
+  const viewType = viewTypeOf(view);
 
   const selectedId = typeof prop === "string" ? prop : null;
   const selected = properties.find((p) => p.notionPropertyId === selectedId) ?? null;
@@ -50,6 +49,7 @@ export default async function DisplaySettingsPage({
     notionPropertyName: p.notionPropertyName,
     displayName: parseDisplayConfig(p.displayConfig).nameOverride?.trim() || null,
     typeLabel: describePropertyType(p.notionPropertyType, p.resolvedType),
+    type: p.notionPropertyType,
     disabled: p.disabled,
   }));
 
@@ -57,53 +57,23 @@ export default async function DisplaySettingsPage({
   const managed = properties.filter((p) => !p.disabled);
   const managedIndex = selected ? managed.findIndex((p) => p.id === selected.id) : -1;
 
-  // A native button can write to any managed property of a writable type; select-like ones
-  // offer their options, read from the snapshot (no request when it is warm).
-  let writable: WritableProperty[] = [];
-  if (selected?.notionPropertyType === "button") {
-    const snapshot = await getGalleryNotionSnapshot({
-      galleryId,
-      dataSourceId: gallery.notionDataSourceId,
-      accessToken: gallery.workspace.accessToken,
-    }).catch(() => null);
-    const schema = snapshot && isFullDataSource(snapshot.dataSourceRes) ? snapshot.dataSourceRes.properties : {};
-    const schemaById = new Map(Object.values(schema).map((entry) => [entry.id, entry]));
-    writable = managed
-      .filter((property) => opsFor(property.notionPropertyType).length > 0)
-      .map((property) => {
-        const entry = schemaById.get(property.notionPropertyId);
-        const options =
-          entry?.type === "select"
-            ? entry.select.options.map((option) => option.name)
-            : entry?.type === "status"
-              ? entry.status.options.map((option) => option.name)
-              : entry?.type === "multi_select"
-                ? entry.multi_select.options.map((option) => option.name)
-                : undefined;
-        return {
-          notionPropertyId: property.notionPropertyId,
-          name: parseDisplayConfig(property.displayConfig).nameOverride?.trim() || property.notionPropertyName,
-          type: property.notionPropertyType,
-          options,
-        };
-      });
-  }
-
   return (
     <div className="mx-auto w-full max-w-5xl px-5 py-8 sm:px-8 sm:py-10">
       <SettingsHeader
         galleryId={galleryId}
         galleryName={gallery.name}
         viewId={view.id}
+        viewType={viewType}
         back={backQuery}
         active="display"
-        description="Chọn cách mỗi property hiển thị trong Gallery và Card Detail — không đổi gì trong Notion, chỉ đổi cách Hallery trình bày lại giá trị."
+        description={`${viewType === "table" ? "Nút chọn ngẫu nhiên" : "Số card mỗi hàng, nút chọn ngẫu nhiên"}, property nào Hallery quản lý và hành động của nút — không đổi gì trong Notion.`}
       />
 
       <GridSettingsForm
         galleryId={galleryId}
         viewId={view.id}
         viewName={view.name}
+        viewType={viewType}
         cardsPerRow={cardsPerRow}
         randomPick={galleryConfig.randomPick !== false}
       />
@@ -118,13 +88,20 @@ export default async function DisplaySettingsPage({
             <PropertyEditor
               key={selected.id}
               galleryId={galleryId}
+              formatLinks={
+                viewType === "table"
+                  ? [
+                      { label: "Cột bảng", href: settingsHref(galleryId, "table", view.id, backQuery) },
+                      { label: "Card Detail", href: settingsHref(galleryId, "card", view.id, backQuery, { mode: "detail" }) },
+                    ]
+                  : [{ label: "Bố cục card", href: settingsHref(galleryId, "card", view.id, backQuery) }]
+              }
               property={selected}
               isFirst={managedIndex === 0}
               isLast={managedIndex === managed.length - 1}
-              writable={writable}
             />
           ) : (
-            <p className="empty-state py-16">Chọn một property bên trái để chỉnh cách nó hiển thị.</p>
+            <p className="empty-state py-16">Chọn một property bên trái để quản lý nó.</p>
           )}
         </div>
       </div>
@@ -134,24 +111,25 @@ export default async function DisplaySettingsPage({
 
 function PropertyEditor({
   galleryId,
+  formatLinks,
   property,
   isFirst,
   isLast,
-  writable,
 }: {
   galleryId: string;
+  /** Where this property's name and formatting are edited for the open view. */
+  formatLinks: { label: string; href: string }[];
   property: {
     id: string;
+    notionPropertyId: string;
     notionPropertyName: string;
     notionPropertyType: string;
     resolvedType: string | null;
     displayConfig: string;
-    detailDisplayConfig: string;
     disabled: boolean;
   };
   isFirst: boolean;
   isLast: boolean;
-  writable: WritableProperty[];
 }) {
   const place = updatePropertyPlacement.bind(null, galleryId, property.id);
   const toggle = setPropertyDisabled.bind(null, galleryId, property.id, !property.disabled);
@@ -186,16 +164,28 @@ function PropertyEditor({
         </p>
       ) : (
         <div className="flex flex-col gap-6">
-          <PropertyDisplayConfigForm galleryId={galleryId} property={property} />
+          {/* Naming and formatting live beside what they format, where the result shows as it changes. */}
+          <p className="text-sm text-ink-soft">
+            Tên hiển thị, kiểu hiển thị và chữ kèm theo chỉnh ở{" "}
+            {formatLinks.map((link, index) => (
+              <span key={link.href}>
+                {index > 0 && " hoặc "}
+                <Link href={link.href} className="font-medium text-brand-ink underline-offset-2 hover:underline">
+                  {link.label}
+                </Link>
+              </span>
+            ))}
+            .
+          </p>
           {property.notionPropertyType === "button" && (
             <section className="border-t border-line pt-5">
-              <h3 className="mb-3 text-sm font-semibold text-ink">Hành động khi bấm nút</h3>
-              <ButtonActionsEditor
+              <h3 className="mb-3 text-sm font-semibold text-ink">Cấu hình nút</h3>
+              <ButtonEditor
+                key={property.notionPropertyId}
                 galleryId={galleryId}
-                propertyConfigId={property.id}
+                propertyId={property.notionPropertyId}
                 propertyName={display.nameOverride?.trim() || property.notionPropertyName}
                 initial={parseNativeButton(display.button)}
-                properties={writable}
               />
             </section>
           )}

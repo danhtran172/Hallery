@@ -1,41 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { isFullDataSource, type DataSourceObjectResponse } from "@notionhq/client";
 import { db } from "@/lib/db";
-import { getNotionClient } from "@/lib/notion";
-import { classifyNotionError, NOTION_PROBLEM_COPY, type NotionProblem } from "@/lib/notion-errors";
+import { NOTION_PROBLEM_COPY } from "@/lib/notion-errors";
+import { databaseIdOf, dataSourceTitle, listSharedDataSources } from "@/lib/notion-listing";
 import { NOTION_CONNECTIONS_HELP_URL, NOTION_INTEGRATIONS_URL, notionPageUrl } from "@/lib/notion-url";
 import { DataSourcePicker, type PickableDataSource } from "./data-source-picker";
 import { getDataSourceEmoji } from "@/lib/notion-schema";
 import { Icon } from "@/components/icons";
 import { RetryButton } from "@/components/retry-button";
+import { CreateDatabaseButton } from "@/components/create-database-button";
 
 export const metadata: Metadata = { title: "Chọn database" };
-
-/** Enough for any real workspace; a runaway search still stops. */
-const MAX_SEARCH_PAGES = 10;
-
-async function listSharedDataSources(accessToken: string): Promise<DataSourceObjectResponse[] | NotionProblem> {
-  const notion = getNotionClient(accessToken);
-  const found: DataSourceObjectResponse[] = [];
-  try {
-    let cursor: string | undefined;
-    for (let page = 0; page < MAX_SEARCH_PAGES; page += 1) {
-      const response = await notion.search({
-        filter: { property: "object", value: "data_source" },
-        page_size: 100,
-        ...(cursor ? { start_cursor: cursor } : {}),
-      });
-      found.push(...response.results.filter(isFullDataSource));
-      if (!response.has_more || !response.next_cursor) break;
-      cursor = response.next_cursor;
-    }
-    return found;
-  } catch (error) {
-    return classifyNotionError(error);
-  }
-}
 
 const iconOf = getDataSourceEmoji;
 
@@ -59,12 +35,12 @@ export default async function PickDatabasePage({ params, searchParams }: PagePro
       ? []
       : result
           .map((source) => {
-            const databaseId = source.database_parent.type === "database_id" ? source.database_parent.database_id : source.id;
+            const databaseId = databaseIdOf(source);
             const added = addedBySource.get(source.id);
             return {
               id: source.id,
               databaseId,
-              title: source.title.map((t) => t.plain_text).join("") || "Untitled",
+              title: dataSourceTitle(source),
               icon: iconOf(source),
               notionUrl: notionPageUrl(databaseId),
               // An auto-added or trashed gallery can still be picked: picking promotes it.
@@ -84,10 +60,13 @@ export default async function PickDatabasePage({ params, searchParams }: PagePro
         Trang chủ
       </Link>
       <p className="eyebrow mt-6">{workspace.name}</p>
-      <h1 className="display mt-2 text-3xl text-ink sm:text-4xl">Chọn database làm Gallery</h1>
+      <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+        <h1 className="display text-3xl text-ink sm:text-4xl">Chọn database làm Gallery</h1>
+        <CreateDatabaseButton workspaceId={workspace.id} />
+      </div>
       <p className="mt-3 text-sm leading-relaxed text-ink-soft">
         Danh sách chỉ gồm database đã được chia sẻ với integration. Không thấy database cần dùng? Mở nó trong Notion →{" "}
-        <b>•••</b> → <b>Connections</b> → chọn integration, rồi tải lại trang này.
+        <b>•••</b> → <b>Connections</b> → chọn integration, rồi tải lại trang này — hoặc tạo database mới ngay từ đây.
       </p>
 
       {reconnected === "1" && (

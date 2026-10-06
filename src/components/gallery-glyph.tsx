@@ -21,6 +21,7 @@ function tintOf(name: string) {
 }
 
 const SIZES = {
+  xs: "size-4 rounded-[5px] text-[10px]",
   sm: "size-5 rounded-md text-[11px]",
   md: "size-7 rounded-lg text-sm",
   lg: "size-11 rounded-2xl text-xl",

@@ -1,4 +1,5 @@
 import type { PageObjectResponse } from "@notionhq/client";
+import { isHalleryButtonId } from "@/lib/native-button";
 
 export type PagePropertyValue = PageObjectResponse["properties"][string];
 
@@ -20,5 +21,13 @@ function indexOf(page: PageObjectResponse): Map<string, PagePropertyValue> {
 }
 
 export function propertyById(page: PageObjectResponse, propertyId: string): PagePropertyValue | undefined {
+  // A button that lives only in Hallery has no value in Notion. It answers as an empty
+  // button value, so cards, tables and the detail draw it like a Notion button.
+  if (isHalleryButtonId(propertyId)) return halleryButtonValue(propertyId);
   return indexOf(page).get(propertyId);
+}
+
+/** The value a Hallery-only button carries on every page: Notion's own empty button shape. */
+export function halleryButtonValue(propertyId: string): PagePropertyValue {
+  return { id: propertyId, type: "button", button: {} } as PagePropertyValue;
 }

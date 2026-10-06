@@ -2,6 +2,7 @@ import type { Client, DataSourceObjectResponse } from "@notionhq/client";
 import { isFullDataSource } from "@notionhq/client";
 import { db } from "@/lib/db";
 import { defaultViewCreate } from "@/lib/gallery-view";
+import { propertyConfigsCreate } from "@/lib/native-button";
 
 type DataSourceProperties = DataSourceObjectResponse["properties"];
 
@@ -70,14 +71,7 @@ async function upsertGallery(
       name: titleOf(dataSource),
       autoAdded,
       views: defaultViewCreate(),
-      propertyConfigs: {
-        create: Object.entries(dataSource.properties).map(([name, config], index) => ({
-          notionPropertyId: config.id,
-          notionPropertyName: name,
-          notionPropertyType: config.type,
-          sortOrder: index,
-        })),
-      },
+      propertyConfigs: propertyConfigsCreate(dataSource.properties),
     },
   });
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -48,6 +48,10 @@ import {
   PROPERTY_PREFIX,
 } from "@/lib/notion-cover";
 import { parseDisplayConfig, type DisplayConfig } from "@/lib/display-config";
+import { BUTTON_COLOR_CLASSES, parseNativeButton } from "@/lib/native-button";
+import { applyDrop, findLayoutField, placeField, setFieldLabel } from "@/lib/card-layout-edit";
+import { PROPERTY_SEARCH_PLACEHOLDER, matchesPropertySearch, splitButtons } from "@/lib/property-search";
+import { ButtonEditorDialog, NewButtonButton } from "@/components/button-editor";
 import { FORM_FIELD_TYPES, type FormDefaults } from "@/lib/create-form";
 import { FormFieldPanel } from "./form-field-panel";
 import { saveCardLayout, type SaveCardLayoutState } from "./actions";
@@ -55,6 +59,7 @@ import { ArrangementGlyph, RatioGlyph } from "./glyphs";
 import { PropertyPanel, type PanelProperty } from "./property-panel";
 import { LayoutPanel } from "./layout-panel";
 import { Icon } from "@/components/icons";
+import { claimPopupTurn, usePopupTurn } from "@/lib/use-popup-turn";
 
 export type EditableCardProperty = PanelProperty & { detailDisplayConfig: string };
 export type CoverShape = { aspect: CoverOrientation; ratio: string };
@@ -109,11 +114,14 @@ export function CardLayoutEditor({
   uploadProperties,
   previewItems,
   initialMode,
+  tableView,
 }: {
   galleryId: string;
   viewId: string;
   /** Which of the three arrangements opens first — links from the form or detail land on theirs. */
   initialMode?: ViewMode;
+  /** A table view draws no cards, so only the Card Detail and the form are arranged here. */
+  tableView?: boolean;
   properties: EditableCardProperty[];
   initialShape: CoverShape;
   initialDetailShape: CoverShape;
@@ -129,7 +137,9 @@ export function CardLayoutEditor({
   uploadProperties: string[];
   previewItems: PreviewRecord[];
 }) {
-  const [mode, setMode] = useState<ViewMode>(initialMode ?? "gallery");
+  const [mode, setMode] = useState<ViewMode>(
+    tableView && (initialMode ?? "gallery") === "gallery" ? "detail" : (initialMode ?? "gallery"),
+  );
 
   // All three arrangements live here at once so switching views costs nothing and one save
   // commits the set — a half-saved screen is worse than a slightly larger form.
@@ -165,6 +175,8 @@ export function CardLayoutEditor({
   const setShape = formMode ? setFormShape : detailMode ? setDetailShape : setGalleryShape;
 
   const [selected, setSelected] = useState<string | null>(null);
+  /** The button whose settings popup is open, by property id. */
+  const [buttonDialog, setButtonDialog] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [recordPreview, setRecordPreview] = useState(true);
@@ -298,100 +310,23 @@ export function CardLayoutEditor({
       // A form can only offer what Hallery can write, so the rest never reaches the tray.
       .filter((p) => !placed.has(p.notionPropertyId) && (!formMode || formEligible.has(p.notionPropertyId)))
       .map((p) => ({ id: p.notionPropertyId, name: p.notionPropertyName, type: p.notionPropertyType })),
-  ].filter((entry) => entry.name.toLowerCase().includes(search.trim().toLowerCase()));
+  ].filter((entry) => matchesPropertySearch(entry, search));
 
   /* ── mutations ─────────────────────────────────────────────────────────── */
 
-  function removeEverywhere(current: CardLayout, id: string): CardLayout {
-    const strip = (grid: Grid): Grid => ({
-      ...grid,
-      boxes: grid.boxes.map((box) => ({ ...box, fields: box.fields.filter((f) => f.id !== id) })),
-    });
-    return {
-      ...current,
-      overlay: current.overlay.filter((f) => f.id !== id),
-      regions: Object.fromEntries(Object.entries(current.regions).map(([key, grid]) => [key, strip(grid)])),
-    };
-  }
-
-  function findField(current: CardLayout, id: string): CardField {
-    const search = (grid: Grid): CardField | undefined => {
-      for (const box of grid.boxes) {
-        const hit = box.fields.find((f) => f.id === id);
-        if (hit) return hit;
-      }
-      return undefined;
-    };
-    return (
-      current.overlay.find((f) => f.id === id) ??
-      Object.values(current.regions).map(search).find(Boolean) ?? {
-        id,
-        showLabel: current.labelVisibility[id] ?? false,
-      }
-    );
-  }
-
   /** Drops a field into a box, or into the overlay, undoing a merge if it landed on one. */
-  function place(id: string, target: string, beforeId?: string) {
-    setLayout((current) => {
-      const field = findField(current, id);
-      const next = removeEverywhere(current, id);
-
-      if (target === "tray") return next;
-      if (target === "overlay") {
-        if (next.overlay.length >= MAX_OVERLAY_FIELDS) return current;
-        const fields = [...next.overlay];
-        insert(fields, field, beforeId);
-        return { ...next, overlay: fields };
-      }
-
-      const drop = (grid: Grid): Grid => ({
-        ...grid,
-        boxes: grid.boxes.map((box) => {
-          if (box.id === target) {
-            const fields = [...box.fields];
-            insert(fields, field, beforeId);
-            // Dropping into a folded box is the clearest way to say "give it back".
-            const rest = { ...box, fields };
-            delete rest.mergedInto;
-            return rest;
-          }
-          return box;
-        }),
-      });
-
-      return {
-        ...next,
-        regions: Object.fromEntries(Object.entries(next.regions).map(([key, grid]) => [key, drop(grid)])),
-      };
-    });
-  }
+  const place = (id: string, target: string, beforeId?: string) =>
+    setLayout((current) => placeField(current, id, target, beforeId));
 
   function handleDragEnd({ active, over }: DragEndEvent) {
     setDragging(null);
     if (!over) return;
     const id = String(active.id).replace("field:", "");
-    const target = String(over.id);
-    if (target.startsWith("box:")) place(id, target.slice(4));
-    else if (target === "zone:overlay") place(id, "overlay");
-    else if (target === "zone:tray") place(id, "tray");
-    else if (target.startsWith("before:")) place(id, findBoxOf(layout, target.slice(7)) ?? "tray", target.slice(7));
+    setLayout((current) => applyDrop(current, id, String(over.id)));
   }
 
   const setShowLabel = (id: string, showLabel: boolean) =>
-    setLayout((current) => {
-      const flip = (fields: CardField[]) => fields.map((f) => (f.id === id ? { ...f, showLabel } : f));
-      const walk = (grid: Grid): Grid => ({
-        ...grid,
-        boxes: grid.boxes.map((box) => ({ ...box, fields: flip(box.fields) })),
-      });
-      return {
-        ...current,
-        overlay: flip(current.overlay),
-        regions: Object.fromEntries(Object.entries(current.regions).map(([k, g]) => [k, walk(g)])),
-        labelVisibility: { ...current.labelVisibility, [id]: showLabel },
-      };
-    });
+    setLayout((current) => setFieldLabel(current, id, showLabel));
 
   /**
    * A landscape cover cannot sit beside its text, so switching shape has to pull the
@@ -452,7 +387,8 @@ export function CardLayoutEditor({
     rawSelected && detailMode
       ? { ...rawSelected, displayConfig: rawSelected.detailDisplayConfig || rawSelected.displayConfig }
       : rawSelected;
-  const selectedField = selected ? findField(layout, selected) : null;
+  const selectedField = selected ? findLayoutField(layout, selected) : null;
+  const buttonProperty = buttonDialog ? (byId.get(buttonDialog) ?? null) : null;
   const selectProperty = (id: string) => {
     setSelected(id);
     setEditingLayout(false);
@@ -493,6 +429,7 @@ export function CardLayoutEditor({
         <div className="flex w-full shrink-0 flex-col gap-3 lg:w-80">
           <ModeSwitch
             mode={mode}
+            withoutCard={tableView}
               onChange={(next) => {
                 setMode(next);
                 setSelected(null);
@@ -557,6 +494,8 @@ export function CardLayoutEditor({
             onSearch={setSearch}
             selected={selected}
             onSelect={selectProperty}
+            // A form only takes what Hallery can write, so it has no button group at all.
+            buttonGroup={formMode ? undefined : <NewButtonButton galleryId={galleryId} onCreated={setButtonDialog} />}
           />
         </div>
 
@@ -651,9 +590,25 @@ export function CardLayoutEditor({
               showLabel={selectedField?.showLabel ?? true}
               onToggleLabel={() => selected && setShowLabel(selected, !(selectedField?.showLabel ?? true))}
               onChange={(propertyId, config) => setConfigs((c) => ({ ...c, [propertyId]: config }))}
+              onConfigureButton={
+                selectedProperty?.notionPropertyType === "button"
+                  ? () => setButtonDialog(selectedProperty.notionPropertyId)
+                  : undefined
+              }
             />
           )}
         </div>
+
+        {buttonDialog && (
+          <ButtonEditorDialog
+            key={buttonDialog}
+            galleryId={galleryId}
+            propertyId={buttonDialog}
+            propertyName={buttonProperty?.notionPropertyName ?? "Nút mới"}
+            initial={buttonProperty ? parseNativeButton(parseDisplayConfig(buttonProperty.displayConfig).button) : null}
+            onClose={() => setButtonDialog(null)}
+          />
+        )}
 
         <div className="fixed right-6 bottom-6 z-40 flex items-center gap-3 rounded-full bg-surface/90 py-1.5 pr-1.5 pl-4 shadow-pop ring-1 ring-line backdrop-blur">
           <span className={`flex items-center gap-1.5 text-xs ${dirty ? "text-warn" : "text-muted"}`}>
@@ -680,32 +635,19 @@ export function CardLayoutEditor({
 
 /* ── helpers ─────────────────────────────────────────────────────────────── */
 
-function insert(fields: CardField[], field: CardField, beforeId?: string) {
-  const at = beforeId ? fields.findIndex((f) => f.id === beforeId) : -1;
-  if (at === -1) fields.push(field);
-  else fields.splice(at, 0, field);
-}
-
-function findBoxOf(layout: CardLayout, fieldId: string): string | null {
-  const search = (grid: Grid): string | null => {
-    for (const box of grid.boxes) {
-      if (box.fields.some((f) => f.id === fieldId)) return box.id;
-    }
-    return null;
-  };
-  if (layout.overlay.some((f) => f.id === fieldId)) return "overlay";
-  for (const grid of Object.values(layout.regions)) {
-    const hit = search(grid);
-    if (hit) return hit;
-  }
-  return null;
-}
-
 /* ── 0: which view is being arranged ─────────────────────────────────────── */
 
-function ModeSwitch({ mode, onChange }: { mode: ViewMode; onChange: (mode: ViewMode) => void }) {
+function ModeSwitch({
+  mode,
+  withoutCard,
+  onChange,
+}: {
+  mode: ViewMode;
+  withoutCard?: boolean;
+  onChange: (mode: ViewMode) => void;
+}) {
   const tabs: { value: ViewMode; label: string }[] = [
-    { value: "gallery", label: "Gallery card" },
+    ...(withoutCard ? [] : [{ value: "gallery" as const, label: "Gallery card" }]),
     { value: "detail", label: "Card Detail" },
     { value: "form", label: "Form thêm" },
   ];
@@ -839,16 +781,32 @@ function CoverTargetSelect({
 function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (value: CoverShape) => void }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(shape);
+  const [nudge, setNudge] = useState(0);
+  const ref = useRef<HTMLDivElement>(null);
+  // A choice not yet confirmed keeps the popup open and flashes OK, rather than being
+  // silently kept or lost. Only OK or Huỷ settle it.
+  const tryClose = () => {
+    if (draft.aspect !== shape.aspect || draft.ratio !== shape.ratio) {
+      setNudge((n) => n + 1);
+      return false;
+    }
+    setOpen(false);
+    return true;
+  };
+  usePopupTurn(ref, open, tryClose);
 
   return (
-    <div className="relative flex-1">
+    <div ref={ref} className="relative flex-1">
       <button
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => {
-          if (!open) setDraft(shape);
-          setOpen((o) => !o);
+          if (open) return void tryClose();
+          if (!claimPopupTurn()) return;
+          setDraft(shape);
+          setNudge(0);
+          setOpen(true);
         }}
         className={`flex h-24 w-full flex-col items-center justify-center gap-1 rounded-2xl border bg-surface p-1.5 ${
           open ? "border-brand" : "border-line-strong hover:border-stone-500"
@@ -944,12 +902,15 @@ function CoverShapeButton({ shape, onChange }: { shape: CoverShape; onChange: (v
               Huỷ
             </button>
             <button
+              key={nudge}
               type="button"
               onClick={() => {
                 onChange(draft);
                 setOpen(false);
               }}
-              className="rounded bg-brand px-3 py-1 text-xs font-medium text-on-brand hover:bg-brand-hover"
+              className={`rounded bg-brand px-3 py-1 text-xs font-medium text-on-brand hover:bg-brand-hover ${
+                nudge ? "animate-nudge" : ""
+              }`}
             >
               OK
             </button>
@@ -980,19 +941,35 @@ function ArrangementButton({
   const extendable = canExtend(draftArrangement, orientation);
   const kind = cardKindOf(draftArrangement, orientation, draftExtended && extendable);
 
+  const [nudge, setNudge] = useState(0);
+  const ref = useRef<HTMLDivElement>(null);
+
   const openPicker = () => {
+    if (!claimPopupTurn()) return;
     setDraftArrangement(value);
     setDraftExtended(extended);
+    setNudge(0);
     setOpen(true);
   };
+  // Same as the shape picker: an unconfirmed choice holds the popup open and flashes OK.
+  const tryClose = () => {
+    const savedExtended = canExtend(value, orientation) && extended;
+    if (draftArrangement !== value || (extendable && draftExtended) !== savedExtended) {
+      setNudge((n) => n + 1);
+      return false;
+    }
+    setOpen(false);
+    return true;
+  };
+  usePopupTurn(ref, open, tryClose);
 
   return (
-    <div className="relative flex-1">
+    <div ref={ref} className="relative flex-1">
       <button
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => (open ? setOpen(false) : openPicker())}
+        onClick={() => (open ? tryClose() : openPicker())}
         className={`flex h-24 w-full flex-col items-center justify-center gap-1 rounded-2xl border bg-surface p-1.5 ${
           open ? "border-brand" : "border-line-strong hover:border-stone-500"
         }`}
@@ -1067,12 +1044,15 @@ function ArrangementButton({
                 Huỷ
               </button>
               <button
+                key={nudge}
                 type="button"
                 onClick={() => {
                   onChange(draftArrangement, extendable && draftExtended);
                   setOpen(false);
                 }}
-                className="rounded bg-brand px-3 py-1 text-xs font-medium text-on-brand hover:bg-brand-hover"
+                className={`rounded bg-brand px-3 py-1 text-xs font-medium text-on-brand hover:bg-brand-hover ${
+                  nudge ? "animate-nudge" : ""
+                }`}
               >
                 OK
               </button>
@@ -1086,20 +1066,34 @@ function ArrangementButton({
 
 /* ── 3: property list ────────────────────────────────────────────────────── */
 
-function PropertyList({
+export function PropertyList({
   entries,
   search,
   onSearch,
   selected,
   onSelect,
+  buttonGroup,
 }: {
   entries: { id: string; name: string; type: string }[];
   search: string;
   onSearch: (value: string) => void;
   selected: string | null;
   onSelect: (id: string) => void;
+  /** When set, buttons gather in a group at the bottom, headed by this (the "new button" control). */
+  buttonGroup?: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: "zone:tray" });
+  const { values, buttons } = splitButtons(entries, (entry) => entry.type);
+  const chip = (entry: { id: string; name: string; type: string }) => (
+    <TrayChip
+      key={entry.id}
+      id={entry.id}
+      name={entry.name}
+      type={entry.type}
+      selected={selected === entry.id}
+      onSelect={() => onSelect(entry.id)}
+    />
+  );
 
   return (
     <div
@@ -1113,7 +1107,7 @@ function PropertyList({
           type="search"
           value={search}
           onChange={(event) => onSearch(event.target.value)}
-          placeholder="Tìm property"
+          placeholder={buttonGroup ? PROPERTY_SEARCH_PLACEHOLDER : "Tìm property"}
           className="w-full rounded-md border border-line-strong py-1.5 pl-2 pr-7 text-xs outline-none focus:border-brand"
         />
         <span aria-hidden className="pointer-events-none absolute right-2 top-1.5 text-faint">
@@ -1122,19 +1116,19 @@ function PropertyList({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
-        {entries.length === 0 ? (
+        {values.length === 0 && (buttons.length === 0 || !buttonGroup) && (
           <p className="px-1 py-2 text-[11px] text-faint">Không còn property nào.</p>
-        ) : (
-          entries.map((entry) => (
-            <TrayChip
-              key={entry.id}
-              id={entry.id}
-              name={entry.name}
-              type={entry.type}
-              selected={selected === entry.id}
-              onSelect={() => onSelect(entry.id)}
-            />
-          ))
+        )}
+        {values.map(chip)}
+        {!buttonGroup && buttons.map(chip)}
+        {buttonGroup && (
+          <div className="mt-2 flex flex-col gap-1 rounded-xl bg-subtle/70 p-1.5 ring-1 ring-line">
+            <div className="flex items-center justify-between gap-2 px-1">
+              <span className="text-[11px] font-medium tracking-wide text-faint uppercase">Nút ({buttons.length})</span>
+              {buttonGroup}
+            </div>
+            {buttons.map(chip)}
+          </div>
         )}
       </div>
     </div>
@@ -1196,7 +1190,7 @@ type CanvasProps = {
   shapeIsRound?: boolean;
 };
 
-function CardCanvas(props: CanvasProps) {
+export function CardCanvas(props: CanvasProps) {
   const { layout, coverRatio, coverUrl, cardKind, widthOverride, shapeIsRound } = props;
   const spec = ARRANGEMENTS[layout.arrangement];
   const wide: boolean = spec.sideBySide;
@@ -1207,7 +1201,7 @@ function CardCanvas(props: CanvasProps) {
       // See the Card Detail: without self-start the row stretches this and the
       // aspect-ratio stops holding.
       className={`relative shrink-0 self-start overflow-hidden bg-stone-200 bg-cover bg-center ${
-        shapeIsRound ? "rounded-full" : "rounded"
+        shapeIsRound ? "rounded-full" : ""
       }`}
       style={{
         aspectRatio: coverRatio,
@@ -1229,13 +1223,13 @@ function CardCanvas(props: CanvasProps) {
           <>
             <div className="flex">
               {spec.cover === "left" && cover}
-              <div className="min-w-0 flex-1 p-2">
+              <div className="min-w-0 flex-1 px-1 py-1.5">
                 <RegionBlock {...props} regionId="main" />
               </div>
               {spec.cover === "right" && cover}
             </div>
             {regions.includes("below") && (
-              <div className="p-2 pt-0">
+              <div className="px-1 pb-1.5">
                 <RegionBlock {...props} regionId="below" />
               </div>
             )}
@@ -1244,7 +1238,7 @@ function CardCanvas(props: CanvasProps) {
           <>
             {cover}
             {regions.map((regionId) => (
-              <div key={regionId} className="p-2">
+              <div key={regionId} className="px-1 py-1.5">
                 <RegionBlock {...props} regionId={regionId} />
               </div>
             ))}
@@ -1315,12 +1309,12 @@ function BoxSlot({
         gridColumn: colSpan > 1 ? `span ${colSpan}` : undefined,
         gridRow: rowSpan > 1 ? `span ${rowSpan}` : undefined,
       }}
-      className={`relative min-h-10 rounded border border-dashed p-1 ${
+      className={`relative min-h-10 rounded border border-dashed px-0.5 py-1 ${
         isOver ? "border-emerald-500 bg-brand-soft" : absorbed ? "border-line bg-canvas/70" : "border-line-strong"
       }`}
     >
       {box.fields.length === 0 && (
-        <span className="block px-1 py-1 text-[10px] text-faint">Kéo prop vào</span>
+        <span className="block px-1 text-[10px] text-faint">Kéo prop vào</span>
       )}
       <div className="flex flex-col gap-1">
         {box.fields.map((field) => (
@@ -1410,6 +1404,9 @@ function FieldChip({
   const name = config?.nameOverride?.trim() || property?.notionPropertyName || "";
   const shown = isTitle ? title : value || "—";
   const isUrl = property?.notionPropertyType === "url" && Boolean(value);
+  // A Notion button has no value to sample; draw the button Hallery will draw instead.
+  const nativeButton =
+    property?.notionPropertyType === "button" ? parseNativeButton(parseDisplayConfig(property.displayConfig).button) : null;
 
   return (
     <span
@@ -1437,7 +1434,22 @@ function FieldChip({
             {!isTitle && field.showLabel && (
               <span className={`shrink-0 truncate ${dark ? "text-white/60" : "text-faint"}`}>{name}</span>
             )}
-            {isUrl ? (
+            {property?.notionPropertyType === "button" ? (
+              nativeButton ? (
+                <span
+                  className={`inline-flex min-w-0 shrink items-center gap-1 rounded-full px-2 py-0.5 font-medium ${
+                    BUTTON_COLOR_CLASSES[nativeButton.color ?? "default"]
+                  }`}
+                >
+                  {nativeButton.icon && <span aria-hidden="true">{nativeButton.icon}</span>}
+                  <span className="truncate">{nativeButton.label || name}</span>
+                </span>
+              ) : (
+                <span className="min-w-0 truncate rounded-full border border-dashed border-line-strong px-2 py-0.5 text-faint">
+                  {name} · chưa cấu hình
+                </span>
+              )
+            ) : isUrl ? (
               <a
                 href={value}
                 target="_blank"

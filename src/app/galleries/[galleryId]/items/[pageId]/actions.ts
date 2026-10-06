@@ -3,16 +3,29 @@
 import { revalidatePath } from "next/cache";
 import {
   APIErrorCode,
+  isFullDataSource,
   isFullPage,
   isNotionClientError,
+  type DataSourceObjectResponse,
   type PageObjectResponse,
   type UpdatePageParameters,
 } from "@notionhq/client";
+import {
+  IMAGE_TARGET_FIELD,
+  ImageError,
+  coverPayload,
+  isImageTarget,
+  propertyPayload,
+  readPickedImage,
+  replaceContentImage,
+  toNotionImage,
+  type NotionImage,
+} from "@/lib/cover-write";
 import { db } from "@/lib/db";
 import { getGalleryNotionSnapshot, patchGalleryNotionSnapshot, snapshotPage } from "@/lib/gallery-notion-cache";
 import { getNotionClient } from "@/lib/notion";
 import { FORM_FIELD_MANIFEST, buildPropertyUpdate, isUnchangedValue } from "@/lib/notion-write";
-import { PROPERTY_PREFIX, parseGalleryConfig } from "@/lib/notion-cover";
+import { CONTENT_IMAGE, PAGE_COVER, PROPERTY_PREFIX, parseGalleryConfig } from "@/lib/notion-cover";
 import { parseViewLayoutConfig } from "@/lib/gallery-view";
 import { NOTION_PROBLEM_COPY, classifyNotionError } from "@/lib/notion-errors";
 import { propertyById } from "@/lib/page-properties";
@@ -88,6 +101,7 @@ export async function saveItem(
 
   // The page as Hallery last saw it, so untouched fields can be left alone.
   let current: PageObjectResponse | undefined;
+  let dataSource: DataSourceObjectResponse | null = null;
   try {
     const snapshot = await getGalleryNotionSnapshot({
       galleryId,
@@ -95,6 +109,7 @@ export async function saveItem(
       accessToken: gallery.workspace.accessToken,
     });
     current = snapshotPage(snapshot, pageId);
+    if (isFullDataSource(snapshot.dataSourceRes)) dataSource = snapshot.dataSourceRes;
   } catch {
     current = undefined;
   }
@@ -122,26 +137,71 @@ export async function saveItem(
     properties[field.id] = update;
   }
 
-  // Nothing differs from what Notion already holds: no request, nothing to roll back.
-  if (Object.keys(properties).length === 0) return { error: null, savedAt: Date.now() };
+  // A new picture, written where the form's gallery reads pictures from. Prepared first:
+  // an upload that fails must stop the save before anything lands.
+  const picked = readPickedImage(formData);
+  const imageTarget = String(formData.get(IMAGE_TARGET_FIELD) ?? "");
+  let image: NotionImage | null = null;
+  let cover: ReturnType<typeof coverPayload> | null = null;
+  if (picked) {
+    if (!dataSource || !isImageTarget(imageTarget, dataSource)) {
+      return { error: "Gallery này không còn chỗ chứa ảnh như đã cấu hình — kiểm tra nguồn ảnh ở Bố cục card." };
+    }
+    try {
+      image = await toNotionImage(notion, picked);
+      if (imageTarget === PAGE_COVER) cover = coverPayload(image);
+      if (imageTarget.startsWith(PROPERTY_PREFIX)) {
+        const name = imageTarget.slice(PROPERTY_PREFIX.length);
+        properties[name] = propertyPayload(dataSource.properties[name].type, image);
+      }
+    } catch (error) {
+      return { error: error instanceof ImageError ? error.message : "Không xử lý được ảnh." };
+    }
+  }
 
-  let updated: Awaited<ReturnType<typeof notion.pages.update>>;
-  try {
-    updated = await notion.pages.update({
-      page_id: pageId,
-      properties: properties as UpdatePageParameters["properties"],
-    });
-  } catch (error) {
-    return { error: writeErrorMessage(error) };
+  // Nothing differs from what Notion already holds: no request, nothing to roll back.
+  if (Object.keys(properties).length === 0 && !image) return { error: null, savedAt: Date.now() };
+
+  let updated: Awaited<ReturnType<typeof notion.pages.update>> | null = null;
+  if (Object.keys(properties).length > 0 || cover) {
+    try {
+      updated = await notion.pages.update({
+        page_id: pageId,
+        properties: properties as UpdatePageParameters["properties"],
+        ...(cover ? { cover } : {}),
+      });
+    } catch (error) {
+      return { error: writeErrorMessage(error) };
+    }
+  }
+
+  // The body's picture is its own write. The fields have landed by now, so a failure here
+  // says exactly that rather than reading as a failed save.
+  let imageProblem: string | null = null;
+  if (image && imageTarget === CONTENT_IMAGE) {
+    try {
+      await replaceContentImage(notion, pageId, image);
+    } catch (error) {
+      imageProblem = `${updated ? "Đã lưu các field, nhưng " : ""}không thay được ảnh trong nội dung page: ${writeErrorMessage(error)}`;
+    }
   }
 
   // Saved in Notion from here on. Local bookkeeping that fails now must not report the
   // save as failed — the reader would retry a write that already landed.
   try {
-    const full = isFullPage(updated) ? updated : await notion.pages.retrieve({ page_id: pageId });
-    if (isFullPage(full)) await refreshLocalCopies(galleryId, pageId, full, properties, gallery);
+    if (updated || image) {
+      const full = updated && isFullPage(updated) ? updated : await notion.pages.retrieve({ page_id: pageId });
+      if (isFullPage(full)) await refreshLocalCopies(galleryId, pageId, full, properties, gallery);
+    }
+    // Whatever the picture's source, the stored thumbnails are of the old one.
+    if (image && !imageProblem) await db.pageImageCache.deleteMany({ where: { notionPageId: pageId } });
   } catch (error) {
     console.error("Post-save bookkeeping failed", error);
+  }
+  if (imageProblem) {
+    revalidatePath(`/galleries/${galleryId}/items/${pageId}`);
+    revalidatePath(`/galleries/${galleryId}`);
+    return { error: imageProblem };
   }
   revalidatePath(`/galleries/${galleryId}/items/${pageId}`);
   revalidatePath(`/galleries/${galleryId}`);

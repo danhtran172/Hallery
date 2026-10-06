@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
-import type { PageObjectResponse } from "@notionhq/client";
 import { Icon } from "@/components/icons";
+import { ImagePicker, type ImageSlot } from "@/components/image-picker";
 import { setUnsaved } from "@/lib/unsaved-guard";
 import { PropertyValue } from "@/components/property-value";
 import { getEditableValue } from "@/lib/notion-schema";
-import { formatDuration, type DisplayConfig } from "@/lib/display-config";
+import { formatDuration } from "@/lib/display-config";
+import type { FieldData } from "@/lib/item-fields";
 import type { CardEligibleProperty, ResolvedCardLayout, ResolvedGrid } from "@/lib/card-layout";
 import { DATE_END_SUFFIX, FORM_FIELD_MANIFEST } from "@/lib/notion-write";
 import type { RenderContext } from "@/lib/property-render";
@@ -16,16 +17,7 @@ import { saveItem, type SaveItemState } from "./actions";
 /** The detail carries no cover, so only its single frame is ever drawn. */
 type DetailLayout = ResolvedCardLayout<CardEligibleProperty>;
 
-export type FieldData = {
-  propertyId: string;
-  name: string;
-  type: string;
-  value: PageObjectResponse["properties"][string];
-  editable: boolean;
-  readonly: boolean;
-  options?: string[];
-  displayConfig: DisplayConfig;
-};
+export type { FieldData };
 
 const labelOf = (field: FieldData) => field.displayConfig.nameOverride?.trim() || field.name;
 
@@ -40,6 +32,7 @@ export function ItemDetail({
   coverRound,
   notionUrl,
   renderContext,
+  image,
 }: {
   galleryId: string;
   pageId: string;
@@ -52,6 +45,8 @@ export function ItemDetail({
   coverRound: boolean;
   notionUrl: string;
   renderContext: RenderContext;
+  /** Where the picture is read from, when the edit form can change it. */
+  image: ImageSlot | null;
 }) {
   const [editing, setEditing] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -158,6 +153,7 @@ export function ItemDetail({
             coverRound={coverRound}
             renderContext={renderContext}
             editing
+            image={image}
           />
           {state.error && (
             <p role="alert" className="rounded-xl bg-danger-soft px-3.5 py-2.5 text-sm text-danger">
@@ -195,7 +191,7 @@ export function ItemDetail({
  * Lays the cover out the way the card does — above, beside, or absent — so the detail is
  * the same arrangement at page size rather than a second design.
  */
-function DetailLayoutRenderer({
+export function DetailLayoutRenderer({
   fields,
   layout,
   coverUrl,
@@ -203,6 +199,7 @@ function DetailLayoutRenderer({
   coverRound,
   renderContext,
   editing,
+  image,
 }: {
   fields: FieldData[];
   layout: DetailLayout;
@@ -211,6 +208,8 @@ function DetailLayoutRenderer({
   coverRound: boolean;
   renderContext: RenderContext;
   editing: boolean;
+  /** Where a new picture goes; when editing, the cover becomes a picker for it. */
+  image?: ImageSlot | null;
 }) {
   const fieldsById = new Map(fields.map((field) => [field.propertyId, field]));
   const hasFields = Object.values(layout.regions).some((grid) =>
@@ -233,7 +232,16 @@ function DetailLayoutRenderer({
   }
 
   const cover =
-    layout.cover === "none" ? null : (
+    layout.cover === "none" ? null : editing && image ? (
+      <ImagePicker
+        slot={image}
+        ratio={coverRatio}
+        round={coverRound}
+        currentUrl={coverUrl}
+        className="max-w-full shrink-0 self-start"
+        style={{ width: layout.sideBySide ? `${layout.ratio[0]}%` : "100%" }}
+      />
+    ) : (
       <div
         // self-start matters: a flex child stretches to the row by default, and that
         // definite height overrides aspect-ratio, squashing the crop out of shape.
@@ -323,6 +331,7 @@ function DetailGridView({
                   <div key={field.propertyId} className={index ? "border-t border-line" : ""}>
                     {editing ? (
                       <div className="p-4">
+                        {field.prefilled && <PrefilledMark />}
                         <EditField field={field} renderContext={renderContext} />
                       </div>
                     ) : (
@@ -344,10 +353,20 @@ function DetailGridView({
   );
 }
 
-/** `field:<type>:<property id>` — ids, so a rename in Notion mid-edit still saves. */
-const fieldNameOf = (field: FieldData) => `field:${field.type}:${field.propertyId}`;
+/** Over a field a button filled in: the value is its preset, not what Notion holds yet. */
+export function PrefilledMark() {
+  return (
+    <span className="mb-1.5 inline-flex items-center gap-1 rounded-full bg-brand-soft px-2 py-0.5 text-[11px] font-medium text-brand-ink">
+      <Icon name="sparkle" className="size-3" />
+      Điền sẵn — chưa lưu
+    </span>
+  );
+}
 
-function EditField({ field, renderContext }: { field: FieldData; renderContext: RenderContext }) {
+/** `field:<type>:<property id>` — ids, so a rename in Notion mid-edit still saves. */
+export const fieldNameOf = (field: FieldData) => `field:${field.type}:${field.propertyId}`;
+
+export function EditField({ field, renderContext }: { field: FieldData; renderContext: RenderContext }) {
   const fieldName = fieldNameOf(field);
   const label = labelOf(field);
 
@@ -355,7 +374,13 @@ function EditField({ field, renderContext }: { field: FieldData; renderContext: 
     return (
       <FieldRow
         label={label}
-        hint={field.readonly ? "Chỉ đọc — Notion không cho sửa kiểu này qua API" : "Chưa sửa được kiểu này trong Hallery"}
+        hint={
+          field.type === "button"
+            ? undefined
+            : field.readonly
+              ? "Chỉ đọc — Notion không cho sửa kiểu này qua API"
+              : "Chưa sửa được kiểu này trong Hallery"
+        }
       >
         <div className="text-sm text-ink">
           <PropertyValue value={field.value} displayConfig={field.displayConfig} context={renderContext} />

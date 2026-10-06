@@ -10,14 +10,14 @@ import { Icon } from "@/components/icons";
 import { parseViewLayoutConfig } from "@/lib/gallery-view";
 import { getNotionClient } from "@/lib/notion";
 import { getPageIcon, getPageTitle, getTitlePropertyName } from "@/lib/notion-schema";
-import { EDITABLE_PROPERTY_TYPES, READONLY_PROPERTY_TYPES } from "@/lib/notion-write";
-import { parseDisplayConfig } from "@/lib/display-config";
+import { buildItemFields } from "@/lib/item-fields";
+import { imageSlotFor } from "@/lib/cover-write";
 import { createDefaultCardLayout, isRoundCover, parseCardLayout, resolveCardLayout } from "@/lib/card-layout";
 import { parseGalleryConfig, resolveCoverUrl, resolveDetailCoverShape, resolveDetailWidth } from "@/lib/notion-cover";
 import { coverFileExists, coverSourceFingerprint, storedCoverDetailUrl, storedCoverUrl } from "@/lib/cover-store";
 import { buildButtonConfigs, buildRelationLinks } from "@/lib/render-context";
 import type { RenderContext } from "@/lib/property-render";
-import { ItemDetail, type FieldData } from "./item-detail";
+import { ItemDetail } from "./item-detail";
 
 /** The record body shared by its full page and its gallery popup. */
 export async function ItemDetailView({
@@ -89,34 +89,7 @@ export async function ItemDetailView({
   const titlePropertyName = getTitlePropertyName(dataSourceRes.properties);
   const title = getPageTitle(pageRes, titlePropertyName);
   const icon = getPageIcon(pageRes);
-  const propertyConfigsById = new Map(gallery.propertyConfigs.map((config) => [config.notionPropertyId, config]));
-  const fields: FieldData[] = Object.entries(pageRes.properties)
-    .filter(([name]) => name !== titlePropertyName)
-    .map(([name, value]) => {
-      const schema = dataSourceRes.properties[name];
-      let options: string[] | undefined;
-      if (schema?.type === "select") options = schema.select.options.map((option) => option.name);
-      if (schema?.type === "status") options = schema.status.options.map((option) => option.name);
-      if (schema?.type === "multi_select") options = schema.multi_select.options.map((option) => option.name);
-      const propertyConfig = propertyConfigsById.get(value.id);
-      return {
-        propertyId: value.id,
-        name,
-        type: value.type,
-        value,
-        editable: EDITABLE_PROPERTY_TYPES.has(value.type),
-        readonly: READONLY_PROPERTY_TYPES.has(value.type),
-        options,
-        displayConfig: propertyConfig
-          ? parseDisplayConfig(propertyConfig.detailDisplayConfig || propertyConfig.displayConfig)
-          : {},
-      };
-    })
-    .sort((a, b) => {
-      const aOrder = propertyConfigsById.get(a.propertyId)?.sortOrder ?? Number.MAX_SAFE_INTEGER;
-      const bOrder = propertyConfigsById.get(b.propertyId)?.sortOrder ?? Number.MAX_SAFE_INTEGER;
-      return aOrder - bOrder || a.name.localeCompare(b.name, "vi");
-    });
+  const { titleField, fields } = buildItemFields(pageRes, dataSourceRes, gallery.propertyConfigs);
 
   // The view the reader came from owns the card and its cover source; the detail follows
   // it, so a view that shows another picture opens on that picture too.
@@ -157,20 +130,6 @@ export async function ItemDetailView({
   const localDetailUrl =
     cached?.detailFile && sourceKey && cached.thumbnailSource === sourceKey && (await coverFileExists(cached.detailFile))
       ? storedCoverDetailUrl(pageId, cached.checkedAt.getTime(), cached.detailFile)
-      : null;
-
-  const titleValue = titlePropertyName ? pageRes.properties[titlePropertyName] : undefined;
-  const titleField: FieldData | null =
-    titleValue && titlePropertyName
-      ? {
-          propertyId: titleValue.id,
-          name: titlePropertyName,
-          type: "title",
-          value: titleValue,
-          editable: true,
-          readonly: false,
-          displayConfig: {},
-        }
       : null;
 
   const renderContext: RenderContext = {
@@ -215,6 +174,7 @@ export async function ItemDetailView({
         coverRound={isRoundCover(coverShape.aspect)}
         notionUrl={pageRes.url}
         renderContext={renderContext}
+        image={imageSlotFor(coverSource, dataSourceRes)}
       />
     </div>
   );

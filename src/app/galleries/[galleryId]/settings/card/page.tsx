@@ -25,7 +25,7 @@ import {
 } from "@/lib/notion-cover";
 import { plainTextValue } from "@/lib/property-text";
 import { parseFormDefaults } from "@/lib/create-form";
-import { ensureGalleryViews, parseViewLayoutConfig } from "@/lib/gallery-view";
+import { ensureGalleryViews, parseViewLayoutConfig, viewTypeOf } from "@/lib/gallery-view";
 import { isNotionAccessError } from "@/lib/notion-errors";
 import { CardLayoutEditor, type PreviewRecord } from "./card-layout-editor";
 
@@ -46,6 +46,7 @@ export default async function CardLayoutSettingsPage({
   const views = await ensureGalleryViews(gallery);
   const requestedViewId = typeof viewParam === "string" ? viewParam : null;
   const view = views.find((entry) => entry.id === requestedViewId) ?? views[0];
+  const viewType = viewTypeOf(view);
 
   const properties = cardEligibleProperties(gallery.propertyConfigs);
   const config = parseGalleryConfig(gallery.displayConfig);
@@ -98,6 +99,7 @@ export default async function CardLayoutSettingsPage({
         galleryId={galleryId}
         galleryName={gallery.name}
         viewId={view.id}
+        viewType={viewType}
         back={typeof back === "string" ? back : undefined}
         active="card"
         compact
@@ -110,6 +112,7 @@ export default async function CardLayoutSettingsPage({
           galleryId={galleryId}
           viewId={view.id}
           initialMode={initialMode}
+          tableView={viewType === "table"}
           properties={properties.map((p) => ({
             notionPropertyId: p.notionPropertyId,
             notionPropertyName: p.notionPropertyName,

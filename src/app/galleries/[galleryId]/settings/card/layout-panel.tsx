@@ -12,6 +12,7 @@ import {
   type FrameAlign,
   type Grid,
 } from "@/lib/card-layout";
+import { claimPopupTurn, usePopupTurn } from "@/lib/use-popup-turn";
 
 /**
  * Panel 5 in layout mode: how many boxes each frame is divided into, and how the cover
@@ -159,6 +160,12 @@ function GridChooser({
   onChange: (cols: 1 | 2, rows: number) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  // Picks apply at once, so there is never anything to confirm — it always gives way.
+  usePopupTurn(ref, open, () => {
+    setOpen(false);
+    return true;
+  });
   const options = [
     { cols: 1 as const, rows: 1 }, { cols: 2 as const, rows: 1 },
     { cols: 1 as const, rows: 2 }, { cols: 2 as const, rows: 2 },
@@ -166,11 +173,14 @@ function GridChooser({
   ];
 
   return (
-    <div className="relative">
+    <div ref={ref} className="relative">
       <button
         type="button"
         aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => {
+          if (open) setOpen(false);
+          else if (claimPopupTurn()) setOpen(true);
+        }}
         className="flex w-full items-center justify-between rounded-md border border-line-strong px-2 py-1.5 text-left text-xs text-ink-soft hover:border-stone-500"
       >
         <span className="flex items-center gap-2">

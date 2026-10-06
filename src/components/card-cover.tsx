@@ -33,6 +33,7 @@ export function CardCover({
   hasSource,
   initialPreviewUrl,
   initialImageUrl,
+  compact,
 }: {
   ratio: string;
   /** Crop the frame to a circle. Only ever paired with a 1:1 ratio. */
@@ -53,6 +54,8 @@ export function CardCover({
   initialPreviewUrl?: string;
   /** A source-matched local 320px WebP card derivative from the same manifest. */
   initialImageUrl?: string;
+  /** A table thumbnail: too small to reposition or to spell out a failure, so neither is offered. */
+  compact?: boolean;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [resolved, setResolved] = useState<string | null>(null);
@@ -175,7 +178,7 @@ export function CardCover({
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
-      if (!(e.ctrlKey || e.metaKey) || !resolved) return;
+      if (compact || !(e.ctrlKey || e.metaKey) || !resolved) return;
       e.preventDefault();
       e.stopPropagation();
 
@@ -210,10 +213,10 @@ export function CardCover({
       node.addEventListener("pointermove", onMove);
       node.addEventListener("pointerup", onUp);
     },
-    [galleryId, pageId, pos.x, pos.y, resolved],
+    [compact, galleryId, pageId, pos.x, pos.y, resolved],
   );
 
-  const armed = ctrlHeld && !!resolved;
+  const armed = !compact && ctrlHeld && !!resolved;
 
   return (
     <div
@@ -246,7 +249,23 @@ export function CardCover({
           style={{ objectPosition: `${pos.x}% ${pos.y}%` }}
         />
       )}
-      {failed && !resolved && (
+      {failed && !resolved && compact && (
+        <button
+          type="button"
+          title="Không tải được ảnh — bấm để thử lại"
+          aria-label="Không tải được ảnh — thử lại"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void retry();
+          }}
+          disabled={retrying}
+          className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center bg-subtle text-faint hover:text-ink disabled:opacity-50"
+        >
+          <Icon name="refresh" className="size-3.5" />
+        </button>
+      )}
+      {failed && !resolved && !compact && (
         <div className="pointer-events-auto absolute inset-0 z-30 flex flex-col items-center justify-center gap-1.5 bg-subtle p-2 text-center">
           <Icon name="image" className="size-5 text-faint" />
           <span className="text-[11px] leading-snug text-muted">Không tải được ảnh</span>

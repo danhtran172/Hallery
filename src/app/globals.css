@@ -55,6 +55,7 @@
   --animate-pop-in: hallery-pop-in 140ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
   --animate-fade-in: hallery-fade-in 160ms ease-out both;
   --animate-rise-in: hallery-rise-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-nudge: hallery-nudge 280ms ease-in-out 3;
 }
 
 /* ── Accent presets ─────────────────────────────────────────────────────────── */
@@ -277,6 +278,7 @@ h3 {
   }
   .segmented > [aria-selected="true"],
   .segmented > [aria-pressed="true"],
+  .segmented > [aria-checked="true"],
   .segmented > [aria-current="page"] {
     @apply bg-surface text-ink shadow-xs;
   }
@@ -339,16 +341,18 @@ h3 {
    * Short names on purpose: a card's classes are sent twice per card (HTML and the RSC
    * payload) for up to a hundred cards, so long utility lists added up to kilobytes.
    */
+  /* isolate: the cover's z-20/z-30 layers stay inside the card instead of rising over the
+     toolbar's menus. */
   .g-card {
-    @apply relative flex shrink-0 flex-col overflow-hidden rounded-card bg-surface shadow-card ring-1 ring-line transition-[box-shadow,transform] duration-200 ease-out;
+    @apply relative isolate flex shrink-0 flex-col overflow-hidden rounded-card bg-surface shadow-card ring-1 ring-line transition-[box-shadow,transform] duration-200 ease-out;
     @apply hover:-translate-y-0.5 hover:shadow-lift;
   }
-  /* The photo sits inside the card like a print in a mat. */
+  /* The photo runs to the card's edges; the card's own rounding clips its corners. */
   .g-mat {
-    @apply relative shrink-0 p-1.5;
+    @apply relative shrink-0;
   }
   .g-pic {
-    @apply relative overflow-hidden rounded-[0.875rem];
+    @apply relative overflow-hidden;
   }
   .g-card-link {
     @apply absolute inset-0 z-10 rounded-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand;
@@ -371,6 +375,107 @@ h3 {
   }
   .g-value {
     @apply min-w-0 flex-1 truncate;
+  }
+
+  /*
+   * ── Table view ──────────────────────────────────────────────────────────
+   * Rows are grids on the `--table-cols` tracks, built from one width variable per column
+   * (--w0, --w1 …) that the header sets, so a dragged column edge moves every row at once.
+   * Each row paints `--row-bg`, which fixed (sticky) cells repeat so scrolled cells hide
+   * beneath them. Cells sit above the row's link but ignore the pointer, as a card body does;
+   * links and buttons inside them opt back in.
+   */
+  .g-table-scroll {
+    @apply max-w-full overflow-x-auto rounded-2xl bg-surface ring-1 ring-line transition-opacity;
+  }
+  .g-table {
+    @apply min-w-full;
+  }
+  .g-thead,
+  .g-tr {
+    @apply grid border-b border-line;
+    grid-template-columns: var(--table-cols);
+    background: var(--row-bg);
+  }
+  .g-thead {
+    --row-bg: var(--color-subtle);
+  }
+  .g-tr {
+    --row-bg: var(--color-surface);
+    @apply relative transition-colors last:border-b-0;
+  }
+  .g-table[data-stripes="true"] .g-tr:nth-child(even of .g-tr) {
+    --row-bg: color-mix(in oklab, var(--color-subtle) 55%, var(--color-surface));
+  }
+  .g-table[data-stripes] .g-tr:hover {
+    --row-bg: var(--color-subtle);
+  }
+  .g-tr > .g-card-link {
+    @apply rounded-none focus-visible:-outline-offset-2;
+  }
+  .g-th {
+    @apply relative flex h-9 min-w-0 items-center gap-1 border-r border-line px-3 text-xs font-medium text-muted last:border-r-0;
+  }
+  .g-th[data-align="center"] > :first-child {
+    @apply justify-center text-center;
+  }
+  .g-th[data-align="right"] > :first-child {
+    @apply justify-end text-right;
+  }
+  .g-resize {
+    @apply absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none rounded-full outline-none;
+    @apply hover:bg-brand/40 focus-visible:bg-brand/60 active:bg-brand/60;
+  }
+  .g-td {
+    @apply pointer-events-none relative z-[11] min-w-0 content-center border-r border-line px-3 py-2 text-sm text-ink-soft last:border-r-0;
+  }
+  .g-table[data-density="compact"] .g-td {
+    @apply py-1;
+  }
+  .g-table[data-density="roomy"] .g-td {
+    @apply py-3.5;
+  }
+  .g-sticky {
+    @apply sticky z-[12];
+    background: var(--row-bg);
+  }
+  .g-td-num {
+    @apply text-right text-xs text-faint tabular-nums;
+  }
+  .g-td-title {
+    @apply flex items-center gap-2;
+  }
+  .g-td-cover {
+    @apply flex items-center justify-center px-3;
+  }
+  .g-td-text {
+    @apply min-w-0;
+  }
+  .g-thumb {
+    @apply relative block shrink-0 overflow-hidden rounded-lg bg-subtle;
+  }
+  .g-td[data-align="center"] {
+    @apply justify-center text-center;
+  }
+  .g-td[data-align="right"] {
+    @apply justify-end text-right;
+  }
+  /* One line: values cut with an ellipsis, tags kept on a single line. */
+  .g-td[data-wrap="false"] {
+    @apply overflow-hidden text-ellipsis whitespace-nowrap;
+  }
+  .g-td[data-wrap="false"] .g-td-text {
+    @apply truncate;
+  }
+  .g-td[data-wrap="false"] .flex-wrap {
+    @apply flex-nowrap;
+  }
+  /* Wrapped cells grow unevenly, so they read from the top, as in Notion. */
+  .g-td[data-wrap="true"] {
+    @apply content-start break-words;
+  }
+  .g-td-title[data-wrap="true"] {
+    @apply items-start;
   }
 
   /* ── Small text ──────────────────────────────────────────────────────── */
@@ -460,6 +565,15 @@ h3 {
   }
 }
 
+/* "Confirm this first": a button pulsing a ring, e.g. OK in a popup closed with a
+   choice still pending. */
+@keyframes hallery-nudge {
+  50% {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--color-brand) 35%, transparent);
+  }
+}
+
 @keyframes hallery-shimmer {
   0% {
     background-position: -200% 0;
@@ -480,7 +594,23 @@ h3 {
   animation: hallery-shimmer 1.4s ease-in-out infinite;
 }
 
+/* The extra star on a peak score (6 on a 5-star scale): a slow gold→rose→violet sheen
+   with a soft glow, so it reads as above the scale rather than a sixth ordinary star. */
+.star-peak {
+  display: inline-block;
+  background: linear-gradient(110deg, #f59e0b 0%, #f43f5e 35%, #a855f7 65%, #f59e0b 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 3px rgb(244 63 94 / 0.55));
+  animation: hallery-shimmer 4s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .star-peak {
+    animation: none;
+  }
   *,
   *::before,
   *::after {

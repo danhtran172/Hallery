@@ -1,6 +1,7 @@
 import type { Client, DataSourceObjectResponse, PageObjectResponse } from "@notionhq/client";
 import type { CardLayout } from "@/lib/card-layout";
 import type { FormDefaults, FormLastValues } from "@/lib/create-form";
+import type { TableLayout, ViewType } from "@/lib/table-layout";
 
 /** Where a card's cover image comes from. Anything but `content_image` is free — it rides along
  *  with the page data the Gallery already fetches. */
@@ -26,6 +27,10 @@ export type GalleryConfig = {
   cardsPerRow?: number;
   /** Which properties a card shows and in what order — see lib/card-layout. */
   card?: CardLayout;
+  /** Cards or one row per item. Per view; absent means cards. */
+  viewType?: ViewType;
+  /** A table view's columns and options — see lib/table-layout. Kept when the view goes back to cards. */
+  table?: TableLayout;
   /**
    * The same arrangement again, for the Card Detail. Detail is a page rather than a
    * thumbnail, so it carries no cover and sets its own width — the two views share an

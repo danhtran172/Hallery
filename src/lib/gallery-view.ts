@@ -2,9 +2,10 @@ import { db } from "@/lib/db";
 import type { GalleryConfig } from "@/lib/notion-cover";
 import { parseGalleryConfig } from "@/lib/notion-cover";
 import { parseGalleryQuery, type GalleryQuery } from "@/lib/gallery-query";
+import { parseViewType, type ViewType } from "@/lib/table-layout";
 
 /** The small, card-facing subset of the legacy gallery configuration that a View owns. */
-const VIEW_LAYOUT_KEYS = ["coverAspect", "coverRatio", "coverSource", "cardsPerRow", "card"] as const;
+const VIEW_LAYOUT_KEYS = ["coverAspect", "coverRatio", "coverSource", "cardsPerRow", "card", "viewType", "table"] as const;
 
 export type GalleryViewRecord = {
   id: string;
@@ -75,4 +76,9 @@ export async function ensureGalleryViews<T extends GalleryViewRecord>(
     },
   });
   return [view];
+}
+
+/** Whether a view shows cards or a table — read from its own layout, never the legacy config. */
+export function viewTypeOf(view: Pick<GalleryViewRecord, "layoutConfig"> | null | undefined): ViewType {
+  return parseViewType(view ? parseGalleryConfig(view.layoutConfig).viewType : undefined);
 }

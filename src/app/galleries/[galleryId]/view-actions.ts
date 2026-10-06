@@ -3,7 +3,19 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { serializeFilters, serializeSorts, type Filter, type SortKey } from "@/lib/gallery-query";
-import { initialViewLayoutConfig } from "@/lib/gallery-view";
+import { initialViewLayoutConfig, parseViewLayoutConfig, viewLayoutConfig } from "@/lib/gallery-view";
+import { CONTENT_IMAGE, PAGE_COVER, PROPERTY_PREFIX, parseGalleryConfig } from "@/lib/notion-cover";
+import { TITLE_FIELD_ID, cardEligibleProperties, parseCardLayout } from "@/lib/card-layout";
+import { parseDisplayConfig } from "@/lib/display-config";
+import {
+  COVER_COLUMN_ID,
+  clampColumnWidth,
+  createDefaultTableLayout,
+  parseTableLayout,
+  parseViewType,
+  type TableLayout,
+  type ViewType,
+} from "@/lib/table-layout";
 import { isFullDataSource } from "@notionhq/client";
 import { getNotionClient } from "@/lib/notion";
 import { addRelationGalleries } from "@/lib/relation-galleries";
@@ -147,5 +159,97 @@ export async function renameGalleryView(galleryId: string, viewId: string, name:
   const result = await db.galleryView.updateMany({ where: { id: viewId, galleryId }, data: { name: trimmed.slice(0, 80) } });
   if (result.count === 0) return { error: "View này không còn tồn tại." };
   refreshGallery(galleryId);
+  return { error: null };
+}
+
+/** Switches a view between cards and a table. Each keeps its own settings for when it comes back. */
+export async function setGalleryViewType(galleryId: string, viewId: string, type: ViewType): Promise<ViewActionResult> {
+  const [gallery, view] = await Promise.all([
+    db.gallery.findUnique({ where: { id: galleryId }, select: { displayConfig: true } }),
+    sourceView(galleryId, viewId),
+  ]);
+  if (!gallery || !view) return { error: "View này không còn tồn tại." };
+  const config = parseViewLayoutConfig(view.layoutConfig, parseGalleryConfig(gallery.displayConfig));
+  config.viewType = parseViewType(type);
+  await db.galleryView.update({ where: { id: view.id }, data: { layoutConfig: viewLayoutConfig(config) } });
+  refreshGallery(galleryId);
+  revalidatePath(`/galleries/${galleryId}/settings/table`);
+  return { error: null };
+}
+
+/**
+ * Stores a table view's columns and options. Unknown property ids are dropped and the
+ * title column is always kept, so a stale editor cannot save a table with no way into its items.
+ * The thumbnail's source is the view's own cover source — the one its cards use too.
+ */
+export async function saveTableLayout(
+  galleryId: string,
+  viewId: string,
+  layout: TableLayout,
+  coverSource: string,
+  /** Shared Hallery names edited alongside, by Notion property id; "" goes back to Notion's. */
+  names: Record<string, string> = {},
+): Promise<ViewActionResult> {
+  const [gallery, view] = await Promise.all([
+    db.gallery.findUnique({ where: { id: galleryId }, include: { propertyConfigs: true } }),
+    sourceView(galleryId, viewId),
+  ]);
+  if (!gallery || !view) return { error: "View này không còn tồn tại." };
+  const parsed = parseTableLayout(layout);
+  if (!parsed) return { error: "Bố cục bảng không hợp lệ." };
+  // The parser already guarantees the title column; anything else must still be managed.
+  const known = new Set([
+    TITLE_FIELD_ID,
+    COVER_COLUMN_ID,
+    ...cardEligibleProperties(gallery.propertyConfigs).map((p) => p.notionPropertyId),
+  ]);
+  parsed.columns = parsed.columns.filter((column) => known.has(column.id));
+
+  const config = parseViewLayoutConfig(view.layoutConfig, parseGalleryConfig(gallery.displayConfig));
+  config.table = parsed;
+  if (coverSource === PAGE_COVER || coverSource === CONTENT_IMAGE || coverSource.startsWith(PROPERTY_PREFIX)) {
+    config.coverSource = coverSource;
+  }
+
+  // A rename is the property's own, not this table's: it lands in the shared display config,
+  // next to whatever formatting is already there.
+  const renames = cardEligibleProperties(gallery.propertyConfigs).flatMap((property) => {
+    const raw = names[property.notionPropertyId];
+    if (typeof raw !== "string") return [];
+    const display = parseDisplayConfig(property.displayConfig);
+    const name = raw.trim().slice(0, 120);
+    if ((display.nameOverride?.trim() ?? "") === name) return [];
+    if (name) display.nameOverride = name;
+    else delete display.nameOverride;
+    return [db.propertyConfig.update({ where: { id: property.id }, data: { displayConfig: JSON.stringify(display) } })];
+  });
+
+  await db.$transaction([
+    db.galleryView.update({ where: { id: view.id }, data: { layoutConfig: viewLayoutConfig(config) } }),
+    ...renames,
+  ]);
+  refreshGallery(galleryId);
+  revalidatePath(`/galleries/${galleryId}/settings/table`);
+  if (renames.length > 0) revalidatePath(`/galleries/${galleryId}/items/[pageId]`, "page");
+  return { error: null };
+}
+
+/** One column's width, dragged on the table's own header. Everything else stays as stored. */
+export async function saveTableColumnWidth(galleryId: string, viewId: string, columnId: string, width: number): Promise<ViewActionResult> {
+  const [gallery, view] = await Promise.all([
+    db.gallery.findUnique({ where: { id: galleryId }, include: { propertyConfigs: true } }),
+    sourceView(galleryId, viewId),
+  ]);
+  if (!gallery || !view) return { error: "View này không còn tồn tại." };
+  const config = parseViewLayoutConfig(view.layoutConfig, parseGalleryConfig(gallery.displayConfig));
+  // A table nobody arranged yet is drawn from its default, so that is what gets resized.
+  const table = parseTableLayout(config.table) ?? createDefaultTableLayout(gallery.propertyConfigs, parseCardLayout(config.card));
+  const column = table.columns.find((entry) => entry.id === columnId);
+  if (!column) return { error: "Cột này không còn trong bảng." };
+  column.width = clampColumnWidth(width);
+  config.table = table;
+  await db.galleryView.update({ where: { id: view.id }, data: { layoutConfig: viewLayoutConfig(config) } });
+  revalidatePath(`/galleries/${galleryId}`);
+  revalidatePath(`/galleries/${galleryId}/settings/table`);
   return { error: null };
 }

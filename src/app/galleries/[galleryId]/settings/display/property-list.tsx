@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
+import { PROPERTY_SEARCH_PLACEHOLDER, matchesPropertySearch, splitButtons } from "@/lib/property-search";
 
 export type ListedProperty = {
   id: string;
@@ -11,6 +12,8 @@ export type ListedProperty = {
   /** The Hallery rename, when there is one. */
   displayName: string | null;
   typeLabel: string;
+  /** Notion's type name, which "/<type>" searches match. */
+  type: string;
   disabled: boolean;
 };
 
@@ -33,14 +36,17 @@ export function PropertyList({
   selectedId: string | null;
 }) {
   const [search, setSearch] = useState("");
-  const needle = search.trim().toLowerCase();
-  const visible = properties.filter(
-    (property) =>
-      property.notionPropertyName.toLowerCase().includes(needle) ||
-      (property.displayName ?? "").toLowerCase().includes(needle),
+  const visible = properties.filter((property) =>
+    matchesPropertySearch(
+      { name: property.notionPropertyName, otherName: property.displayName, type: property.type },
+      search,
+    ),
   );
 
-  const active = visible.filter((property) => !property.disabled);
+  const { values: active, buttons } = splitButtons(
+    visible.filter((property) => !property.disabled),
+    (property) => property.type,
+  );
   const disabled = visible.filter((property) => property.disabled);
 
   return (
@@ -49,7 +55,7 @@ export function PropertyList({
         type="search"
         value={search}
         onChange={(event) => setSearch(event.target.value)}
-        placeholder="Tìm property"
+        placeholder={PROPERTY_SEARCH_PLACEHOLDER}
         aria-label="Tìm property"
         className="input input-sm"
       />
@@ -66,6 +72,23 @@ export function PropertyList({
             selected={property.notionPropertyId === selectedId}
           />
         ))}
+
+        {buttons.length > 0 && (
+          <div className="mt-3 rounded-2xl bg-subtle/70 p-1.5 ring-1 ring-line">
+            <p className="px-1 pb-1 text-[11px] font-medium tracking-wide text-faint uppercase">Nút ({buttons.length})</p>
+            <div className="flex flex-col gap-0.5">
+              {buttons.map((property) => (
+                <PropertyLink
+                  key={property.id}
+                  galleryId={galleryId}
+                  viewId={viewId}
+                  property={property}
+                  selected={property.notionPropertyId === selectedId}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         {disabled.length > 0 && (
           <div className="mt-3 rounded-2xl border border-dashed border-line-strong bg-subtle/60 p-1.5">

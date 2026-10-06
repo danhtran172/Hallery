@@ -1,11 +1,13 @@
 import type { DataSourceObjectResponse, PageObjectResponse } from "@notionhq/client";
 import { db } from "@/lib/db";
+import { isHalleryButtonId, isImportedNotionType } from "@/lib/native-button";
 import { detectResolvedTypes } from "@/lib/property-kind";
 
 type ExistingPropertyConfig = {
   id: string;
   notionPropertyId: string;
   notionPropertyName: string;
+  notionPropertyType?: string;
   isMissing: boolean;
   sortOrder: number;
 };
@@ -19,16 +21,22 @@ export async function syncPropertyConfigs(
   existing: ExistingPropertyConfig[],
   dataSource: DataSourceObjectResponse,
 ) {
-  const live = Object.entries(dataSource.properties).map(([name, property]) => ({
-    id: property.id,
-    name,
-    type: property.type,
-  }));
+  const live = Object.entries(dataSource.properties)
+    .filter(([, property]) => isImportedNotionType(property.type))
+    .map(([name, property]) => ({ id: property.id, name, type: property.type }));
   const liveById = new Map(live.map((property) => [property.id, property]));
   const knownIds = new Set(existing.map((property) => property.notionPropertyId));
   const operations = [];
 
   for (const property of existing) {
+    // Hallery's own buttons were never in Notion's schema; their absence is not a loss.
+    if (isHalleryButtonId(property.notionPropertyId)) continue;
+    // Taken in before Notion's buttons were left out. Nothing can be set on them that
+    // matters, so they go; a layout that held one simply stops drawing it.
+    if (property.notionPropertyType && !isImportedNotionType(property.notionPropertyType)) {
+      operations.push(db.propertyConfig.delete({ where: { id: property.id } }));
+      continue;
+    }
     const current = liveById.get(property.notionPropertyId);
     if (!current && !property.isMissing) {
       operations.push(db.propertyConfig.update({ where: { id: property.id }, data: { isMissing: true } }));
