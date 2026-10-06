@@ -292,6 +292,18 @@ Mỗi view chọn **Gallery** hoặc **Bảng** ở đầu menu **Tuỳ chỉnh*
 - Tab view dạng bảng có icon bảng. View nhân bản/tạo mới từ view bảng giữ dạng bảng.
 - ⚠ Dev server đang chạy sẽ báo `reading 'apply'` khi gọi server action mới thêm — restart `next dev` (cùng họ bẫy 4).
 
+### 4.7e PWA cho điện thoại 06/10/2026
+
+- `app/manifest.ts` (standalone, màu canvas sáng `#eeede8`), icon `public/icons/` (any 192/512 + maskable 512) và
+  `app/apple-icon.png` — vẽ từ `LogoMark`. `metadata.appleWebApp` để iOS mở toàn màn hình.
+- `public/sw.js` **chỉ** thay trang lỗi offline bằng `public/offline.html` cho lượt tải trang (`mode: navigate`).
+  Không cache dữ liệu, RSC, server action, ảnh hay `/api` — gallery luôn đọc trực tiếp, bản cũ giả làm bản mới còn tệ hơn.
+  Đăng ký trong `components/service-worker.tsx`, **chỉ production** (dev giữ worker qua mỗi lần restart).
+- `allowedDevOrigins` cho dải IP LAN + `*.ts.net`: thiếu nó thì điện thoại mở `http://<IP máy>:3000` không hydrate.
+- ⚠ Service worker và cài đặt PWA thật trên Android **cần HTTPS**. `http://<IP LAN>` vẫn dùng được như web, iOS
+  vẫn "Thêm vào MH chính" được, nhưng không có worker. HTTPS: Tailscale (`tailscale serve`) — app không có đăng nhập,
+  đừng mở ra Internet công khai.
+
 ### 4.8 Data model
 
 ```

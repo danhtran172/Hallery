@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#eeede8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b0b0a" media="(prefers-color-scheme: dark)" />
+    <title>Mất kết nối · Hallery</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: light-dark(#eeede8, #0b0b0a);
+        --sheet: light-dark(#ffffff, #161615);
+        --ink: light-dark(#1a1917, #eeede9);
+        --muted: light-dark(#77736c, #9b978f);
+        --brand: #4b8b60;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        display: grid;
+        place-items: center;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--ink);
+        font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main {
+        width: 100%;
+        max-width: 22rem;
+        padding: 28px 24px;
+        border-radius: 1.75rem;
+        background: var(--sheet);
+        text-align: center;
+      }
+      svg { width: 44px; height: 44px; }
+      h1 { margin: 16px 0 6px; font-size: 20px; }
+      p { margin: 0 0 20px; color: var(--muted); }
+      button {
+        font: inherit;
+        font-weight: 600;
+        padding: 10px 20px;
+        border: 0;
+        border-radius: 999px;
+        background: var(--brand);
+        color: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="2" y="2" width="9" height="11.5" rx="3" fill="#4b8b60" />
+        <rect x="13" y="2" width="9" height="7" rx="3" fill="currentColor" opacity="0.18" />
+        <rect x="2" y="15.5" width="9" height="6.5" rx="3" fill="currentColor" opacity="0.18" />
+        <rect x="13" y="11" width="9" height="11" rx="3" fill="currentColor" opacity="0.88" />
+      </svg>
+      <h1>Mất kết nối tới Hallery</h1>
+      <p>Điện thoại chưa gọi được máy đang chạy Hallery. Kiểm tra Wi-Fi, hoặc xem máy tính còn bật server không.</p>
+      <button type="button" onclick="location.reload()">Thử lại</button>
+    </main>
+    <script>
+      // Back online: reload on its own rather than waiting for a tap.
+      addEventListener("online", () => location.reload());
+    </script>
+  </body>
+</html>

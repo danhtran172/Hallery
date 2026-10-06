@@ -25,6 +25,8 @@ const display = Bricolage_Grotesque({
 export const metadata: Metadata = {
   title: { default: "Hallery", template: "%s · Hallery" },
   description: "Gallery cho dữ liệu Notion — bạn quyết định mỗi property hiển thị ra sao.",
+  // iOS ignores most of the manifest: these make "Thêm vào MH chính" open full-screen.
+  appleWebApp: { capable: true, title: "Hallery", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {
